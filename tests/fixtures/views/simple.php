@@ -1,0 +1,1 @@
+Hello <?= $name ?>, shared=<?= $shared_value ?? 'none' ?>

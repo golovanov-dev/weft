@@ -1,0 +1,56 @@
+# Weft example — the documentation site
+
+This directory is a complete, working Weft site. It is also **the Weft documentation**: the docs are
+served by the engine they describe, which keeps the example honest — if Weft breaks, its own docs go
+down.
+
+Copy this directory to start a new site.
+
+## Run it
+
+```bash
+composer install
+npm install && npm run build     # or: npm run dev  (Vite dev server, pairs with DEV_MODE=true)
+php -S localhost:8000 -t public public/index.php
+php scripts/health.php
+```
+
+Open <http://localhost:8000>.
+
+> Working on the engine itself? The example installs `golovanov/weft` from Packagist like any other
+> consumer. To point it at your local checkout instead, see [CONTRIBUTING](../CONTRIBUTING.md).
+
+## What it demonstrates
+
+| Feature | Where to look |
+|---|---|
+| Convention routing | `pages/home.php` → `/`, `pages/docs/index.php` → `/docs` |
+| **Dynamic routes** | `pages/docs/[slug].php` → `/docs/getting-started`, with `$slug` |
+| SEO per page | `Seo::set()` / `Seo::jsonLd()` in every page; `seo()` in `components/layout.php` |
+| Sitemap from content | `app/Configs/app.php` → `'sitemap' => fn() => (new DocsService())->sitemapRoutes()` |
+| Caching | `app/Services/DocsService.php` — `Cache::remember()` around Markdown parsing, with `mtime` in the key |
+| Logic vs presentation | `DocsService` does the work; `pages/` only print |
+| Form protection | `pages/contact.php` + `api/contact.php` — honeypot → CSRF → rate limit → validation → captcha → service |
+| Config in two layers | `config/config.dev.php` (constants) vs `app/Configs/app.php` (business) |
+| Vite | `frontend/src/` → `public/dist/`, switched by `DEV_MODE` |
+
+## Content
+
+Chapters are Markdown files in `content/en/`, each with a small front matter block:
+
+```markdown
+---
+title: Getting Started
+description: Install Weft and get a site running in five minutes.
+order: 1
+---
+```
+
+Add a file, and it appears in the sidebar, on the index, in the sitemap and at
+`/docs/<filename>` — no code changes.
+
+## Making it multilingual
+
+The docs are English-only, but the plumbing is ready. Set
+`'locales' => ['enabled' => true, 'supported' => ['en', 'ru']]` in `app/Configs/app.php`, add
+`lang/ru/*.php` and `content/ru/*.md`, and `/ru/docs/...` starts working with automatic `hreflang`.

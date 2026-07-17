@@ -1,0 +1,51 @@
+{
+  "name": "golovanov/weft",
+  "description": "A lightweight PHP engine for quickly launching simple websites: SEO, optional i18n, caching, tracing and form protection out of the box.",
+  "type": "library",
+  "keywords": ["framework", "website", "seo", "i18n", "cms", "micro-framework", "vite"],
+  "license": "MIT",
+  "homepage": "https://github.com/golovanov-dev/weft",
+  "authors": [
+    {
+      "name": "Roman Golovanov",
+      "homepage": "https://golovanov.dev"
+    }
+  ],
+  "support": {
+    "issues": "https://github.com/golovanov-dev/weft/issues",
+    "source": "https://github.com/golovanov-dev/weft"
+  },
+  "require": {
+    "php": ">=8.4",
+    "ext-curl": "*",
+    "ext-json": "*",
+    "firebase/php-jwt": "^7.0",
+    "golovanov/traceloom": "^0.4"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^12.0"
+  },
+  "suggest": {
+    "ext-redis": "Enables the Redis cache and rate-limit stores.",
+    "ext-pdo": "Required only if the site uses Golovanov\\Weft\\Database."
+  },
+  "autoload": {
+    "psr-4": {
+      "Golovanov\\Weft\\": "src/"
+    },
+    "files": [
+      "src/helpers.php"
+    ]
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Golovanov\\Weft\\Tests\\": "tests/"
+    }
+  },
+  "scripts": {
+    "test": "phpunit"
+  },
+  "config": {
+    "sort-packages": true
+  }
+}

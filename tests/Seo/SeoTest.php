@@ -1,0 +1,127 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Golovanov\Weft\Tests\Seo;
+
+use Golovanov\Weft\Config\Config;
+use Golovanov\Weft\Seo\Seo;
+use Golovanov\Weft\Tests\TestCase;
+
+final class SeoTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Config::set('app.url.base', 'https://example.com');
+        Config::set('app.seo', [
+            'site_name' => 'Example',
+            'title_template' => '%s — Example',
+            'description' => 'Default description',
+        ]);
+        $_SERVER['REQUEST_URI'] = '/about';
+    }
+
+    public function testDocumentTitleAppliesTemplate(): void
+    {
+        Seo::set(['title' => 'About']);
+        $this->assertSame('About — Example', Seo::documentTitle());
+    }
+
+    public function testDocumentTitleFallsBackToDefaultWhenUnset(): void
+    {
+        Config::set('app.seo.default_title', 'Example — Home of Examples');
+        $this->assertSame('Example — Home of Examples', Seo::documentTitle());
+    }
+
+    public function testDocumentTitleFallsBackToSiteNameWithoutDefaultTitle(): void
+    {
+        $this->assertSame('Example', Seo::documentTitle());
+    }
+
+    public function testDocumentTitleIgnoresTemplateWithoutPlaceholder(): void
+    {
+        Config::set('app.seo.title_template', 'Static Title');
+        Seo::set(['title' => 'About']);
+        $this->assertSame('About', Seo::documentTitle());
+    }
+
+    public function testRenderEmitsTitleDescriptionCanonicalAndOpenGraph(): void
+    {
+        Seo::set(['title' => 'About', 'description' => 'About the site.']);
+        $html = Seo::render();
+
+        $this->assertStringContainsString('<title>About — Example</title>', $html);
+        $this->assertStringContainsString('<meta name="description" content="About the site." />', $html);
+        $this->assertStringContainsString('<meta name="robots" content="index, follow" />', $html);
+        $this->assertStringContainsString('<link rel="canonical" href="https://example.com/about" />', $html);
+        $this->assertStringContainsString('<meta property="og:type" content="website" />', $html);
+        $this->assertStringContainsString('<meta property="og:title" content="About — Example" />', $html);
+        $this->assertStringContainsString('<meta property="og:url" content="https://example.com/about" />', $html);
+        $this->assertStringContainsString('<meta property="og:site_name" content="Example" />', $html);
+        // No image configured — the plain summary card is used.
+        $this->assertStringContainsString('<meta name="twitter:card" content="summary" />', $html);
+        $this->assertStringNotContainsString('og:image', $html);
+    }
+
+    public function testRenderEscapesHtmlInPageValues(): void
+    {
+        Seo::set(['title' => '<script>alert(1)</script>']);
+        $html = Seo::render();
+        $this->assertStringNotContainsString('<script>alert(1)</script>', $html);
+        $this->assertStringContainsString('&lt;script&gt;', $html);
+    }
+
+    public function testRenderUsesLargeImageCardAndAbsoluteImageUrl(): void
+    {
+        Seo::set(['title' => 'About', 'image' => 'img/og.png']);
+        $html = Seo::render();
+        $this->assertStringContainsString('<meta property="og:image" content="https://example.com/img/og.png" />', $html);
+        $this->assertStringContainsString('<meta name="twitter:card" content="summary_large_image" />', $html);
+    }
+
+    public function testRenderEmitsHreflangAlternatesWhenLocalesEnabled(): void
+    {
+        Config::set('app.locales', ['enabled' => true, 'supported' => ['en', 'ru'], 'default' => 'en']);
+        Seo::set(['title' => 'About']);
+        $html = Seo::render();
+
+        $this->assertStringContainsString('hreflang="en" href="https://example.com/about"', $html);
+        $this->assertStringContainsString('hreflang="ru" href="https://example.com/ru/about"', $html);
+        $this->assertStringContainsString('hreflang="x-default" href="https://example.com/about"', $html);
+    }
+
+    public function testRenderOmitsHreflangWhenLocalesDisabled(): void
+    {
+        Seo::set(['title' => 'About']);
+        $this->assertStringNotContainsString('hreflang', Seo::render());
+    }
+
+    public function testNoindexOverridesRobots(): void
+    {
+        Seo::noindex();
+        $this->assertStringContainsString('<meta name="robots" content="noindex, nofollow" />', Seo::render());
+    }
+
+    public function testJsonLdBlocksGetSchemaContextInjected(): void
+    {
+        Seo::jsonLd(['@type' => 'WebSite', 'name' => 'Example']);
+        $html = Seo::render();
+        $this->assertStringContainsString('<script type="application/ld+json">', $html);
+        $this->assertStringContainsString('"@context": "https://schema.org"', $html);
+        $this->assertStringContainsString('"@type": "WebSite"', $html);
+    }
+
+    public function testDefaultJsonLdFromConfigSupportsSingleSchema(): void
+    {
+        Config::set('app.seo.json_ld', ['@type' => 'Person', 'name' => 'Roman']);
+        Seo::set(['title' => 'About']);
+        $this->assertStringContainsString('"@type": "Person"', Seo::render());
+    }
+
+    public function testCanonicalCanBeOverriddenPerPage(): void
+    {
+        Seo::set(['canonical' => 'https://example.com/custom']);
+        $this->assertStringContainsString('<link rel="canonical" href="https://example.com/custom" />', Seo::render());
+    }
+}

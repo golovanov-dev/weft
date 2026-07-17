@@ -1,0 +1,31 @@
+# Library dependencies (a library does not commit its lock file)
+/vendor/
+/composer.lock
+/.phpunit.cache/
+
+# Example site
+# composer.lock is not committed: the example resolves the engine from Packagist, so pinning it
+# here would freeze the very version we want to exercise. package-lock.json IS committed — the
+# deployment docs use `npm ci`, which requires it.
+/example/vendor/
+/example/composer.lock
+/example/node_modules/
+/example/public/dist/
+/example/storage/logs/*
+/example/storage/cache/*
+!/example/storage/logs/.gitkeep
+!/example/storage/cache/.gitkeep
+/example/config/config.php
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# AI workflow internals (not published with the repo)
+/.ai/
+/input/
+/publication/
+/docs/
