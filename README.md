@@ -56,8 +56,18 @@ convention-driven core so a new site is mostly content.
 composer require golovanov/weft
 ```
 
-Weft expects a small site skeleton around it. The fastest way to get one is to copy the
-[`example/`](example) directory — it is a complete, working site.
+Weft expects a small site skeleton around it. The fastest way to get one is to **clone** the repo
+and copy the [`example/`](example) directory — it is a complete, working site:
+
+```bash
+git clone https://github.com/golovanov-dev/weft.git
+cp -r weft/example my-site
+```
+
+> **Get the example by cloning, not by "Download ZIP".** The package archive is kept lean:
+> `example/`, `tests/` and CI config are `export-ignore`d, so `composer require` — and GitHub's
+> ZIP / release "Source code" downloads — contain only the engine. `git clone` gives you
+> everything.
 
 ## Project layout
 
