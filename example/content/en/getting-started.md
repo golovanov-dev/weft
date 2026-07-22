@@ -47,30 +47,17 @@ for request tracing, and `firebase/php-jwt` for token verification.
 Configuration comes in two layers. Environment values — secrets and per-server switches — are PHP
 constants in `config/`:
 
-- `config.example.php` — the template with every constant documented;
-- `config.dev.php` — local development (`DEBUG=true`, `DEV_MODE=true`);
-- `config.php` — the real server. **You create it; it is gitignored.**
+- `config.example.php` — the documented template (`DEV_MODE=false`). Used as the fallback when no
+  `config.php` exists, so the site works out of the box;
+- `config.php` — the real server, or your local dev config. **You create it; it is gitignored.**
 
-The engine picks the first that exists: `config.php` → `config.dev.php` → `config.example.php`. For
-local work you need to do nothing — `config.dev.php` is used automatically.
-
-## Build the frontend
-
-Sources live in `frontend/src/` and are built by Vite into `public/dist/`.
-
-```bash
-npm install
-npm run dev      # dev server with HMR (pairs with DEV_MODE=true)
-# or
-npm run build    # hashed production assets
-```
-
-The layout switches between the two automatically based on `DEV_MODE` — you never edit templates
-for this.
+The engine picks the first that exists: `config.php` → `config.dev.php` → `config.example.php`.
 
 ## Run it
 
-The document root is the `public/` directory. Locally:
+This example ships its built frontend in `public/dist/`, so **no Node is needed to see it** — the
+committed `config.example.php` runs in production mode and serves those assets. The document root
+is the `public/` directory:
 
 ```bash
 php -S localhost:8000 -t public public/index.php
@@ -94,6 +81,20 @@ php scripts/health.php
 ```
 
 If `ok` is false, the usual cause is that `storage/` is not writable.
+
+## Working on the frontend (optional)
+
+Sources live in `frontend/src/` and are built by Vite into `public/dist/`. To edit styles/JS with
+hot reload, opt into dev mode by creating a `config.php` with `DEV_MODE=true`:
+
+```bash
+cp config/config.example.php config/config.php   # set DEV_MODE=true in it
+npm install
+npm run dev       # Vite dev server with HMR
+```
+
+With `DEV_MODE=true` the layout points at the dev server; with it off, at the built files in
+`public/dist/`. Run `npm run build` to refresh those. You never edit templates for this.
 
 ## Your first page
 

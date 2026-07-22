@@ -15,9 +15,8 @@ my-site/
 │   ├── Bootstrap.php       site wiring (alert notifier, resolvers, …)
 │   └── Services/           your business logic
 ├── config/
-│   ├── config.php          environment constants — secrets, gitignored
-│   ├── config.dev.php      local development
-│   └── config.example.php  template
+│   ├── config.example.php  documented template + fallback (DEV_MODE=false)
+│   └── config.php          your real / local environment — secrets, gitignored
 ├── pages/                  views → routes
 ├── api/                    JSON endpoints → /api/*
 ├── components/             layout.php, header.php, footer.php

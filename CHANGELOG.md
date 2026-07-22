@@ -3,6 +3,15 @@
 All notable changes to Weft are documented in this file. Weft follows semantic versioning;
 pre-1.0 the API may change between minor versions.
 
+## 0.1.1 - 2026-07-22
+
+### Fixed
+
+- The example/documentation site now runs straight after `composer install`, with no Node build
+  step: its built assets are committed and it defaults to production mode.
+- `composer require golovanov/weft` no longer pulls the example site, tests or CI config into
+  `vendor/` — the package archive now ships only the engine (`src/`) and its metadata.
+
 ## 0.1.0 - 2026-07-17
 
 Initial release: the complete engine as a Composer library (`golovanov/weft`), with a working

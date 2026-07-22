@@ -38,10 +38,13 @@ with `git checkout example/composer.json` before opening a pull request.
 ```bash
 cd example
 composer install
-npm install
-npm run dev        # Vite dev server; config.dev.php already sets DEV_MODE=true
-php -S localhost:8000 -t public public/index.php
+php -S localhost:8000 -t public public/index.php   # committed dist → runs without Node
 php scripts/health.php
+
+# To work on the frontend with HMR, opt into dev mode:
+cp config/config.example.php config/config.php      # set DEV_MODE=true in it
+npm install
+npm run dev                                          # Vite dev server
 ```
 
 ## Code style

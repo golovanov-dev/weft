@@ -1,0 +1,27 @@
+# Ignores for anyone who copies this directory as the starting point for their own site.
+
+/vendor/
+/node_modules/
+/composer.lock
+/config/config.php
+/storage/logs/*
+/storage/cache/*
+!/storage/logs/.gitkeep
+!/storage/cache/.gitkeep
+
+# Build output.
+#
+# For YOUR site, uncomment the next line and build in CI or on deploy — committing hashed build
+# artefacts just adds churn.
+#
+#   /public/dist/
+#
+# In THIS demo it is intentionally committed (see the note in the repo-root .gitignore) so the
+# example runs straight after `composer install`, without installing Node.
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

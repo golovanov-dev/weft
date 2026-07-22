@@ -8,14 +8,29 @@ Copy this directory to start a new site.
 
 ## Run it
 
+No Node required — the built assets in `public/dist/` are committed, so the site runs straight
+after `composer install`:
+
 ```bash
 composer install
-npm install && npm run build     # or: npm run dev  (Vite dev server, pairs with DEV_MODE=true)
 php -S localhost:8000 -t public public/index.php
 php scripts/health.php
 ```
 
-Open <http://localhost:8000>.
+Open <http://localhost:8000>. With no `config/config.php` present, the engine falls back to
+`config/config.example.php` (`DEV_MODE=false`), which serves the committed assets.
+
+### Working on the frontend (optional)
+
+To edit styles/JS with hot reload, opt into dev mode:
+
+```bash
+cp config/config.example.php config/config.php   # then set DEV_MODE=true in it
+npm install
+npm run dev                                       # Vite dev server on :5173
+```
+
+Run `npm run build` before committing to refresh `public/dist/`.
 
 > Working on the engine itself? The example installs `golovanov/weft` from Packagist like any other
 > consumer. To point it at your local checkout instead, see [CONTRIBUTING](../CONTRIBUTING.md).
@@ -31,7 +46,7 @@ Open <http://localhost:8000>.
 | Caching | `app/Services/DocsService.php` — `Cache::remember()` around Markdown parsing, with `mtime` in the key |
 | Logic vs presentation | `DocsService` does the work; `pages/` only print |
 | Form protection | `pages/contact.php` + `api/contact.php` — honeypot → CSRF → rate limit → validation → captcha → service |
-| Config in two layers | `config/config.dev.php` (constants) vs `app/Configs/app.php` (business) |
+| Config in two layers | `config/config.example.php` (constants) vs `app/Configs/app.php` (business) |
 | Vite | `frontend/src/` → `public/dist/`, switched by `DEV_MODE` |
 
 ## Content

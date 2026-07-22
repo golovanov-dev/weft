@@ -1,0 +1,17 @@
+# Keep the Composer package lean.
+#
+# `export-ignore` removes these paths from the archive that `git archive` produces — the same
+# archive Composer/Packagist download for a `dist` install. Without this, `composer require
+# golovanov/weft` copies the whole repository (example site, tests, CI config) into the
+# consumer's vendor/, which they never need. README, LICENSE, CHANGELOG and composer.json stay.
+#
+# Verify with:  git archive --worktree-attributes HEAD | tar -t | grep -E '^(example|tests)/'
+# (should print nothing). Note: export-ignore only affects tags created AFTER it is committed.
+
+/example            export-ignore
+/tests              export-ignore
+/.github            export-ignore
+/phpunit.xml.dist   export-ignore
+/CONTRIBUTING.md    export-ignore
+/.gitignore         export-ignore
+/.gitattributes     export-ignore
