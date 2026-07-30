@@ -31,7 +31,14 @@ final class Vite
     }
 
     /**
-     * Full set of tags (styles + module script) for an entry, ready to drop in <head>.
+     * Full set of tags (preload hints + styles + module script) for an entry, ready to drop
+     * in <head>.
+     *
+     * In production the entry chunk and every chunk it statically imports are announced with
+     * <link rel="modulepreload"> and the stylesheets with <link rel="preload" as="style">, so
+     * the browser starts fetching them immediately instead of discovering them after parsing
+     * the entry. Dynamic imports are deliberately left out: they are lazy by design and
+     * preloading them would undo the code split.
      */
     public static function tags(string $entry = 'src/main.js'): string
     {
@@ -50,12 +57,66 @@ final class Vite
         }
         $chunk = $manifest[$key];
 
+        // Module evaluation order: imported chunks first, the entry last.
+        $chunks = self::staticGraph($manifest, $key);
+
+        $preloads = [];
         $tags = [];
-        foreach ($chunk['css'] ?? [] as $css) {
-            $tags[] = '<link rel="stylesheet" href="' . self::assetUrl($css) . '">';
+
+        // Highest priority first: the entry, then the chunks it pulls in.
+        foreach (array_reverse($chunks) as $name) {
+            $file = $manifest[$name]['file'] ?? null;
+            if (is_string($file) && $file !== '') {
+                $preloads[] = '<link rel="modulepreload" href="' . self::assetUrl($file) . '">';
+            }
         }
+
+        $styles = [];
+        foreach ($chunks as $name) {
+            foreach ($manifest[$name]['css'] ?? [] as $css) {
+                if (is_string($css) && !in_array($css, $styles, true)) {
+                    $styles[] = $css;
+                }
+            }
+        }
+        foreach ($styles as $css) {
+            $url = self::assetUrl($css);
+            $preloads[] = '<link rel="preload" as="style" href="' . $url . '">';
+            $tags[] = '<link rel="stylesheet" href="' . $url . '">';
+        }
+
         $tags[] = '<script type="module" src="' . self::assetUrl($chunk['file']) . '"></script>';
-        return implode("\n  ", $tags) . "\n";
+        return implode("\n  ", array_merge($preloads, $tags)) . "\n";
+    }
+
+    /**
+     * Chunk keys reachable from $entry through static `imports`, in module evaluation order
+     * (imports first, the entry last). Every chunk appears once; a chunk is marked visited
+     * before its own imports are walked, so import cycles terminate.
+     *
+     * @param array<string, array<string, mixed>> $manifest
+     * @return list<string>
+     */
+    private static function staticGraph(array $manifest, string $entry): array
+    {
+        $order = [];
+        $visited = [];
+
+        $visit = static function (string $key) use (&$visit, &$order, &$visited, $manifest): void {
+            if (isset($visited[$key]) || !isset($manifest[$key])) {
+                return;
+            }
+            $visited[$key] = true;
+            foreach ($manifest[$key]['imports'] ?? [] as $import) {
+                if (is_string($import)) {
+                    $visit($import);
+                }
+            }
+            $order[] = $key;
+        };
+
+        $visit($entry);
+        return $order;
     }
 
     private static function assetUrl(string $file): string
@@ -63,7 +124,17 @@ final class Vite
         return Url::asset('dist/' . ltrim($file, '/'));
     }
 
-    /** @return array<string, array{file: string, css?: array<int, string>}> */
+    /**
+     * @return array<string, array{
+     *     file: string,
+     *     name?: string,
+     *     src?: string,
+     *     isEntry?: bool,
+     *     css?: array<int, string>,
+     *     imports?: array<int, string>,
+     *     dynamicImports?: array<int, string>
+     * }>
+     */
     private static function manifest(): array
     {
         if (self::$manifest !== null) {

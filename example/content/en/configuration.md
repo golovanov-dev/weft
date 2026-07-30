@@ -127,12 +127,17 @@ A plain list of routes:
 
 ```php
 'vite'       => ['entry' => 'src/main.js', 'dev_server' => 'http://localhost:5173'],
-'cache'      => ['enabled' => false, 'driver' => 'file', 'path' => '…/storage/cache', 'prefix' => 'weft:'],
+'cache'      => ['enabled' => true, 'driver' => 'file', 'path' => '…/storage/cache', 'prefix' => 'weft:'],  // on in this demo, see below
 'rate_limit' => ['max' => 20, 'window' => 60],       // per client IP per bucket
 'captcha'    => ['enabled' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],
 'alertloop'  => ['enabled' => …, 'source' => 'my-site', 'timeout' => 4],
 'security'   => ['frame_options' => 'SAMEORIGIN', 'hsts' => true, 'csp' => ''],
 ```
+
+Caching is deliberately **on** in this demo (`'cache' => ['enabled' => true]` in
+`app/Configs/app.php`): it makes Markdown rendering cheap and shows the feature working in a real
+setting rather than as a switched-off example. Caching is optional — with `enabled => false`,
+`Cache::remember()` still runs its callback.
 
 Note how feature flags derive from the environment, so there is one source of truth:
 

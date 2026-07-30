@@ -21,7 +21,7 @@ and billing, use a full framework.
 | PHP | 8.4+ | the engine uses 8.4 syntax |
 | PHP extensions | `curl`, `json` required; `pdo_mysql` for the database; `redis` for the Redis cache | HTTP client, JSON, storage |
 | Composer | 2.x | dependencies and autoloading |
-| Node.js | 18+ | building the frontend with Vite |
+| Node.js | 18+ | *optional* — only to rebuild the frontend with Vite; not needed to run the site |
 
 ## Install
 

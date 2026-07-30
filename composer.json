@@ -2,7 +2,7 @@
   "name": "golovanov/weft",
   "description": "A lightweight PHP engine for quickly launching simple websites: SEO, optional i18n, caching, tracing and form protection out of the box.",
   "type": "library",
-  "keywords": ["framework", "website", "seo", "i18n", "cms", "micro-framework", "vite"],
+  "keywords": ["php", "php84", "website-engine", "micro-framework", "seo", "i18n", "vite", "content-first"],
   "license": "MIT",
   "homepage": "https://github.com/golovanov-dev/weft",
   "authors": [

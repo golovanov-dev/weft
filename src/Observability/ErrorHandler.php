@@ -43,7 +43,7 @@ final class ErrorHandler
     public static function handleException(\Throwable $e): void
     {
         self::log('exception', (int) $e->getCode(), $e->getMessage(), $e->getFile(), $e->getLine());
-        Alert::critical('Unhandled exception: ' . $e->getMessage(), [
+        self::alert('Unhandled exception: ' . $e->getMessage(), [
             'file' => $e->getFile() . ':' . $e->getLine(),
             'trace_id' => RequestContext::traceId(),
         ], 'exception:' . md5($e->getFile() . $e->getLine()));
@@ -54,10 +54,28 @@ final class ErrorHandler
         $error = error_get_last();
         if ($error !== null && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
             self::log('fatal', $error['type'], $error['message'], $error['file'], $error['line']);
-            Alert::critical('Fatal error: ' . $error['message'], [
+            self::alert('Fatal error: ' . $error['message'], [
                 'file' => $error['file'] . ':' . $error['line'],
                 'trace_id' => RequestContext::traceId(),
             ], 'fatal:' . md5($error['file'] . $error['line']));
+        }
+    }
+
+    /**
+     * Raise an alert from inside error handling.
+     *
+     * Alert is best-effort and swallows delivery problems itself; this is the second belt:
+     * nothing thrown here may escape the exception/shutdown handler, or the failure of an
+     * alert would be re-entered as a new error to handle.
+     *
+     * @param array<string, mixed> $context
+     */
+    private static function alert(string $message, array $context, string $dedupeKey): void
+    {
+        try {
+            Alert::critical($message, $context, $dedupeKey);
+        } catch (\Throwable) {
+            // Nothing to do: the error itself is already in the log above.
         }
     }
 

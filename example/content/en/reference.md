@@ -104,8 +104,8 @@ Headers::send();
 ### Observability
 
 ```php
-Trace::event($name, $data);  Trace::id();
-Alert::send($msg, $severity, $type, $dedupeKey, $context);  Alert::critical($msg, $ctx);  Alert::notifier();
+Trace::event($name, $data);  Trace::id();  Trace::isActive();
+Alert::send($msg, $severity, $type, $dedupeKey, $context, $category);  Alert::critical($msg, $ctx);  Alert::notifier();
 ErrorHandler::log($type, $code, $msg, $file, $line);  ErrorHandler::debug();
 ```
 

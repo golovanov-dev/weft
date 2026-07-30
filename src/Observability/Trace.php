@@ -54,6 +54,17 @@ final class Trace
         return self::$id;
     }
 
+    /**
+     * Whether a trace is already running for this request.
+     *
+     * Lets callers on an error path (see Alert::reportFailure()) record an event only when a
+     * timeline exists, instead of booting the tracer from inside failure handling.
+     */
+    public static function isActive(): bool
+    {
+        return self::$booted;
+    }
+
     public static function id(): string
     {
         if (!self::$booted) {

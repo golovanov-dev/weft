@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Golovanov\Weft\Tests;
 
+use Golovanov\Weft\Assets\Vite;
 use Golovanov\Weft\Cache\Cache;
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\RequestContext;
 use Golovanov\Weft\I18n\I18n;
 use Golovanov\Weft\I18n\Locale;
+use Golovanov\Weft\Observability\Alert;
+use Golovanov\Weft\Observability\Trace;
 use Golovanov\Weft\Seo\Seo;
 use Golovanov\Weft\View\View;
 use PHPUnit\Framework\TestCase as BaseTestCase;
@@ -39,6 +42,9 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(I18n::class, ['dict' => [], 'locale' => 'en']);
         self::setStatics(Cache::class, ['store' => null]);
         self::setStatics(View::class, ['shared' => []]);
+        self::setStatics(Vite::class, ['manifest' => null]);
+        self::setStatics(Alert::class, ['transport' => null, 'reporting' => false]);
+        self::setStatics(Trace::class, ['tracer' => null, 'trace' => null, 'id' => '', 'booted' => false]);
         self::setStatics(RequestContext::class, [
             'request' => null,
             'traceId' => '',

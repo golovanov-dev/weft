@@ -2,7 +2,16 @@
 
 /vendor/
 /node_modules/
+
+# Dependency lock file.
+#
+# In THIS demo it is intentionally NOT committed: the example resolves the engine from Packagist,
+# so pinning it here would freeze the very version we want to exercise.
+#
+# For YOUR site, delete the next line and commit composer.lock — a deployed application should
+# install the exact versions it was tested with.
 /composer.lock
+
 /config/config.php
 /storage/logs/*
 /storage/cache/*

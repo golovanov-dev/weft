@@ -11,7 +11,7 @@ declare(strict_types=1);
 
 use App\Services\DocsService;
 
-$origin = 'https://weft.golovanov.dev';   // change to your domain
+$origin = 'https://example.com';   // change to your domain
 
 return [
     'default_route' => 'home',
@@ -78,7 +78,8 @@ return [
         'site_key' => defined('RECAPTCHA_SITEKEY') ? RECAPTCHA_SITEKEY : '',
         'secret_key' => defined('RECAPTCHA_SECRETKEY') ? RECAPTCHA_SECRETKEY : '',
         'threshold' => 0.5,
-        'allowed_hosts' => ['weft.golovanov.dev'],
+        // Hostnames reCAPTCHA is accepted from — replace with your own domain(s).
+        'allowed_hosts' => ['example.com'],
     ],
 
     'alertloop' => [

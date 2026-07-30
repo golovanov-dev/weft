@@ -40,15 +40,18 @@ convention-driven core so a new site is mostly content.
   [traceloom](https://github.com/golovanov-dev/traceloom), with automatic redaction.
 - **Form protection by default** — rate limiting, CSRF, honeypot and Google reCAPTCHA v3.
 - **Alerting for sensitive spots** — push events to
-  [AlertLoop](https://github.com/golovanov-dev/alertloop); best-effort, never blocks a request.
+  [AlertLoop](https://github.com/golovanov-dev/alertloop); best-effort, never blocks a request,
+  and a failed delivery is recorded on the request trace instead of vanishing.
 - **Batteries in the engine** — HTTP client, PDO wrapper, JWT (firebase/php-jwt), security headers.
-- **Vite** — dev server with HMR, hashed production assets from the manifest.
+- **Vite** — dev server with HMR, hashed production assets from the manifest, with
+  preload hints for the entry and its statically imported chunks.
 
 ## Requirements
 
 - PHP **8.4+** with `ext-curl` and `ext-json`
 - `ext-pdo` only if you use the database, `ext-redis` only for the Redis cache
-- Node.js 18+ to build the frontend
+- Node.js 18+ only to rebuild the frontend — not needed to run the example, whose built assets
+  are committed
 
 ## Install
 
@@ -90,15 +93,30 @@ your-site/
 
 ## Quick start
 
+No build step: the example's built assets are committed, so it runs straight after
+`composer install`.
+
 ```bash
 cd example
 composer install
-npm install && npm run build
 php -S localhost:8000 -t public public/index.php
 ```
 
 Open <http://localhost:8000>. The example **is** the Weft documentation site — it documents the
-engine while being built with it.
+engine while being built with it. With no `config/config.php` present, it falls back to
+`config/config.example.php` (`DEV_MODE=false`) and serves the committed assets.
+
+### Working on the frontend (optional)
+
+Node is needed only to edit styles/JS:
+
+```bash
+cp config/config.example.php config/config.php   # then set DEV_MODE=true in it
+npm install
+npm run dev                                       # Vite dev server on :5173
+```
+
+`npm run build` refreshes the committed `public/dist/`.
 
 ## Configuration in two layers
 

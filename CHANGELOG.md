@@ -3,6 +3,28 @@
 All notable changes to Weft are documented in this file. Weft follows semantic versioning;
 pre-1.0 the API may change between minor versions.
 
+## 0.1.2 - 2026-07-30
+
+### Fixed
+
+- Data passed to `Alert::send()` / `Alert::critical()` as `$context` now reaches AlertLoop: it is
+  sent as the event's `payload`, and the trace id travels as the top-level `trace_id` — previously
+  both were dropped on arrival.
+- A failed alert delivery is no longer silent: transport errors and non-2xx responses are recorded
+  on the request trace as an `alert.failed` event (metadata only — never the alert body). Delivery
+  stays best-effort and non-blocking.
+
+### Performance
+
+- Vite asset tags now include preload hints in production: `rel="modulepreload"` for the entry and
+  for every chunk it statically imports (walked recursively through the manifest), and
+  `rel="preload"` for stylesheets. Dynamic imports are deliberately left out.
+
+### Added
+
+- `Alert::send()` accepts a `category`, the AlertLoop field for your own labels — `$type` stays the
+  AlertLoop event type (`incident`, `business_event`, `audit`).
+
 ## 0.1.1 - 2026-07-22
 
 ### Fixed

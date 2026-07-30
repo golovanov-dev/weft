@@ -74,7 +74,12 @@ if ($errors !== []) {
 // 5) reCAPTCHA v3 (a no-op pass when captcha is disabled in config).
 $captcha = Captcha::verify((string) ($body['recaptcha_token'] ?? ''), 'contact');
 if (!$captcha['ok']) {
-    Alert::send('Contact form captcha rejected', Alert::WARNING, 'security', context: ['score' => $captcha['score']]);
+    Alert::send(
+        'Contact form captcha rejected',
+        Alert::WARNING,
+        context: ['score' => $captcha['score']],
+        category: 'security',
+    );
     Response::json(['success' => false, 'error' => 'Captcha verification failed'], 400)->send();
     return;
 }

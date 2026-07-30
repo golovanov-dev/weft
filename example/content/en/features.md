@@ -144,11 +144,18 @@ use Golovanov\Weft\Observability\Alert;
 
 Alert::send('New contact request', Alert::INFO, 'business_event', context: $data);
 Alert::critical('Payment webhook failed', ['order' => $id]);
+Alert::send('Captcha rejected', Alert::WARNING, category: 'security');
 ```
 
-Events go to [AlertLoop](https://github.com/golovanov-dev/alertloop) (`POST /v1/events`). Delivery is
-best-effort and non-blocking: a failure is swallowed so alerting never breaks a request. Unhandled
-exceptions, fatals and database errors alert automatically.
+Events go to [AlertLoop](https://github.com/golovanov-dev/alertloop) (`POST /v1/events`). `$context`
+is sent as the event's `payload`, the current trace id travels as the top-level `trace_id`, and
+`$type` is an AlertLoop event type (`incident`, `business_event`, `audit`) — use `category` for your
+own labels.
+
+Delivery is best-effort and non-blocking: nothing is retried and no failure reaches your code. It is
+not silent, though — a delivery that fails is recorded on the request trace as an `alert.failed`
+event (status, transport flag, event type and category; never the alert body). Unhandled exceptions,
+fatals and database errors alert automatically.
 
 ## Database
 
@@ -199,6 +206,11 @@ echo Golovanov\Weft\Assets\Vite::tags('src/main.js');   // already in the layout
 
 `DEV_MODE=true` points at the dev server with HMR; `DEV_MODE=false` reads
 `public/dist/.vite/manifest.json` and emits hashed, cache-busted files.
+
+In production the tags also carry preload hints: `rel="modulepreload"` for the entry and every
+chunk it statically imports (the manifest's `imports`, walked recursively) and `rel="preload"` for
+the stylesheets, so the browser fetches them without waiting to parse the entry. Dynamic imports
+are left out on purpose — preloading them would undo the code split.
 
 ## Security defaults
 
