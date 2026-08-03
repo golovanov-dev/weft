@@ -29,8 +29,8 @@ Thumbs.db
 
 # AI workflow internals (not published with the repo)
 /.ai/
-/input/
-/publication/
 /docs/
+/publication/
 .claude/
 AGENTS.md
+CLAUDE.md
