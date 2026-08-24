@@ -84,13 +84,7 @@ final class Kernel
 
         // 3) SEO endpoints, generated on the fly from config.
         if ($path === '/sitemap.xml') {
-            // 'app.sitemap' is usually a plain list of routes, but it may also be a callable for
-            // sites whose URLs come from content (posts, docs pages, …).
-            $routes = Config::get('app.sitemap', []);
-            if (is_callable($routes)) {
-                $routes = $routes();
-            }
-            $xml = Sitemap::xml((array) $routes);
+            $xml = Sitemap::xml(Sitemap::routes());
             return new Response(200, $xml, ['Content-Type' => 'application/xml; charset=utf-8']);
         }
         if ($path === '/robots.txt') {

@@ -50,6 +50,44 @@ final class SitemapTest extends TestCase
         $this->assertSame(2, substr_count($xml, 'hreflang="ru"'));
     }
 
+    public function testRoutesResolvesAConfiguredCallable(): void
+    {
+        // The defect this covers: only the kernel unwrapped the callable, so a CLI generator
+        // received [0 => Closure] and died casting it to a string.
+        Config::set('app.sitemap', static fn(): array => [['path' => '/from-content']]);
+
+        $routes = Sitemap::routes();
+        $this->assertSame([['path' => '/from-content']], $routes);
+        $this->assertStringContainsString('<loc>https://example.com/from-content</loc>', Sitemap::xml($routes));
+    }
+
+    public function testRoutesReturnsAPlainListUnchanged(): void
+    {
+        Config::set('app.sitemap', ['/', '/about']);
+        $this->assertSame(['/', '/about'], Sitemap::routes());
+    }
+
+    public function testRoutesDefaultsToAnEmptyListWhenUnconfigured(): void
+    {
+        $this->assertSame([], Sitemap::routes());
+    }
+
+    public function testLastmodIsEmittedWhenGivenAndOmittedOtherwise(): void
+    {
+        $xml = Sitemap::xml([
+            ['path' => '/notes/one', 'lastmod' => '2026-08-24', 'changefreq' => 'monthly'],
+            ['path' => '/about', 'changefreq' => 'monthly'],
+        ]);
+
+        $this->assertStringContainsString('<lastmod>2026-08-24</lastmod>', $xml);
+        $this->assertSame(1, substr_count($xml, '<lastmod>'));
+        // Schema order is loc, lastmod, changefreq, priority.
+        $this->assertMatchesRegularExpression(
+            '~<loc>[^<]+</loc>\s*<lastmod>2026-08-24</lastmod>\s*<changefreq>~',
+            $xml,
+        );
+    }
+
     public function testEmptyRouteListStillProducesValidUrlset(): void
     {
         $xml = Sitemap::xml([]);

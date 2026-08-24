@@ -55,6 +55,7 @@ Seo::set([
     'title'       => 'About',        // → title_template
     'description' => '…',
     'image'       => '/img/og-about.png',
+    'image_alt'   => 'The About page card',
     'type'        => 'article',
     'canonical'   => null,           // null ⇒ derived from the current path
 ]);

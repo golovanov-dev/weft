@@ -131,4 +131,8 @@ php scripts/cache-clear.php  # flush the cache store
 
 Your own script: `require dirname(__DIR__) . '/bootstrap.php';` and the whole engine is initialised.
 
+Any script that boots the engine reports a crash honestly: an uncaught throwable is logged, written
+to stderr and ends the process with status 1, so a failed step in cron or CI is not mistaken for a
+successful one.
+
 Next: [Deployment](/docs/deployment).

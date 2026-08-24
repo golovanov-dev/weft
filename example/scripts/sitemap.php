@@ -9,10 +9,11 @@ declare(strict_types=1);
 
 require dirname(__DIR__) . '/bootstrap.php';
 
-use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Seo\Sitemap;
 
-$xml = Sitemap::xml((array) Config::get('app.sitemap', []));
+// Sitemap::routes() resolves 'app.sitemap' whether it is a plain list or a callable, so this
+// file and the kernel's /sitemap.xml always describe the same site.
+$xml = Sitemap::xml(Sitemap::routes());
 $target = dirname(__DIR__) . '/public/sitemap.xml';
 
 if (@file_put_contents($target, $xml) === false) {

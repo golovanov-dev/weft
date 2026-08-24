@@ -44,6 +44,9 @@ final class Seo
             'canonical' => null,               // auto from current path when null
             'robots' => (string) Config::get('app.seo.robots', 'index, follow'),
             'image' => (string) Config::get('app.seo.og_image', ''),
+            'image_alt' => null,               // null = not set by the page, see render()
+            'image_width' => (string) Config::get('app.seo.og_image_width', ''),
+            'image_height' => (string) Config::get('app.seo.og_image_height', ''),
             'type' => 'website',
             'alternates' => true,              // emit hreflang links
         ];
@@ -137,6 +140,30 @@ final class Seo
         }
         if ($image !== '') {
             $out[] = '<meta property="og:image" content="' . $e(self::absoluteImage($image)) . '" />';
+
+            $imageAlt = self::$data['image_alt'];
+            if ($imageAlt === null) {
+                // The configured alt describes the configured image. A page pointing og:image
+                // somewhere else without giving its own alt gets none, rather than a caption
+                // written for a different picture.
+                $imageAlt = $image === (string) Config::get('app.seo.og_image', '')
+                    ? (string) Config::get('app.seo.og_image_alt', '')
+                    : '';
+            }
+            if ((string) $imageAlt !== '') {
+                $out[] = '<meta property="og:image:alt" content="' . $e($imageAlt) . '" />';
+            }
+
+            // Dimensions let a scraper lay out the large card before it has fetched the image.
+            // Both or neither: one on its own tells a scraper nothing it can use. Configure them
+            // only if every OG image on the site is rendered at that size, and let a page with a
+            // differently sized image override or clear them.
+            $width = (string) self::$data['image_width'];
+            $height = (string) self::$data['image_height'];
+            if ($width !== '' && $height !== '') {
+                $out[] = '<meta property="og:image:width" content="' . $e($width) . '" />';
+                $out[] = '<meta property="og:image:height" content="' . $e($height) . '" />';
+            }
         }
 
         // Twitter.

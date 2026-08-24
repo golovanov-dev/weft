@@ -47,6 +47,8 @@ final class ErrorHandler
             'file' => $e->getFile() . ':' . $e->getLine(),
             'trace_id' => RequestContext::traceId(),
         ], 'exception:' . md5($e->getFile() . $e->getLine()));
+
+        self::exitIfCli($e);
     }
 
     public static function handleShutdown(): void
@@ -59,6 +61,32 @@ final class ErrorHandler
                 'trace_id' => RequestContext::traceId(),
             ], 'fatal:' . md5($error['file'] . $error['line']));
         }
+    }
+
+    /**
+     * End a failed CLI run with a non-zero status.
+     *
+     * Registering an exception handler changes how PHP dies: once the handler returns, the script
+     * terminates with status 0. A CLI script killed by an uncaught throwable therefore reports
+     * success to cron, CI and deploy steps, and with display_errors off in production it prints
+     * nothing at all — the failure exists only in the error log nobody was told to read. The web
+     * path is untouched: there the Kernel renders the response and sets the status code.
+     */
+    private static function exitIfCli(\Throwable $e): void
+    {
+        if (PHP_SAPI !== 'cli' || !defined('STDERR')) {
+            return;
+        }
+
+        fwrite(STDERR, sprintf(
+            "Uncaught %s: %s in %s:%d\n",
+            $e::class,
+            $e->getMessage(),
+            $e->getFile(),
+            $e->getLine(),
+        ));
+
+        exit(1);
     }
 
     /**

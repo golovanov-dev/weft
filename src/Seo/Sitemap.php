@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Golovanov\Weft\Seo;
 
+use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\I18n\Locale;
 use Golovanov\Weft\I18n\Url;
 use Golovanov\Weft\Support\Sanitize;
@@ -18,7 +19,27 @@ use Golovanov\Weft\Support\Sanitize;
 final class Sitemap
 {
     /**
-     * @param array<int, string|array{path: string, changefreq?: string, priority?: string}> $routes
+     * The configured routes, with a callable resolved.
+     *
+     * 'app.sitemap' is usually a plain list, but it may also be a callable for sites whose URLs
+     * come from content (posts, docs pages, …). Everything that renders a sitemap reads it
+     * through here: when only the kernel resolved the callable, a CLI generator handed
+     * self::xml() a list holding one Closure and died casting it to a string.
+     *
+     * @return array<int, string|array<string, mixed>>
+     */
+    public static function routes(): array
+    {
+        $routes = Config::get('app.sitemap', []);
+        if (is_callable($routes)) {
+            $routes = $routes();
+        }
+
+        return (array) $routes;
+    }
+
+    /**
+     * @param array<int, string|array{path: string, lastmod?: string, changefreq?: string, priority?: string}> $routes
      */
     public static function xml(array $routes): string
     {
@@ -31,6 +52,7 @@ final class Sitemap
 
         foreach ($routes as $route) {
             $path = is_array($route) ? (string) $route['path'] : (string) $route;
+            $lastmod = is_array($route) ? ($route['lastmod'] ?? null) : null;
             $changefreq = is_array($route) ? ($route['changefreq'] ?? null) : null;
             $priority = is_array($route) ? ($route['priority'] ?? null) : null;
 
@@ -41,6 +63,13 @@ final class Sitemap
                     foreach ($locales as $alt) {
                         $lines[] = '    <xhtml:link rel="alternate" hreflang="' . $e($alt) . '" href="' . $e(Url::absolute($path, $alt)) . '" />';
                     }
+                }
+                // Order follows the sitemap schema sequence: loc, lastmod, changefreq, priority.
+                // Give lastmod only where a real modification date exists; a date the generator
+                // invented (a file mtime, today) teaches crawlers to distrust the field, and a
+                // distrusted lastmod is worth less than an absent one.
+                if ($lastmod !== null && $lastmod !== '') {
+                    $lines[] = '    <lastmod>' . $e((string) $lastmod) . '</lastmod>';
                 }
                 if ($changefreq !== null) {
                     $lines[] = '    <changefreq>' . $e((string) $changefreq) . '</changefreq>';

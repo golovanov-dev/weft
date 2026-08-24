@@ -3,6 +3,29 @@
 All notable changes to Weft are documented in this file. Weft follows semantic versioning;
 pre-1.0 the API may change between minor versions.
 
+## 0.1.3 - 2026-08-24
+
+### Fixed
+
+- `scripts/sitemap.php` works when `app.sitemap` is a callable, the documented way to build a
+  sitemap from content. Only the kernel resolved the callable, so the script handed the generator
+  a list holding a closure and died on it. Both paths now read the routes through
+  `Sitemap::routes()`.
+- A CLI script that dies on an uncaught throwable now exits with status 1 and writes the error to
+  stderr. Registering an exception handler makes PHP terminate with status 0, so a failed cron job,
+  CI step or deploy step reported success and, with `display_errors` off, printed nothing.
+
+### Added
+
+- Sitemap routes accept an optional `lastmod`, emitted in schema order (`loc`, `lastmod`,
+  `changefreq`, `priority`). Give it only where a real modification date exists: search engines
+  ignore `changefreq` and `priority` and do read `lastmod`, but only while they trust it.
+- `og:image:alt`, from a page's `image_alt` or the new `app.seo.og_image_alt`. The configured alt
+  applies only to the configured image, so a page that sets its own image without an alt gets none
+  instead of a caption for a different picture.
+- `og:image:width` and `og:image:height`, from `app.seo.og_image_width` / `og_image_height` or a
+  per-page override. Emitted only as a pair.
+
 ## 0.1.2 - 2026-07-30
 
 ### Fixed

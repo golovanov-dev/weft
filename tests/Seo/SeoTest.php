@@ -80,6 +80,60 @@ final class SeoTest extends TestCase
         $this->assertStringContainsString('<meta name="twitter:card" content="summary_large_image" />', $html);
     }
 
+    public function testPageImageAltIsEmittedAsOpenGraphAlt(): void
+    {
+        Seo::set(['title' => 'About', 'image' => 'og/about.png', 'image_alt' => 'The about page card']);
+        $this->assertStringContainsString(
+            '<meta property="og:image:alt" content="The about page card" />',
+            Seo::render(),
+        );
+    }
+
+    public function testConfiguredImageAltAppliesOnlyToTheConfiguredImage(): void
+    {
+        Config::set('app.seo.og_image', 'og/default.png');
+        Config::set('app.seo.og_image_alt', 'Default social card');
+
+        // The page inherits the configured image, so the configured alt describes it.
+        Seo::set(['title' => 'Home']);
+        $this->assertStringContainsString('content="Default social card"', Seo::render());
+
+        // A page pointing somewhere else gets no alt rather than the wrong one.
+        self::resetEngineState();
+        Config::set('app.url.base', 'https://example.com');
+        Config::set('app.seo.og_image', 'og/default.png');
+        Config::set('app.seo.og_image_alt', 'Default social card');
+        Seo::set(['title' => 'About', 'image' => 'og/about.png']);
+        $this->assertStringNotContainsString('og:image:alt', Seo::render());
+    }
+
+    public function testImageDimensionsAreEmittedOnlyAsAPair(): void
+    {
+        Config::set('app.seo.og_image_width', 2400);
+        Config::set('app.seo.og_image_height', 1260);
+        Seo::set(['title' => 'About', 'image' => 'og/about.png']);
+        $html = Seo::render();
+        $this->assertStringContainsString('<meta property="og:image:width" content="2400" />', $html);
+        $this->assertStringContainsString('<meta property="og:image:height" content="1260" />', $html);
+
+        // A lone dimension is unusable, so neither tag is emitted.
+        self::resetEngineState();
+        Config::set('app.url.base', 'https://example.com');
+        Config::set('app.seo.og_image_width', 2400);
+        Seo::set(['title' => 'About', 'image' => 'og/about.png']);
+        $this->assertStringNotContainsString('og:image:width', Seo::render());
+    }
+
+    public function testImageMetaIsAbsentWithoutAnImage(): void
+    {
+        Config::set('app.seo.og_image_alt', 'Default social card');
+        Config::set('app.seo.og_image_width', 2400);
+        Config::set('app.seo.og_image_height', 1260);
+        Seo::set(['title' => 'About']);
+        $html = Seo::render();
+        $this->assertStringNotContainsString('og:image', $html);
+    }
+
     public function testRenderEmitsHreflangAlternatesWhenLocalesEnabled(): void
     {
         Config::set('app.locales', ['enabled' => true, 'supported' => ['en', 'ru'], 'default' => 'en']);

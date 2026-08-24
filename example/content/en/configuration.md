@@ -98,6 +98,10 @@ The file returns an array. Read it anywhere with `config('app.<path>')`.
     'title_template' => '%s — Weft',    // Seo::set(['title' => 'About']) → "About — Weft"
     'description'    => '…',
     'og_image'       => '/img/og.png',
+    'og_image_alt'   => 'Weft social card',  // describes og_image; a page setting its own
+                                             // image without an alt gets none, not this one
+    'og_image_width' => 1200,           // both or neither, and only if every OG image on the
+    'og_image_height'=> 630,            // site is that size; a page may override or clear them
     'twitter'        => '',
     'robots'         => 'index, follow',
     'robots_allow'   => true,           // robots.txt (DEBUG always blocks indexing)
@@ -122,6 +126,18 @@ A plain list of routes:
 ```php
 'sitemap' => static fn(): array => (new DocsService())->sitemapRoutes(),
 ```
+
+A route may carry `lastmod` where a real modification date exists:
+
+```php
+['path' => '/notes/hello', 'lastmod' => '2026-08-24', 'changefreq' => 'monthly'],
+```
+
+Give it only for routes whose date you actually know, such as content with a date in its front
+matter. Search engines ignore `changefreq` and `priority` and do read `lastmod`, but only while
+they trust it: a date derived from a file mtime or set to today on every build teaches them to
+ignore the field, and a distrusted `lastmod` is worth less than an absent one. Mixing routes with
+and without it is valid.
 
 ### The rest
 
