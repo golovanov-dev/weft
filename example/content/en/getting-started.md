@@ -18,10 +18,10 @@ and billing, use a full framework.
 
 | Tool | Version | Why |
 |---|---|---|
-| PHP | 8.4+ | the engine uses 8.4 syntax |
+| PHP | 8.4+ | required by the package (`php >=8.4` in `composer.json`) |
 | PHP extensions | `curl`, `json` required; `pdo_mysql` for the database; `redis` for the Redis cache | HTTP client, JSON, storage |
 | Composer | 2.x | dependencies and autoloading |
-| Node.js | 18+ | *optional* — only to rebuild the frontend with Vite; not needed to run the site |
+| Node.js | 20.19+ or 22.12+ | *optional* — only to rebuild the frontend with Vite 7; not needed to run the site |
 
 ## Install
 
@@ -39,8 +39,9 @@ cd my-site
 composer install
 ```
 
-This installs three things: the engine itself, [traceloom](https://github.com/golovanov-dev/traceloom)
-for request tracing, and `firebase/php-jwt` for token verification.
+This installs the engine itself, [traceloom](https://github.com/golovanov-dev/traceloom) for
+request tracing, `firebase/php-jwt` for token verification, and `league/commonmark`, which this
+documentation site uses to render its Markdown chapters.
 
 ## Configure the environment
 
@@ -51,7 +52,8 @@ constants in `config/`:
   `config.php` exists, so the site works out of the box;
 - `config.php` — the real server, or your local dev config. **You create it; it is gitignored.**
 
-The engine picks the first that exists: `config.php` → `config.dev.php` → `config.example.php`.
+The site's `bootstrap.php` picks the first that exists: `config.php` → `config.dev.php` →
+`config.example.php`.
 
 ## Run it
 
@@ -73,10 +75,15 @@ php scripts/health.php
 {
   "ok": true,
   "php": "8.4.13",
+  "timezone": "UTC",
+  "debug": false,
+  "dev_mode": false,
   "logs_writable": true,
   "traceloom": true,
   "multilingual": false,
-  "cache_enabled": true
+  "cache_enabled": true,
+  "captcha_enabled": false,
+  "alertloop_enabled": false
 }
 ```
 

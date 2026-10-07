@@ -8,7 +8,7 @@ Weft is for content-first sites: landing pages, portfolios, product and document
 It is deliberately not a full-stack framework — no ORM, no DI container, no admin panel.
 
 ```php
-// pages/about.php  ->  /about
+<?php // pages/about.php  ->  /about
 use Golovanov\Weft\Seo\Seo;
 
 Seo::set(['title' => 'About', 'description' => 'What I do and how I work.']);
@@ -49,8 +49,9 @@ convention-driven core so a new site is mostly content.
 ## Requirements
 
 - PHP **8.4+** with `ext-curl` and `ext-json`
-- `ext-pdo` only if you use the database, `ext-redis` only for the Redis cache
-- Node.js 18+ only to rebuild the frontend — not needed to run the example, whose built assets
+- `ext-pdo` with `pdo_mysql` only if you use the database (MySQL), `ext-redis` only for the
+  Redis cache
+- Node.js 20.19+ or 22.12+ (required by Vite 7) only to rebuild the frontend — not needed to run the example, whose built assets
   are committed
 
 ## Install
@@ -142,7 +143,8 @@ Everything optional is a flag:
 ## Documentation
 
 Full documentation lives in [`example/content/en`](example/content/en) and is served by the
-example site itself. Start with [Getting Started](example/content/en/getting-started.md).
+example site itself — read it there: links between chapters resolve on the running site, not on
+GitHub. Start with [Getting Started](example/content/en/getting-started.md).
 
 ## Versioning
 

@@ -17,7 +17,7 @@ php -S localhost:8000 -t public public/index.php
 php scripts/health.php
 ```
 
-Open <http://localhost:8000>. With no `config/config.php` present, the engine falls back to
+Open <http://localhost:8000>. With no `config/config.php` present, `bootstrap.php` falls back to
 `config/config.example.php` (`DEV_MODE=false`), which serves the committed assets.
 
 ### Working on the frontend (optional)
@@ -61,8 +61,8 @@ order: 1
 ---
 ```
 
-Add a file, and it appears in the sidebar, on the index, in the sitemap and at
-`/docs/<filename>` — no code changes.
+Add a file named in lowercase letters, digits and hyphens (`my-chapter.md`), and it appears in
+the sidebar, on the index, in the sitemap and at `/docs/<filename>` — no code changes.
 
 ## Making it multilingual
 

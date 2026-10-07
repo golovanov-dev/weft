@@ -50,7 +50,7 @@ Integrations:
 
 ```php
 define('RECAPTCHA_SITEKEY', '');    // public key → the frontend
-define('RECAPTCHA_SECRETKEY', '');  // secret key → verification; setting it enables the captcha
+define('RECAPTCHA_SECRETKEY', '');  // secret key → verification; with the site key, enables the captcha
 
 define('ALERTLOOP_BASE_URL', '');   // e.g. https://alerts.example.com
 define('ALERTLOOP_API_KEY', '');    // setting it enables alerts
@@ -61,8 +61,8 @@ define('MAIL_FROM', 'noreply@example.com');
 define('AUTH_JWT_KEY', '');         // JWT verification
 define('AUTH_JWT_ISSUER', '');
 
-define('PROXY_IPS', []);            // X-Forwarded-For is trusted only from these
-define('TRACE_TRUST_INCOMING', false); // reuse an upstream X-Trace-Id
+define('PROXY_IPS', []);            // X-Client-Ip / X-Forwarded-For are trusted only from these
+define('TRACE_TRUST_INCOMING', false); // reuse an upstream X-Trace-Id / X-Request-Id
 ```
 
 > Optional: define `G_ANALYTICS` and the layout will add gtag when `DEV_MODE` is false. No constant,
@@ -94,7 +94,7 @@ The file returns an array. Read it anywhere with `config('app.<path>')`.
 ```php
 'seo' => [
     'site_name'      => 'Weft',
-    'default_title'  => 'Weft — a lightweight PHP engine',  // used on "/"
+    'default_title'  => 'Weft — a lightweight PHP engine',  // used when a page sets no title
     'title_template' => '%s — Weft',    // Seo::set(['title' => 'About']) → "About — Weft"
     'description'    => '…',
     'og_image'       => '/img/og.png',
@@ -143,11 +143,12 @@ and without it is valid.
 
 ```php
 'vite'       => ['entry' => 'src/main.js', 'dev_server' => 'http://localhost:5173'],
-'cache'      => ['enabled' => true, 'driver' => 'file', 'path' => '…/storage/cache', 'prefix' => 'weft:'],  // on in this demo, see below
+'cache'      => ['enabled' => true, 'driver' => 'file', 'path' => '…/storage/cache', 'prefix' => 'weft:'],  // on in this demo, see below; prefix applies to redis only
 'rate_limit' => ['max' => 20, 'window' => 60],       // per client IP per bucket
-'captcha'    => ['enabled' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],
-'alertloop'  => ['enabled' => …, 'source' => 'my-site', 'timeout' => 4],
-'security'   => ['frame_options' => 'SAMEORIGIN', 'hsts' => true, 'csp' => ''],
+'captcha'    => ['enabled' => …, 'site_key' => …, 'secret_key' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],
+'alertloop'  => ['enabled' => …, 'base_url' => …, 'api_key' => …, 'source' => 'my-site', 'timeout' => 4],
+'security'   => ['frame_options' => 'SAMEORIGIN', 'referrer_policy' => 'strict-origin-when-cross-origin',
+                 'permissions_policy' => 'geolocation=(), microphone=(), camera=()', 'hsts' => true, 'csp' => ''],
 ```
 
 Caching is deliberately **on** in this demo (`'cache' => ['enabled' => true]` in
@@ -160,6 +161,7 @@ Note how feature flags derive from the environment, so there is one source of tr
 ```php
 'captcha' => [
     'enabled'    => defined('RECAPTCHA_SECRETKEY') && RECAPTCHA_SECRETKEY !== '',
+    'site_key'   => defined('RECAPTCHA_SITEKEY') ? RECAPTCHA_SITEKEY : '',
     'secret_key' => defined('RECAPTCHA_SECRETKEY') ? RECAPTCHA_SECRETKEY : '',
 ],
 ```

@@ -128,7 +128,7 @@ if (!$result['ok']) { /* reject */ }
 ```
 
 The rate limiter uses the cache when enabled, otherwise the session, and **fails open** — a missing
-backend never locks users out. The captcha is enabled by setting `RECAPTCHA_SECRETKEY`; while it is
+backend never locks users out. The captcha is enabled by setting both `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY`; while it is
 off, `verify()` returns a pass (`skipped => true`) so forms work in development without keys.
 
 The usual order in an endpoint: **honeypot → CSRF → rate limit → validation → captcha → service.**
@@ -137,7 +137,7 @@ See `api/contact.php` in this example for the complete flow.
 ## Alerts for sensitive spots
 
 ```php
-'alertloop' => ['enabled' => true],   // plus ALERTLOOP_BASE_URL / ALERTLOOP_API_KEY
+'alertloop' => ['enabled' => true, 'base_url' => ALERTLOOP_BASE_URL, 'api_key' => ALERTLOOP_API_KEY],
 ```
 
 ```php
@@ -155,8 +155,9 @@ own labels.
 
 Delivery is best-effort and non-blocking: nothing is retried and no failure reaches your code. It is
 not silent, though — a delivery that fails is recorded on the request trace as an `alert.failed`
-event (status, transport flag, event type and category; never the alert body). Unhandled exceptions,
-fatals and database errors alert automatically.
+event (status, transport flag, event type and category; never the alert body). Unhandled exceptions
+and fatals alert automatically; database errors alert once the site registers a notifier, as this
+example's `app/Bootstrap.php` does with `Database::setErrorNotifier(Alert::notifier())`.
 
 ## Database
 

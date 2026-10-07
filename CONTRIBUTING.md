@@ -10,6 +10,7 @@ feature is needed by *most* content sites. Anything site-specific belongs in the
 weft/
 ├── composer.json     the golovanov/weft package
 ├── src/              engine source (Golovanov\Weft\)
+├── tests/            PHPUnit suite (composer test)
 └── example/          a working site that also serves as the documentation
 ```
 

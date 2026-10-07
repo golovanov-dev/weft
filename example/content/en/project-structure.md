@@ -46,6 +46,7 @@ There is no route file. The URL path maps straight onto a file:
 | `/ru/about` | `pages/about.php` rendered in the `ru` locale |
 | `/sitemap.xml`, `/robots.txt` | generated from config |
 | anything else | `pages/404.php` |
+| an uncaught exception in a page | `pages/500.php`, if present (receives `$error`) |
 
 ### Dynamic segments
 

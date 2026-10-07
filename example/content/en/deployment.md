@@ -25,8 +25,8 @@ composer install --no-dev --optimize-autoloader
 
 # 3. Real environment
 cp config/config.example.php config/config.php
-#    DEBUG=false, DEV_MODE=false, BASE_URI='', APP_TIMEZONE,
-#    app.url.base = your https domain, plus any keys you use
+#    DEBUG=false, DEV_MODE=false, BASE_URI='', APP_TIMEZONE, plus any keys you use;
+#    in app/Configs/app.php set app.url.base to your https domain
 
 # 4. Frontend (here or in CI)
 npm ci && npm run build
@@ -47,7 +47,7 @@ php scripts/health.php
 
 ## Document root is `public/`
 
-Only `public/` is exposed. `config/` with your secrets, `src/`, `app/` and `storage/` with logs stay
+Only `public/` is exposed. `config/` with your secrets, `app/`, `vendor/` and `storage/` with logs stay
 **above** the document root and are unreachable from the web.
 
 ### Apache
@@ -103,7 +103,8 @@ report points straight at a timeline:
 vendor/bin/eventtrace show <trace_id> --dir=storage/logs/requests
 ```
 
-Secrets are redacted automatically; files rotate by date and size. On a busy site add OS-level log
+Values under sensitive key names (password, token, api_key, …) are redacted; files rotate by date
+and size. On a busy site add OS-level log
 rotation for `storage/logs`.
 
 ## Checklist
@@ -116,6 +117,7 @@ rotation for `storage/logs`.
 - [ ] `storage/` writable by the web server
 - [ ] HTTPS on; consider `app.security.hsts`
 - [ ] keys set for whichever of captcha / alerts / mail you use
+- [ ] `app.captcha.allowed_hosts` lists your real domain, if the captcha is on
 - [ ] `php scripts/health.php` → `ok: true`
 
 That is the whole engine. If something is missing from these docs, please
