@@ -92,8 +92,9 @@ return [
 
     // Request traces in storage/logs/requests (traceloom).
     'trace' => [
-        'log_body' => false,         // true: also log JSON / form bodies, masked by key; off: size and type only
-        'sensitive_keys' => [],      // extra whole key names to mask, e.g. ['phone', 'customer_phone'];
+        'log_body' => true,          // bodies are logged (JSON / form fields masked by key); false: size and type only
+        'sensitive_keys' => [],      // extra whole key names to mask, e.g. ['passport', 'card_number'];
+                                     // Latin letters and digits only: 'Пароль' masks nothing;
                                      // traceloom's password, token, api_key, … are masked anyway
         'retention_days' => 30,      // delete trace files older than this; 0 keeps them forever
     ],

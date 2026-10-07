@@ -7,22 +7,33 @@ pre-1.0 the API may change between minor versions.
 
 ### Security
 
-- Request traces no longer contain request bodies. `request_start` and the outgoing `HttpClient`
-  event record a body's size and content type only; the raw body string is never logged. To keep
-  bodies in the trace, set `app.trace.log_body` to `true`: JSON, urlencoded and multipart bodies are
-  then logged as fields and masked by key. The query string is still logged as is: the request
-  `uri`, the `referer` header and the URL of an outgoing call.
+- Request and outgoing `HttpClient` bodies in the trace are now parsed into fields, so traceloom
+  masks them by key; before, a body was one raw string that masking could not reach. A body that
+  decodes as a JSON object or array is parsed whatever its content type (`+json` types, no type,
+  JSON sent by `curl -d`); so is any urlencoded form (for `HttpClient`, a body passed as an array),
+  and multipart fields (never uploaded files);
+  any other body is still logged as the raw string. Weft masks nothing itself: an email or a phone number
+  stays in the trace unless you list its key in `app.trace.sensitive_keys`. To keep bodies out of
+  the trace, set `app.trace.log_body` to `false` (default `true`): a body is then logged as its size
+  and content type only. This does not touch fields your code writes with `Trace::event()`; mask
+  those with `sensitive_keys`.
+- The query string is parsed into a `query` field and masked by key the same way, whatever
+  `log_body` says. The `referer` header is still logged as sent, query string included.
 
 ### Added
 
-- `app.trace.sensitive_keys` — extra keys to mask in traces, on top of traceloom's defaults
-  (`password`, `token`, `api_key`, …). Each must match a whole key name: `phone` does not mask
-  `customer_phone`.
+- `app.trace.log_body` (default `true`) and `app.trace.sensitive_keys` — extra keys to mask in
+  traces, on top of traceloom's defaults (`password`, `token`, `api_key`, …). Each must match a
+  whole key name: `phone` does not mask `customer_phone`.
 
 ### Changed
 
-- The `body` field of `request_start` and `http_out_request` is now an object
-  `{size, content_type[, data]}` instead of a string; update anything that parses traces.
+- Trace format, for anything that parses traces: `body` in `request_start` and `http_out_request`
+  is now an object `{size, content_type, data}` instead of a string, or `null` when the request has
+  no body (`data` is an array, or the raw string for a body that is not JSON or a form, and is
+  absent with `log_body` off); `uri` in
+  `request_start` and `url` in `http_out_request` / `http_out_response` no longer include the query
+  string, which moved to the `query` field (absent when there is none).
 - Trace files are deleted after 30 days. Set `app.trace.retention_days` to keep them longer, or to
   `0` to keep them forever. The first request after the upgrade already deletes older files: if you
   need that history, set the key before upgrading.
@@ -31,8 +42,6 @@ pre-1.0 the API may change between minor versions.
   pages also lose the no-cache headers PHP sent with the session; if your site relied on them, send
   `Cache-Control` yourself. If your site copied this file, remove the `session_start()` line too,
   with the same effect on headers.
-- The example's `ContactService` no longer writes the visitor's email to the `contact_submit` trace
-  event. If your site copied it, drop the `email` field from that event too.
 
 ## 0.1.3 - 2026-08-24
 

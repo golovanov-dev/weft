@@ -17,8 +17,9 @@ use Golovanov\Weft\Support\Clock;
  * Every request gets a correlation (trace) id and a single event timeline grouped by that id,
  * written as JSONL under LOGS_PATH/requests. Traceloom handles rotation, size caps, retention
  * (app.trace.retention_days) and redaction of sensitive keys (its defaults plus
- * app.trace.sensitive_keys). Request and outgoing bodies are recorded as size and content type;
- * their parsed fields only with app.trace.log_body on — see body().
+ * app.trace.sensitive_keys). Weft masks nothing itself: it hands traceloom request and outgoing
+ * bodies and query strings parsed into arrays, so the redaction reaches their fields — see body()
+ * and splitQuery(). app.trace.log_body (default on) controls whether body contents are recorded.
  *
  * If the traceloom package is not installed, Trace degrades to a compatible built-in JSONL
  * writer so the engine keeps working (and produces the same shape of logs).
@@ -105,10 +106,13 @@ final class Trace
         // A multipart body is not readable from php://input; its size comes from the header.
         $size = $raw !== '' ? strlen($raw) : (int) $request->header('content-length', '0');
 
+        [$uri, $query] = self::splitQuery($request->uri);
+
         self::event('request_start', [
             'method' => $request->method,
             'path' => $request->path,
-            'uri' => $request->uri,
+            'uri' => $uri,
+            ...($query !== [] ? ['query' => $query] : []),
             'client_ip' => $request->clientIp,
             'headers' => $request->headers,
             'body' => $size > 0
@@ -118,16 +122,26 @@ final class Trace
     }
 
     /**
-     * What the trace records about a body: its size and content type. With app.trace.log_body on,
-     * a JSON, urlencoded or multipart body is added as `data`, parsed into an array so traceloom
-     * masks it by key. The raw body string is never recorded.
+     * What the trace records about a body: its size and content type, plus `data` with
+     * app.trace.log_body on (the default). These go into `data` as an array, so traceloom masks
+     * them by key: a body that decodes as a JSON object or array, whatever its content type (a
+     * `+json` type, none at all, `curl -d` sending JSON as a form); otherwise an urlencoded body,
+     * parsed with parse_str(); multipart fields (never file contents). Any other body goes in as
+     * the raw string, which key-based masking cannot reach into.
      *
      * @internal used by httpStart() and HttpClient
      * @param array<string, mixed> $formFields fields PHP has already parsed from a multipart body
-     * @return array{size: int, content_type: string, data?: array<mixed>}
+     * @param bool $parseForm false: an urlencoded body that is not JSON goes in as the raw string
+     *   (HttpClient labels every non-JSON string body urlencoded, whatever it holds)
+     * @return array{size: int, content_type: string, data?: array<mixed>|string}
      */
-    public static function body(string $raw, string $contentType, ?int $size = null, array $formFields = []): array
-    {
+    public static function body(
+        string $raw,
+        string $contentType,
+        ?int $size = null,
+        array $formFields = [],
+        bool $parseForm = true,
+    ): array {
         $summary = ['size' => $size ?? strlen($raw), 'content_type' => $contentType];
 
         // The built-in fallback writer cannot mask by key, so it never receives body contents.
@@ -135,17 +149,35 @@ final class Trace
             return $summary;
         }
 
-        $data = match (strtolower(trim(explode(';', $contentType, 2)[0]))) {
-            'application/json' => json_decode($raw, true),
-            'application/x-www-form-urlencoded' => self::parseForm($raw),
-            'multipart/form-data' => $formFields,
-            default => null,
-        };
-        if (is_array($data)) {
-            $summary['data'] = $data;
+        $data = json_decode($raw, true);
+        if (!is_array($data)) {
+            $data = match (strtolower(trim(explode(';', $contentType, 2)[0]))) {
+                'application/x-www-form-urlencoded' => $parseForm ? self::parseForm($raw) : null,
+                'multipart/form-data' => $formFields,
+                default => null,
+            };
         }
+        $summary['data'] = is_array($data) ? self::utf8Keys($data) : $raw;
 
         return $summary;
+    }
+
+    /**
+     * A URL split into the part before `?` and its query string parsed into an array (parse_str),
+     * so traceloom masks query parameters by key. A `#fragment` is dropped.
+     *
+     * @internal used by httpStart() and HttpClient
+     * @return array{0: string, 1: array<mixed>}
+     */
+    public static function splitQuery(string $url): array
+    {
+        $url = explode('#', $url, 2)[0];
+        $pos = strpos($url, '?');
+        if ($pos === false) {
+            return [$url, []];
+        }
+        parse_str(substr($url, $pos + 1), $query);
+        return [substr($url, 0, $pos), self::utf8Keys($query)];
     }
 
     public static function httpEnd(int $status, float $elapsedSeconds): void
@@ -168,33 +200,60 @@ final class Trace
     }
 
     /**
-     * Fields of an urlencoded body, or null when the body is not a form. parse_str() turns any text
-     * into keys, and traceloom masks values, not keys: JSON or prose sent with this content type
-     * would be logged as one long key. So every `&`-separated pair must be `name=value`, and every
-     * decoded name a form field name: a letter or `_`, then letters, digits, `_`, `.`, `-`, and
-     * optional `[...]` parts (`client[phone]`).
+     * Fields of an urlencoded body. Any text parses: a pair without `=` becomes a field with an
+     * empty value, a name PHP does not expect keeps its value, so `password` in an imperfect form is
+     * still a field traceloom masks.
      *
-     * @return array<mixed>|null
+     * @return array<mixed>
      */
-    private static function parseForm(string $raw): ?array
+    private static function parseForm(string $raw): array
     {
-        foreach (explode('&', $raw) as $pair) {
-            if ($pair === '') {
-                continue;
-            }
-            $name = strstr($pair, '=', true);
-            if ($name === false || preg_match('/^[A-Za-z_][\w.\-]*(\[[\w.\-]*\])*$/', urldecode($name)) !== 1) {
-                return null;
-            }
-        }
         parse_str($raw, $fields);
         return $fields;
     }
 
-    /** A boolean or a boolean-like string ('true', '1', 'on', 'yes'); 'false' and anything else mean off. */
+    /**
+     * The array with every key made valid UTF-8, at any depth. traceloom cannot encode a key that
+     * is not (`?%E8%EC%FF=1`, a cp1251 form field) and then drops the whole event's data — method,
+     * path, headers and all. Invalid bytes become U+FFFD; traceloom compares keys on [a-z0-9] only,
+     * so the masking decision for the key does not change. A renamed key that lands on an existing
+     * one gets `~` appended until it is free, so no value is lost. Values stay as they are:
+     * traceloom records a string that is not UTF-8 as `_binary`.
+     *
+     * @param array<mixed> $data
+     * @return array<mixed>
+     */
+    private static function utf8Keys(array $data): array
+    {
+        $out = [];
+        $renamed = [];
+        foreach ($data as $key => $value) {
+            if (is_array($value)) {
+                $value = self::utf8Keys($value);
+            }
+            if (is_string($key) && preg_match('//u', $key) !== 1) {
+                $renamed[] = [$key, $value];
+                continue;
+            }
+            $out[$key] = $value;
+        }
+        foreach ($renamed as [$key, $value]) {
+            $key = (string) json_decode((string) json_encode($key, JSON_INVALID_UTF8_SUBSTITUTE));
+            while (array_key_exists($key, $out)) {
+                $key .= '~';
+            }
+            $out[$key] = $value;
+        }
+        return $out;
+    }
+
+    /**
+     * On unless configured off. A boolean or a boolean-like string ('true', '1', 'on', 'yes');
+     * 'false' and any other value mean off.
+     */
     private static function logBody(): bool
     {
-        $value = Config::get('app.trace.log_body', false);
+        $value = Config::get('app.trace.log_body', true);
         return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) === true;
     }
 

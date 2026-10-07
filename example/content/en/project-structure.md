@@ -86,7 +86,7 @@ App\Bootstrap::init();                        // 6) site wiring
 
 ```text
 1. Request::fromGlobals()      method, path, headers, client IP, body
-2. Trace::boot() + httpStart() assign a trace id, record request_start
+2. Trace::boot() + httpStart() assign a trace id, record request_start (query, body as fields)
 3. Headers::send()             security headers + X-Trace-Id
 4. Resolve the path
    ├─ strip BASE_URI, sanitise

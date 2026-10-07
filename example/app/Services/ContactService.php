@@ -22,9 +22,9 @@ final class ContactService
      */
     public function submit(array $data): bool
     {
-        // No personal fields in the trace: the visitor's contact details go only to the owner.
         Trace::event('contact_submit', [
             'type' => $data['type'] ?? null,
+            'email' => $data['email'] ?? null,
             'has_repo' => !empty($data['repository']),
         ]);
 

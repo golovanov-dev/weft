@@ -12,8 +12,9 @@ use Golovanov\Weft\Observability\Trace;
  *
  * Safe defaults: SSL verification on, short timeouts, JSON body/decoding, and outbound
  * request/response events written to the current request's trace timeline (log => true).
- * The request body is traced as size and content type, its fields only with
- * app.trace.log_body on (Trace::body()); the response body is never traced.
+ * The traced URL has no query string; the query goes in as a parsed `query` array. The request
+ * body is traced as Trace::body() describes (contents unless app.trace.log_body is off); the
+ * response body is never traced.
  *
  * @phpstan-type Options array{
  *   method?: string, headers?: array<int, string>, timeout?: int, connectTimeout?: int,
@@ -103,12 +104,21 @@ final class HttpClient
             curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
         }
 
+        // The trace gets the URL without its query string and the query parsed, masked by key.
+        [$traceUrl, $traceQuery] = Trace::splitQuery($url);
+        $traceQuery = $traceQuery !== [] ? ['query' => $traceQuery] : [];
+
         if ($log) {
             Trace::event('http_out_request', [
-                'url' => $url,
+                'url' => $traceUrl,
+                ...$traceQuery,
                 'method' => $method,
                 'ssl_verify' => (bool) $opt['sslVerify'],
-                'body' => $postData === null ? null : Trace::body($postData, $contentType),
+                // A string body sent with json off is the caller's own format (XML, text): it is
+                // labelled urlencoded only because every non-JSON body is, so it is not parsed as a form.
+                'body' => $postData === null
+                    ? null
+                    : Trace::body($postData, $contentType, parseForm: is_array($opt['body'])),
             ]);
         }
 
@@ -145,7 +155,8 @@ final class HttpClient
 
         if ($log) {
             Trace::event('http_out_response', [
-                'url' => $url,
+                'url' => $traceUrl,
+                ...$traceQuery,
                 'ok' => $ok,
                 'status' => $status,
                 'error' => $out['error'],

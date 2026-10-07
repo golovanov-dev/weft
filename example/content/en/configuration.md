@@ -147,7 +147,7 @@ and without it is valid.
 'rate_limit' => ['max' => 20, 'window' => 60],       // per client IP per bucket
 'captcha'    => ['enabled' => …, 'site_key' => …, 'secret_key' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],
 'alertloop'  => ['enabled' => …, 'base_url' => …, 'api_key' => …, 'source' => 'my-site', 'timeout' => 4],
-'trace'      => ['log_body' => false, 'sensitive_keys' => [], 'retention_days' => 30],   // see below
+'trace'      => ['log_body' => true, 'sensitive_keys' => [], 'retention_days' => 30],    // see below
 'security'   => ['frame_options' => 'SAMEORIGIN', 'referrer_policy' => 'strict-origin-when-cross-origin',
                  'permissions_policy' => 'geolocation=(), microphone=(), camera=()', 'hsts' => true, 'csp' => ''],
 ```
@@ -171,22 +171,43 @@ Note how feature flags derive from the environment, so there is one source of tr
 
 ```php
 'trace' => [
-    'log_body'       => false,  // true: log JSON and form bodies as fields, masked by key
-    'sensitive_keys' => [],     // e.g. ['phone', 'customer_phone']: masked on top of password, token, api_key, …
+    'log_body'       => true,   // false: log a body as its size and content type only
+    'sensitive_keys' => [],     // e.g. ['passport', 'card_number'], Latin names only: masked on top of password, token, api_key, …
     'retention_days' => 30,     // trace files older than this are deleted; 0 keeps them forever
 ],
 ```
 
-With `log_body` off, a request or outgoing body is logged as its size and content type. With it on,
-a body that is not JSON, multipart or urlencoded `name=value` pairs is still logged as size and
-type only; file uploads are never logged. A string `log_body` (from the environment) is read as a
-boolean: `'true'`, `'1'`, `'yes'`, `'on'` turn it on, `'false'` and anything else leave it off. The
-query string is not a body and is logged as is: the request `uri`, the `referer` header and the URL
-of an outgoing call.
+A request body (`request_start`) and the body of an outgoing `HttpClient` call (`http_out_request`)
+are logged as `body: {size, content_type, data}`; a request without a body has `body: null`. These
+go into `data` as fields, so the masking below reaches them: a body that decodes as a JSON object
+or array, whatever its content type (`application/vnd.api+json`, none, JSON sent by `curl -d`);
+any other `application/x-www-form-urlencoded` body, parsed as a form; multipart form fields.
+Uploaded files are never logged. Any other body — XML, plain text, broken JSON not sent as a
+form, a string you pass to `HttpClient` with `['json' => false]`, even a form string such as
+`a=1&password=x` (pass an array to get it masked) — goes into `data` as the raw string,
+which masking by key cannot look inside; traceloom shortens long strings. With `log_body` off,
+`body` has only `size` and `content_type`. A string `log_body` (from the environment) is read
+as a boolean: `'true'`, `'1'`, `'yes'`, `'on'` keep it on, `'false'` and anything else turn it off.
 
-Key names are compared in lowercase with everything but letters and digits removed, so
-`first-name` also masks `first_name` and `FirstName`. A key in `sensitive_keys` must match the whole
-name — `phone` does not mask `customer_phone` — so list every name your forms use. traceloom's
+The query string is logged apart from the URL, parsed into fields and masked the same way,
+whatever `log_body` says: `request_start` has `uri` without the query and `query` with its
+parameters; outgoing calls have `url` and `query`. A parameter or field name that is not valid
+UTF-8 (`?%E8%EC%FF=1`) is logged with the bad bytes replaced by `�`, and `~` added if that name is
+already taken. The `referer` header is logged as sent, query string included: a browser moving
+within your site sends the full URL of the previous page, so a `?token=` on one page shows up
+unmasked in the next request's `referer`.
+
+Weft masks nothing itself: traceloom does, by key name. Personal data such as an email or a phone
+number stays in the trace unless you list its key in `sensitive_keys`. `log_body` covers bodies
+only: fields your code writes with `Trace::event()` (the example's `contact_submit` records the
+email) are logged with `log_body` off too; `sensitive_keys` masks them.
+
+Key names are compared in lowercase with everything but the Latin letters `a`–`z` and the digits
+`0`–`9` removed, so `first-name` also masks `first_name` and `FirstName`. Cyrillic and other
+non-Latin letters are removed as well, so `sensitive_keys` works with Latin names only:
+`'Пароль'` masks nothing, not even a field named `пароль`, and nothing warns you. Give the fields
+you need masked Latin names. A key in `sensitive_keys` must match the whole name — `phone` does
+not mask `customer_phone` — so list every name your forms use. traceloom's
 built-in keys also mask any name that contains `password`, `secret`, `token`, `api_key`, `cookie`,
 `session` or a few others (`user_password`).
 

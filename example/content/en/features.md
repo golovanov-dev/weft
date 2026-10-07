@@ -95,12 +95,13 @@ Always on. Every request gets a correlation id and a single event timeline writt
 with rotation, size caps and automatic redaction of keys like `password`, `token` and `api_key`.
 Files older than 30 days are deleted.
 
-The engine records `request_start` (method, path, headers, client IP), `request_end` and outbound
-HTTP calls. Request and outgoing bodies are recorded as size and content type only; the query
-string in the request URI and outgoing URLs is logged as is. To debug with bodies, turn on
-`app.trace.log_body`: JSON and form bodies are then logged as fields, masked by key; any other body
-stays size and type. All three settings are in
-[Configuration](/docs/configuration).
+The engine records `request_start` (method, path, query, headers, client IP, body), `request_end`
+and outbound HTTP calls. JSON bodies (by content, whatever the content type), form bodies and
+query strings are logged as fields, so the redaction reaches them; add your own key names with
+`app.trace.sensitive_keys`. Any other body is logged as a raw string, and the `referer` header as
+sent, query string included. To keep bodies out of the trace, set `app.trace.log_body` to `false`;
+fields you pass to `Trace::event()` stay — mask them with `sensitive_keys`. All
+three settings are in [Configuration](/docs/configuration).
 
 Add your own events:
 

@@ -103,10 +103,17 @@ report points straight at a timeline:
 vendor/bin/eventtrace show <trace_id> --dir=storage/logs/requests
 ```
 
-Values under sensitive key names (password, token, api_key, … plus `app.trace.sensitive_keys`)
-are redacted, and bodies are logged as size and type unless `app.trace.log_body` is on; the query
-string in the request URI and outgoing URLs is logged as is. Trace files rotate by date and size
-and are deleted after `app.trace.retention_days` (30 by default; `0` keeps them forever). The first
+Request and outgoing bodies and query strings are logged as fields; values under sensitive key
+names (password, token, api_key, … plus `app.trace.sensitive_keys`) are redacted. Anything else
+your forms collect — an email, a phone number — is logged unless you add its key to
+`sensitive_keys`. Setting `app.trace.log_body` to `false` logs a body as its size and content type
+only, but not the fields your code writes to its own events with `Trace::event()` — the example's
+`contact_submit` records the email; only `sensitive_keys` masks those. A body that neither decodes
+as JSON nor is a form is logged as a raw string, and so is a form string your code builds
+itself for `HttpClient`: pass the fields as an array so their sensitive keys are masked. The `referer` header is logged as sent:
+within your site it is the full previous URL, query string included, and masking does not reach
+it. Trace files rotate by date and
+size and are deleted after `app.trace.retention_days` (30 by default; `0` keeps them forever). The first
 request after an engine update already deletes older files: set the key before updating if you need
 them.
 `errors/` is not cleaned up: rotate it at the OS level.
