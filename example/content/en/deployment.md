@@ -103,9 +103,13 @@ report points straight at a timeline:
 vendor/bin/eventtrace show <trace_id> --dir=storage/logs/requests
 ```
 
-Values under sensitive key names (password, token, api_key, …) are redacted; files rotate by date
-and size. On a busy site add OS-level log
-rotation for `storage/logs`.
+Values under sensitive key names (password, token, api_key, … plus `app.trace.sensitive_keys`)
+are redacted, and bodies are logged as size and type unless `app.trace.log_body` is on; the query
+string in the request URI and outgoing URLs is logged as is. Trace files rotate by date and size
+and are deleted after `app.trace.retention_days` (30 by default; `0` keeps them forever). The first
+request after an engine update already deletes older files: set the key before updating if you need
+them.
+`errors/` is not cleaned up: rotate it at the OS level.
 
 ## Checklist
 

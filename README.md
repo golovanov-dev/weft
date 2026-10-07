@@ -37,7 +37,8 @@ convention-driven core so a new site is mostly content.
   (`/about`), others get `/ru/about`, with automatic hreflang and canonical redirects.
 - **Optional caching** — file or Redis. `Cache::remember()` is safe even when caching is off.
 - **Request tracing** — one JSONL timeline per request via
-  [traceloom](https://github.com/golovanov-dev/traceloom), with automatic redaction.
+  [traceloom](https://github.com/golovanov-dev/traceloom): redaction by key, request bodies kept
+  out of the logs by default (the query string is logged as is), trace files deleted after 30 days.
 - **Form protection by default** — rate limiting, CSRF, honeypot and Google reCAPTCHA v3.
 - **Alerting for sensitive spots** — push events to
   [AlertLoop](https://github.com/golovanov-dev/alertloop); best-effort, never blocks a request,

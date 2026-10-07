@@ -12,6 +12,8 @@ use Golovanov\Weft\Observability\Trace;
  *
  * Safe defaults: SSL verification on, short timeouts, JSON body/decoding, and outbound
  * request/response events written to the current request's trace timeline (log => true).
+ * The request body is traced as size and content type, its fields only with
+ * app.trace.log_body on (Trace::body()); the response body is never traced.
  *
  * @phpstan-type Options array{
  *   method?: string, headers?: array<int, string>, timeout?: int, connectTimeout?: int,
@@ -87,7 +89,8 @@ final class HttpClient
             is_array($opt['headers']) ? $opt['headers'] : [],
             static fn(string $h): bool => stripos($h, 'content-type:') !== 0
         );
-        $headers[] = $json ? 'Content-Type: application/json' : 'Content-Type: application/x-www-form-urlencoded';
+        $contentType = $json ? 'application/json' : 'application/x-www-form-urlencoded';
+        $headers[] = 'Content-Type: ' . $contentType;
         curl_setopt($ch, CURLOPT_HTTPHEADER, array_values($headers));
 
         // Body.
@@ -105,7 +108,7 @@ final class HttpClient
                 'url' => $url,
                 'method' => $method,
                 'ssl_verify' => (bool) $opt['sslVerify'],
-                'body' => $postData,
+                'body' => $postData === null ? null : Trace::body($postData, $contentType),
             ]);
         }
 

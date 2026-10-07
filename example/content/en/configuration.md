@@ -147,6 +147,7 @@ and without it is valid.
 'rate_limit' => ['max' => 20, 'window' => 60],       // per client IP per bucket
 'captcha'    => ['enabled' => …, 'site_key' => …, 'secret_key' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],
 'alertloop'  => ['enabled' => …, 'base_url' => …, 'api_key' => …, 'source' => 'my-site', 'timeout' => 4],
+'trace'      => ['log_body' => false, 'sensitive_keys' => [], 'retention_days' => 30],   // see below
 'security'   => ['frame_options' => 'SAMEORIGIN', 'referrer_policy' => 'strict-origin-when-cross-origin',
                  'permissions_policy' => 'geolocation=(), microphone=(), camera=()', 'hsts' => true, 'csp' => ''],
 ```
@@ -165,6 +166,31 @@ Note how feature flags derive from the environment, so there is one source of tr
     'secret_key' => defined('RECAPTCHA_SECRETKEY') ? RECAPTCHA_SECRETKEY : '',
 ],
 ```
+
+### Trace
+
+```php
+'trace' => [
+    'log_body'       => false,  // true: log JSON and form bodies as fields, masked by key
+    'sensitive_keys' => [],     // e.g. ['phone', 'customer_phone']: masked on top of password, token, api_key, …
+    'retention_days' => 30,     // trace files older than this are deleted; 0 keeps them forever
+],
+```
+
+With `log_body` off, a request or outgoing body is logged as its size and content type. With it on,
+a body that is not JSON, multipart or urlencoded `name=value` pairs is still logged as size and
+type only; file uploads are never logged. A string `log_body` (from the environment) is read as a
+boolean: `'true'`, `'1'`, `'yes'`, `'on'` turn it on, `'false'` and anything else leave it off. The
+query string is not a body and is logged as is: the request `uri`, the `referer` header and the URL
+of an outgoing call.
+
+Key names are compared in lowercase with everything but letters and digits removed, so
+`first-name` also masks `first_name` and `FirstName`. A key in `sensitive_keys` must match the whole
+name — `phone` does not mask `customer_phone` — so list every name your forms use. traceloom's
+built-in keys also mask any name that contains `password`, `secret`, `token`, `api_key`, `cookie`,
+`session` or a few others (`user_password`).
+
+A missing or negative `retention_days` means 30.
 
 ## Reading configuration
 

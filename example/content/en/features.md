@@ -93,8 +93,16 @@ fails to connect, the engine falls back to the file store instead of failing the
 Always on. Every request gets a correlation id and a single event timeline written to
 `storage/logs/requests/<date>.jsonl` by [traceloom](https://github.com/golovanov-dev/traceloom),
 with rotation, size caps and automatic redaction of keys like `password`, `token` and `api_key`.
+Files older than 30 days are deleted.
 
-The engine records `request_start`, `request_end` and outbound HTTP calls. Add your own:
+The engine records `request_start` (method, path, headers, client IP), `request_end` and outbound
+HTTP calls. Request and outgoing bodies are recorded as size and content type only; the query
+string in the request URI and outgoing URLs is logged as is. To debug with bodies, turn on
+`app.trace.log_body`: JSON and form bodies are then logged as fields, masked by key; any other body
+stays size and type. All three settings are in
+[Configuration](/docs/configuration).
+
+Add your own events:
 
 ```php
 use Golovanov\Weft\Observability\Trace;

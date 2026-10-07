@@ -90,6 +90,14 @@ return [
         'timeout' => 4,
     ],
 
+    // Request traces in storage/logs/requests (traceloom).
+    'trace' => [
+        'log_body' => false,         // true: also log JSON / form bodies, masked by key; off: size and type only
+        'sensitive_keys' => [],      // extra whole key names to mask, e.g. ['phone', 'customer_phone'];
+                                     // traceloom's password, token, api_key, … are masked anyway
+        'retention_days' => 30,      // delete trace files older than this; 0 keeps them forever
+    ],
+
     'security' => [
         'frame_options' => 'SAMEORIGIN',
         'referrer_policy' => 'strict-origin-when-cross-origin',

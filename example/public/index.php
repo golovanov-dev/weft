@@ -16,9 +16,9 @@ ini_set('log_errors', '1');
 // Web root, used by the Vite manifest resolver.
 define('WEB_ROOT', __DIR__);
 
-// Sessions (CSRF + session-based rate limiting).
+// Session cookie parameters. The session itself starts only when a form needs it (Csrf,
+// RateLimiter), so pages without a form set no cookie.
 session_set_cookie_params(['path' => '/', 'httponly' => true, 'samesite' => 'Lax']);
-session_start();
 
 require dirname(__DIR__) . '/bootstrap.php';
 
