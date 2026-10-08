@@ -64,7 +64,39 @@ permissions and can report `ok: true` for a `storage/` that PHP cannot write.
 
 If PHP cannot write `storage/`, rate limits stop limiting: the limiter fails open so a broken disk
 never locks visitors out, and the line it writes about that goes to `storage/logs/errors/`, which is
-not writable either — nothing records it.
+not writable either — nothing records it but `health.php` (`rate_limit_writable: false`).
+
+### What `health.php` checks
+
+It prints a JSON report and exits with 1 when `ok` is false. `ok` is false when any of these is bad:
+
+| Field | Bad value | What to do |
+|---|---|---|
+| `logs_writable` | `false` | give the PHP user write access to `LOGS_PATH` (see above) |
+| `rate_limit_writable` | `false` | rate limits are off: give the PHP user write access to `rate_limit_path`; with Redis, see below |
+| `rate_limit_store` | `file` while `cache_driver` is `redis` | Redis is not used, counters are per server: see below |
+| `proxy_ips_error` | not `null` | `PROXY_IPS` is not an array, so no proxy is trusted: write `define('PROXY_IPS', [...])` |
+| `proxy_ips_invalid` | not empty | these `PROXY_IPS` entries are ignored: replace them with IP addresses or CIDR ranges; for `localhost` write `'127.0.0.1'` and/or `'::1'` |
+| `proxy_ips_trust_all` | not empty | these entries (`0.0.0.0/0`, `::/0`) trust every address, so a forged `X-Forwarded-For` gets around rate limits: list only your proxies |
+| `captcha_missing_keys` | not empty, with `DEBUG` off | every form submission is rejected: set the keys or disable the captcha (below) |
+
+With `DEBUG` on, `captcha_missing_keys` is still listed but does not fail the check: forms pass then.
+
+`captcha_missing_keys` names keys of `app.captcha`: `site_key`, `secret_key`. In this example they
+come from `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` in `config/config.php`, and the captcha is
+on whenever `RECAPTCHA_SECRETKEY` is not empty. To disable it, set `RECAPTCHA_SECRETKEY` to `''`; on
+a site with its own config, set `app.captcha.enabled` to `false`.
+
+`rate_limit_path` is `app.rate_limit.path`; a relative one is taken from the site root (`APP_ROOT`),
+so `health.php` and the site use the same directory whatever their working directory.
+
+With `app.cache.driver` set to `redis`, `health.php` writes a probe counter to Redis (ten-second
+TTL, deleted at once). `rate_limit_store: "file"` means the limiter could not use Redis and fell
+back to files: ext-redis is not installed, Redis is unreachable at `REDIS_HOST`:`REDIS_PORT`, or it
+rejected `REDIS_PASSWORD` or `REDIS_DB`. The reason is in `storage/logs/errors/`, in a line starting
+with "Redis unavailable". `rate_limit_store: "redis"` with `rate_limit_writable: false` means Redis
+took the connection but not the write: a read-only replica, `maxmemory` reached under the
+`noeviction` policy, or a Redis user not allowed to run `EVAL`.
 
 ## Document root is `public/`
 
@@ -115,8 +147,10 @@ on what stands in front of it:
 define('PROXY_IPS', ['203.0.113.10', '173.245.48.0/20', '2400:cb00::/32']);
 ```
 
-Each entry is an IP address or a CIDR range. A host name (`localhost`, a Docker service name such as
-`nginx`) is ignored without an error — write the address.
+Each entry is an IP address or a CIDR range. A host name is ignored: write the address — for
+`localhost`, `'127.0.0.1'` and/or `'::1'`; for a Docker service name such as `nginx`, its address
+(below). `health.php` lists such entries under `proxy_ips_invalid`. It also fails on `0.0.0.0/0` and
+`::/0` (`proxy_ips_trust_all`): they trust every address, and any visitor can then pick their own IP.
 
 - **Cloudflare** — every range from [cloudflare.com/ips](https://www.cloudflare.com/ips/), IPv4 and
   IPv6. The list changes now and then; compare it when you update the site.
@@ -192,9 +226,8 @@ them.
   "Behind a proxy or CDN" above); otherwise all visitors share one rate limit
 - [ ] HTTPS on; consider `app.security.hsts`
 - [ ] keys set for whichever of captcha / alerts / mail you use; a captcha enabled with a key missing
-  passes forms while `DEBUG` is on and rejects every submission with it off — look for
-  `Captcha is enabled without` in `storage/logs/errors/` and for the `captcha.misconfigured` event
-  in the traces
+  passes forms while `DEBUG` is on and rejects every submission with it off — `health.php` lists
+  the missing keys under `captcha_missing_keys`
 - [ ] `app.captcha.allowed_hosts` lists your real domain, if the captcha is on
 - [ ] `sudo -u www-data php scripts/health.php` (your PHP user) → `ok: true`
 

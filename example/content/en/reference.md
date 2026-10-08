@@ -44,6 +44,9 @@ Arr::get($arr, 'a.b.c', $def);  Str::slug($s);  Str::limit($s, 160);  Json::deco
 ```php
 $request->method;  $request->path;  $request->clientIp;  $request->post;  $request->rawBody;
 $request->isPost();  $request->wantsJson();  $request->header('authorization');  $request->body();
+Request::invalidProxyIps();   // PROXY_IPS entries that are neither an IP nor a CIDR range
+Request::trustAllProxyIps();  // PROXY_IPS entries with prefix /0 (trust every address)
+Request::proxyIpsError();     // why PROXY_IPS is unusable (not an array), or null
 
 Response::html($html, 200);  Response::json($data, 200);  Response::text($t);  Response::redirect($url, 302);
 $response->withHeader($n, $v);  $response->send();
@@ -93,8 +96,8 @@ $m->create($data);  $m->update($id, $data);  $m->delete($id);
 ### Security
 
 ```php
-Captcha::enabled();  Captcha::siteKey();  Captcha::verify($token, $action);
-RateLimiter::allow($bucket, $max, $window);  RateLimiter::throttle($bucket, $sec);
+Captcha::enabled();  Captcha::siteKey();  Captcha::verify($token, $action);  Captcha::missingKeys();
+RateLimiter::allow($bucket, $max, $window);  RateLimiter::throttle($bucket, $sec);  RateLimiter::storeStatus();
 RateLimiter::honeypot($body, $field);
 Csrf::field();  Csrf::token();  Csrf::check($token);  Csrf::fieldName();
 Jwt::decode($token);  Jwt::encode($claims, ttl: 3600);  Jwt::fromBearer($header);

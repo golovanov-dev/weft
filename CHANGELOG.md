@@ -49,6 +49,18 @@ pre-1.0 the API may change between minor versions.
 
 ### Added
 
+- `scripts/health.php` in the example fails (`ok: false`, exit code 1) when rate-limit counters
+  cannot be written (with Redis, a probe write) or went to files while `app.cache.driver` is
+  `redis`, when `PROXY_IPS` is not an array or has an entry that is not an IP or a CIDR range or
+  trusts every address (`0.0.0.0/0`, `::/0`), or when a captcha is enabled without its keys outside
+  `DEBUG`. New fields: `cache_driver`, `rate_limit_store`, `rate_limit_path`,
+  `rate_limit_writable`, `proxy_ips_error`, `proxy_ips_invalid`, `proxy_ips_trust_all`,
+  `captcha_missing_keys`. If your site copied the script, update the engine to 0.2.0 first, then
+  copy the script again: on an older engine it stops with a fatal error. The engine side:
+  `Captcha::missingKeys()`, `RateLimiter::storeStatus()`, `Request::invalidProxyIps()`,
+  `Request::trustAllProxyIps()`, `Request::proxyIpsError()`.
+- A relative `app.rate_limit.path` is taken from `APP_ROOT`, not from the working directory, so the
+  site and CLI scripts such as `health.php` use the same directory.
 - `PROXY_IPS` accepts CIDR ranges, IPv4 and IPv6 (`'173.245.48.0/20'`, `'2400:cb00::/32'`), next
   to exact addresses, so a CDN such as Cloudflare can be listed by its published ranges. An entry
   that is neither is ignored, host names included (`localhost`, a Docker service name): write the
@@ -98,6 +110,9 @@ pre-1.0 the API may change between minor versions.
   CSS, JS and images; before, every asset request went to the engine and returned 404. Production
   servers (nginx, Apache) are not affected. If your site copied `example/public/index.php` and you
   develop with `php -S`, copy the new `cli-server` block at its top.
+- A Redis cache with a wrong password or database number now falls back to the file store, as an
+  unreachable Redis already did; before, the store was created and every read and write silently
+  failed. Check `REDIS_PASSWORD` and `REDIS_DB` if `health.php` reports the file store.
 
 ## 0.1.3 - 2026-08-24
 

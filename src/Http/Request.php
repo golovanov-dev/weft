@@ -42,7 +42,7 @@ final class Request
             method: $method,
             uri: $uri,
             path: $path,
-            clientIp: self::resolveClientIp($_SERVER, defined('PROXY_IPS') && is_array(PROXY_IPS) ? PROXY_IPS : []),
+            clientIp: self::resolveClientIp($_SERVER, self::proxyIps()),
             headers: self::collectHeaders(),
             query: $_GET,
             post: $_POST,
@@ -140,6 +140,61 @@ final class Request
     }
 
     /**
+     * Entries of PROXY_IPS (or of $entries) that are neither an IP address nor a CIDR range, such as
+     * a host name. The client IP resolution ignores them; health checks report them.
+     *
+     * @param array<mixed>|null $entries null reads the PROXY_IPS constant
+     * @return list<mixed>
+     */
+    public static function invalidProxyIps(?array $entries = null): array
+    {
+        $invalid = [];
+        foreach ($entries ?? self::proxyIps() as $entry) {
+            if (self::parseProxy($entry) === null) {
+                $invalid[] = $entry;
+            }
+        }
+        return $invalid;
+    }
+
+    /**
+     * Entries of PROXY_IPS (or of $entries) with prefix /0, such as "0.0.0.0/0" or "::/0": they
+     * trust every address, so a forged X-Forwarded-For sets the client IP and bypasses rate
+     * limits. Health checks report them.
+     *
+     * @param array<mixed>|null $entries null reads the PROXY_IPS constant
+     * @return list<string>
+     */
+    public static function trustAllProxyIps(?array $entries = null): array
+    {
+        $found = [];
+        foreach ($entries ?? self::proxyIps() as $entry) {
+            if (is_string($entry) && (self::parseProxy($entry)[1] ?? null) === 0) {
+                $found[] = $entry;
+            }
+        }
+        return $found;
+    }
+
+    /**
+     * Why PROXY_IPS is unusable as a whole: it is defined but not an array, so no proxy is
+     * trusted. Null when it is an array or not defined. Health checks report it.
+     */
+    public static function proxyIpsError(): ?string
+    {
+        if (!defined('PROXY_IPS') || is_array(PROXY_IPS)) {
+            return null;
+        }
+        return 'PROXY_IPS must be an array, ' . get_debug_type(PROXY_IPS) . ' given; no proxy is trusted';
+    }
+
+    /** @return array<mixed> */
+    private static function proxyIps(): array
+    {
+        return defined('PROXY_IPS') && is_array(PROXY_IPS) ? PROXY_IPS : [];
+    }
+
+    /**
      * Whether a valid IP matches an entry of PROXY_IPS: an exact IPv4/IPv6 address or a CIDR range
      * ("173.245.48.0/20", "2400:cb00::/32"). Entries that are neither are ignored.
      *
@@ -149,22 +204,14 @@ final class Request
     {
         $ipBin = (string) inet_pton($ip);
         foreach ($trusted as $entry) {
-            if (!is_string($entry)) {
+            $proxy = self::parseProxy($entry);
+            if ($proxy === null) {
                 continue;
             }
-            [$net, $bits] = array_pad(explode('/', trim($entry), 2), 2, null);
-            if (!filter_var($net, FILTER_VALIDATE_IP)) {
-                continue;
-            }
-            $netBin = (string) inet_pton($net);
-            $max = strlen($netBin) * 8;
-            if ($bits !== null && (!ctype_digit($bits) || (int) $bits > $max)) {
-                continue;
-            }
+            [$netBin, $bits] = $proxy;
             if (strlen($ipBin) !== strlen($netBin)) {
                 continue;
             }
-            $bits = $bits === null ? $max : (int) $bits;
             $bytes = intdiv($bits, 8);
             if (substr($ipBin, 0, $bytes) !== substr($netBin, 0, $bytes)) {
                 continue;
@@ -179,6 +226,32 @@ final class Request
             }
         }
         return false;
+    }
+
+    /**
+     * A PROXY_IPS entry as [packed network address, prefix length], or null when it is neither an
+     * IP address nor a CIDR range.
+     *
+     * @return array{0: string, 1: int}|null
+     */
+    private static function parseProxy(mixed $entry): ?array
+    {
+        if (!is_string($entry)) {
+            return null;
+        }
+        [$net, $bits] = array_pad(explode('/', trim($entry), 2), 2, null);
+        if (!filter_var($net, FILTER_VALIDATE_IP)) {
+            return null;
+        }
+        $netBin = (string) inet_pton($net);
+        $max = strlen($netBin) * 8;
+        if ($bits === null) {
+            return [$netBin, $max];
+        }
+        if (!ctype_digit($bits) || (int) $bits > $max) {
+            return null;
+        }
+        return [$netBin, (int) $bits];
     }
 
     private static function readRawBody(string $method): ?string

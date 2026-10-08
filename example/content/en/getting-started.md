@@ -79,15 +79,24 @@ php scripts/health.php
   "debug": false,
   "dev_mode": false,
   "logs_writable": true,
+  "cache_driver": "file",
+  "rate_limit_store": "file",
+  "rate_limit_path": "/path/to/site/storage/cache",
+  "rate_limit_writable": true,
+  "proxy_ips_error": null,
+  "proxy_ips_invalid": [],
+  "proxy_ips_trust_all": [],
   "traceloom": true,
   "multilingual": false,
   "cache_enabled": true,
   "captcha_enabled": false,
+  "captcha_missing_keys": [],
   "alertloop_enabled": false
 }
 ```
 
-If `ok` is false, the usual cause is that `storage/` is not writable.
+If `ok` is false (exit code 1), the usual cause is that `storage/` is not writable. What each field
+means and how to fix it: [Deployment](/docs/deployment), "What `health.php` checks".
 
 ## Working on the frontend (optional)
 

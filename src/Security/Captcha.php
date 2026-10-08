@@ -25,9 +25,27 @@ final class Captcha
     /** True when the captcha is switched on and both keys are set. */
     public static function enabled(): bool
     {
-        return (bool) Config::get('app.captcha.enabled', false)
-            && Config::get('app.captcha.site_key', '') !== ''
-            && Config::get('app.captcha.secret_key', '') !== '';
+        return (bool) Config::get('app.captcha.enabled', false) && self::missingKeys() === [];
+    }
+
+    /**
+     * Keys the switched-on captcha lacks ('site_key', 'secret_key'); empty when both are set or the
+     * captcha is off. Non-empty means verify() reports `misconfigured`.
+     *
+     * @return list<string>
+     */
+    public static function missingKeys(): array
+    {
+        if (!Config::get('app.captcha.enabled', false)) {
+            return [];
+        }
+        $missing = [];
+        foreach (['site_key', 'secret_key'] as $key) {
+            if ((string) Config::get('app.captcha.' . $key, '') === '') {
+                $missing[] = $key;
+            }
+        }
+        return $missing;
     }
 
     public static function siteKey(): string
@@ -51,9 +69,10 @@ final class Captcha
         ];
 
         if (!self::enabled()) {
-            if (Config::get('app.captcha.enabled', false)) {
+            $missing = self::missingKeys();
+            if ($missing !== []) {
                 $debug = (bool) Config::env('DEBUG', false);
-                self::reportMisconfigured($debug);
+                self::reportMisconfigured($missing, $debug);
                 if (!$debug) {
                     $result['errorCodes'] = ['misconfigured'];
                     return $result;
@@ -99,15 +118,13 @@ final class Captcha
         return $result;
     }
 
-    /** Trace event and error-log line always; the alert only when the form is actually rejected. */
-    private static function reportMisconfigured(bool $debug): void
+    /**
+     * Trace event and error-log line always; the alert only when the form is actually rejected.
+     *
+     * @param list<string> $missing
+     */
+    private static function reportMisconfigured(array $missing, bool $debug): void
     {
-        $missing = [];
-        foreach (['site_key', 'secret_key'] as $key) {
-            if (Config::get('app.captcha.' . $key, '') === '') {
-                $missing[] = $key;
-            }
-        }
         Trace::event('captcha.misconfigured', ['missing' => $missing]);
         ErrorHandler::log(
             'captcha',

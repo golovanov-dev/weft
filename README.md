@@ -144,6 +144,7 @@ Everything optional is a flag:
 ```
 
 The captcha needs both keys: enabled without them, it rejects every form submission unless `DEBUG` is on.
+`php scripts/health.php` lists the missing keys.
 
 ## Documentation
 

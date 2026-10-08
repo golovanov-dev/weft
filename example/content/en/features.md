@@ -139,10 +139,11 @@ if (!$result['ok']) { /* reject */ }
 ```
 
 Rate-limit counters live in Redis when `app.cache.driver` is `redis` (in files if Redis is
-unreachable), otherwise in files under `app.rate_limit.path`, which defaults to `app.cache.path` —
-whether caching is enabled or not. A window starts at the first hit and later hits never extend it.
+unreachable), otherwise in files under `app.rate_limit.path` (absolute, or relative to the site
+root `APP_ROOT`), which defaults to `app.cache.path` — whether caching is enabled or not. A window starts at the first hit and later hits never extend it.
 If a counter cannot be written, the limiter **fails open**: the request is allowed and the failure
-goes to the error log, so a broken store never locks users out.
+goes to the error log, so a broken store never locks users out. `php scripts/health.php` shows
+where counters go (`rate_limit_store`, `rate_limit_path`) and fails when they cannot be written.
 
 Limits count per client IP, taken from `REMOTE_ADDR`. On shared hosting and with nginx + php-fpm on
 one machine that is usually the visitor, and `PROXY_IPS` stays empty. Behind a CDN, load balancer or
@@ -150,7 +151,7 @@ another server proxying to PHP it is the proxy's address, so every visitor share
 example's contact form then takes one submission per 5 seconds for the whole site. List the proxies
 in the `PROXY_IPS` constant (`config/config.php`) as IP addresses or CIDR ranges
 (`'173.245.48.0/20'`, `'2400:cb00::/32'`); a host name such as `localhost` or a Docker service name
-is ignored. For a request from one of them, the client IP is the rightmost `X-Forwarded-For` entry
+is ignored, and `php scripts/health.php` lists it under `proxy_ips_invalid`. For a request from one of them, the client IP is the rightmost `X-Forwarded-For` entry
 that is not in `PROXY_IPS`; entries further left are set by the client and ignored. No other header
 is read: a proxy that passes the address only in `X-Real-IP` or `X-Client-Ip`, or an entry that is
 not an IP, leaves the proxy's address in place. To see which address Weft took, look at `client_ip`
@@ -163,7 +164,8 @@ flag follows `RECAPTCHA_SECRETKEY`. While the flag is off, `verify()` returns a 
 missing, `verify()` records a `captcha.misconfigured` trace event and a line in the error log
 (`storage/logs/errors/`), then: with `DEBUG` on it passes, so the form works locally; with `DEBUG`
 off it fails with the error code `misconfigured` and sends a critical alert (category `security`),
-so in production every submission is rejected until both keys are set.
+so in production every submission is rejected until both keys are set. `php scripts/health.php`
+lists the missing keys under `captcha_missing_keys` and, with `DEBUG` off, fails.
 
 The usual order in an endpoint: **honeypot → CSRF → rate limit → validation → captcha → service.**
 See `api/contact.php` in this example for the complete flow.

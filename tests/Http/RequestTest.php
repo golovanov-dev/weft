@@ -7,6 +7,7 @@ namespace Golovanov\Weft\Tests\Http;
 use Golovanov\Weft\Http\Request;
 use Golovanov\Weft\Tests\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
 final class RequestTest extends TestCase
 {
@@ -121,6 +122,36 @@ final class RequestTest extends TestCase
                 '198.51.100.1',
             ],
         ];
+    }
+
+    public function testInvalidProxyIpsListsEntriesThatAreNeitherAnAddressNorARange(): void
+    {
+        $this->assertSame(
+            ['localhost', 42, '173.245.48.0/99', '173.245.48.0/'],
+            Request::invalidProxyIps(['localhost', '203.0.113.10', 42, '173.245.48.0/99', '2400:cb00::/32', '173.245.48.0/']),
+        );
+        // PROXY_IPS is not defined in tests.
+        $this->assertSame([], Request::invalidProxyIps());
+    }
+
+    public function testTrustAllProxyIpsListsEntriesWithPrefixZero(): void
+    {
+        $this->assertSame(
+            ['0.0.0.0/0', ' ::/0 ', '10.0.0.0/00'],
+            Request::trustAllProxyIps(['0.0.0.0/0', '10.0.0.0/8', ' ::/0 ', '127.0.0.1', '10.0.0.0/00', 'x/0', 0]),
+        );
+        // PROXY_IPS is not defined in tests.
+        $this->assertSame([], Request::trustAllProxyIps());
+        $this->assertNull(Request::proxyIpsError());
+    }
+
+    #[RunInSeparateProcess]
+    public function testProxyIpsErrorWhenTheConstantIsNotAnArray(): void
+    {
+        define('PROXY_IPS', '10.0.0.1');
+
+        $this->assertSame('PROXY_IPS must be an array, string given; no proxy is trusted', Request::proxyIpsError());
+        $this->assertSame([], Request::invalidProxyIps());
     }
 
     public function testHeaderLookupIsCaseInsensitiveWithDefault(): void

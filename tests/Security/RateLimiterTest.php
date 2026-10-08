@@ -8,6 +8,8 @@ use Golovanov\Weft\Cache\RedisStore;
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Security\RateLimiter;
 use Golovanov\Weft\Tests\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
 final class RateLimiterTest extends TestCase
 {
@@ -75,6 +77,109 @@ final class RateLimiterTest extends TestCase
 
         $this->assertTrue(RateLimiter::allow('form', 1, 60));
         $this->assertTrue(RateLimiter::allow('form', 1, 60));
+    }
+
+    public function testStoreStatusReportsTheCounterDirectory(): void
+    {
+        $this->assertSame(
+            ['store' => 'file', 'path' => $this->dir, 'writable' => true],
+            RateLimiter::storeStatus(),
+        );
+    }
+
+    public function testStoreStatusReportsAnUnwritableCounterDirectory(): void
+    {
+        $notADir = $this->dir . '/file';
+        file_put_contents($notADir, '');
+        Config::set('app.rate_limit.path', $notADir);
+
+        $this->assertSame(
+            ['store' => 'file', 'path' => $notADir, 'writable' => false],
+            RateLimiter::storeStatus(),
+        );
+    }
+
+    public function testRelativeCounterPathIsResolvedFromAppRoot(): void
+    {
+        $relative = 'storage/ratelimit-' . bin2hex(random_bytes(4));
+        Config::set('app.rate_limit.path', $relative);
+
+        try {
+            $this->assertSame(
+                ['store' => 'file', 'path' => APP_ROOT . '/' . $relative, 'writable' => true],
+                RateLimiter::storeStatus(),
+            );
+            $this->assertTrue(RateLimiter::allow('rel', 1, 60));
+            $this->assertCount(1, glob(APP_ROOT . '/' . $relative . '/*.cache') ?: []);
+        } finally {
+            $this->removeDir(APP_ROOT . '/' . $relative);
+        }
+    }
+
+    #[RunInSeparateProcess]
+    public function testStoreStatusFallsBackToFilesWhenRedisIsUnavailable(): void
+    {
+        // Nothing listens on port 1; without ext-redis the store fails even earlier.
+        define('REDIS_PORT', 1);
+        Config::set('app.cache.driver', 'redis');
+
+        $this->assertSame(
+            ['store' => 'file', 'path' => $this->dir, 'writable' => true],
+            RateLimiter::storeStatus(),
+        );
+    }
+
+    /**
+     * @return array<string, array{mixed, bool}>
+     */
+    public static function redisProbeResults(): array
+    {
+        return [
+            'write accepted' => [1, true],
+            'error reply (read-only replica, OOM, NOAUTH)' => [false, false],
+            'exception' => [new \RedisException('READONLY'), false],
+        ];
+    }
+
+    #[DataProvider('redisProbeResults')]
+    public function testStoreStatusProbesRedisWithARealWrite(mixed $evalResult, bool $writable): void
+    {
+        if (!extension_loaded('redis')) {
+            $this->markTestSkipped('ext-redis is not installed');
+        }
+
+        // No Redis server in tests: the client is replaced, the store is built without connecting.
+        $redis = new class extends \Redis {
+            public mixed $evalResult = null;
+            /** @var list<string> */
+            public array $written = [];
+            /** @var list<string> */
+            public array $deleted = [];
+
+            public function eval(string $script, array $args = [], int $num_keys = 0): mixed
+            {
+                $this->written[] = $args[0] . ' ttl ' . $args[1];
+                if ($this->evalResult instanceof \Throwable) {
+                    throw $this->evalResult;
+                }
+                return $this->evalResult;
+            }
+
+            public function del(array|string $key, string ...$other_keys): \Redis|int|false
+            {
+                $this->deleted[] = (string) $key;
+                return 1;
+            }
+        };
+        $redis->evalResult = $evalResult;
+        $store = (new \ReflectionClass(RedisStore::class))->newInstanceWithoutConstructor();
+        (new \ReflectionProperty(RedisStore::class, 'redis'))->setValue($store, $redis);
+        (new \ReflectionProperty(RedisStore::class, 'prefix'))->setValue($store, 'site:');
+        (new \ReflectionProperty(RateLimiter::class, 'store'))->setValue(null, $store);
+
+        $this->assertSame(['store' => 'redis', 'path' => null, 'writable' => $writable], RateLimiter::storeStatus());
+        $this->assertSame(['site:health:probe ttl 10'], $redis->written);
+        $this->assertSame($evalResult instanceof \Throwable ? [] : ['site:health:probe'], $redis->deleted);
     }
 
     public function testRedisStoreCountsWithItsPrefixAndTheWindow(): void

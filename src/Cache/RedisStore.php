@@ -22,11 +22,12 @@ final class RedisStore implements Store
     ) {
         $this->redis = new Redis();
         $this->redis->connect($host, $port, 2.0);
-        if ($password !== '') {
-            $this->redis->auth($password);
+        // phpredis returns false (no exception) on a rejected password or database number.
+        if ($password !== '' && $this->redis->auth($password) !== true) {
+            throw new \RuntimeException('Redis AUTH failed: ' . ($this->redis->getLastError() ?? 'rejected'));
         }
-        if ($database !== 0) {
-            $this->redis->select($database);
+        if ($database !== 0 && $this->redis->select($database) !== true) {
+            throw new \RuntimeException('Redis SELECT ' . $database . ' failed: ' . ($this->redis->getLastError() ?? 'rejected'));
         }
     }
 

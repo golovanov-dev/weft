@@ -146,7 +146,7 @@ and without it is valid.
 ```php
 'vite'       => ['entry' => 'src/main.js', 'dev_server' => 'http://localhost:5173'],
 'cache'      => ['enabled' => true, 'driver' => 'file', 'path' => '…/storage/cache', 'prefix' => 'weft:'],  // on in this demo, see below; prefix applies to redis only
-'rate_limit' => ['max' => 20, 'window' => 60, 'path' => '…'],  // per client IP per bucket; path defaults to cache.path
+'rate_limit' => ['max' => 20, 'window' => 60, 'path' => '…'],  // per client IP per bucket; path: absolute or relative to APP_ROOT, defaults to cache.path
 'captcha'    => ['enabled' => …, 'site_key' => …, 'secret_key' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],
 'alertloop'  => ['enabled' => …, 'base_url' => …, 'api_key' => …, 'source' => 'my-site', 'timeout' => 4],
 'trace'      => ['log_body' => true, 'sensitive_keys' => [], 'retention_days' => 30],    // see below
@@ -168,6 +168,10 @@ Note how feature flags derive from the environment, so there is one source of tr
     'secret_key' => defined('RECAPTCHA_SECRETKEY') ? RECAPTCHA_SECRETKEY : '',
 ],
 ```
+
+So the keys `php scripts/health.php` names under `captcha_missing_keys` (`site_key`, `secret_key`)
+are set as `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` in `config/config.php`. To disable the
+captcha in this example, set `RECAPTCHA_SECRETKEY` to `''`.
 
 ### Trace
 

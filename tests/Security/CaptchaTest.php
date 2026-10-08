@@ -50,6 +50,20 @@ final class CaptchaTest extends TestCase
         $this->assertSame('', self::errorLogSince($logOffset));
     }
 
+    public function testMissingKeysAreReportedOnlyWhileTheCaptchaIsOn(): void
+    {
+        Config::set('app.captcha', ['enabled' => false, 'site_key' => '', 'secret_key' => '']);
+        $this->assertSame([], Captcha::missingKeys());
+
+        Config::set('app.captcha', ['enabled' => true, 'site_key' => 'site', 'secret_key' => '']);
+        $this->assertSame(['secret_key'], Captcha::missingKeys());
+        $this->assertFalse(Captcha::enabled());
+
+        Config::set('app.captcha', ['enabled' => true, 'site_key' => 'site', 'secret_key' => 'secret']);
+        $this->assertSame([], Captcha::missingKeys());
+        $this->assertTrue(Captcha::enabled());
+    }
+
     public function testEnabledWithoutAKeyFailsAndAlerts(): void
     {
         $traceId = Trace::boot();
