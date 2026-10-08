@@ -83,3 +83,6 @@ enough for the engine — but it may be a great example or a documentation page.
 Include the PHP version, the relevant part of `config/config.php` (**without secrets**), and the
 `X-Trace-Id` from the response if the problem is a runtime error — it points straight at the
 request timeline in `storage/logs/requests/`.
+
+Security vulnerabilities are the exception: report them privately, as described in
+[SECURITY.md](SECURITY.md), not as a public issue.

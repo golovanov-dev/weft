@@ -152,6 +152,10 @@ GitHub. Start with [Getting Started](example/content/en/getting-started.md).
 
 Weft follows semantic versioning. Pre-1.0 the API may still change between minor versions.
 
+## Security
+
+Please report vulnerabilities privately — see [SECURITY.md](SECURITY.md).
+
 ## License
 
 MIT © Roman Golovanov. See [LICENSE](LICENSE).
