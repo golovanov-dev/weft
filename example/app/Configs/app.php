@@ -71,6 +71,8 @@ return [
     'rate_limit' => [
         'max' => 20,
         'window' => 60,
+        // Counters are files in app.cache.path (Redis with the redis driver), even with caching off.
+        // 'path' => dirname(__DIR__, 2) . '/storage/ratelimit',
     ],
 
     'captcha' => [

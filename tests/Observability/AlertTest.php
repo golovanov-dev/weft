@@ -58,27 +58,6 @@ final class AlertTest extends TestCase
         (new \ReflectionClass(Alert::class))->getProperty('transport')->setValue(null, $transport);
     }
 
-    /**
-     * Events recorded on the current trace, read back from the JSONL timeline.
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function traceEvents(string $traceId): array
-    {
-        Trace::flush();
-        $dir = sys_get_temp_dir() . '/weft-logs/requests';
-        $events = [];
-        foreach (glob($dir . '/*.jsonl') ?: [] as $file) {
-            foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
-                $record = json_decode($line, true);
-                if (is_array($record) && ($record['trace_id'] ?? $record['id'] ?? null) === $traceId) {
-                    $events[] = $record;
-                }
-            }
-        }
-        return $events;
-    }
-
     /** @param list<array<string, mixed>> $events */
     private function failureEvents(array $events): array
     {

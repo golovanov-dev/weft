@@ -31,19 +31,40 @@ cp config/config.example.php config/config.php
 # 4. Frontend (here or in CI)
 npm ci && npm run build
 
-# 5. Writable runtime
+# 5. Writable runtime, owned by the user PHP runs as (www-data below; see "Who writes storage/")
 mkdir -p storage/logs storage/cache
-chmod -R 770 storage
+sudo chown -R www-data:www-data storage
+sudo chmod -R 770 storage
 
 # 6. Optional: a static sitemap for a CDN
 php scripts/sitemap.php
 
-# 7. Verify
-php scripts/health.php
+# 7. Verify, as the same user PHP runs as
+sudo -u www-data php scripts/health.php
 ```
+
+Run all of this on the server, in the site root (the directory holding `bootstrap.php`), as the
+user who deploys the code; steps 5 and 7 need `sudo`.
 
 > **Non-negotiable in production:** `DEBUG=false` and `DEV_MODE=false`. Otherwise assets are fetched
 > from a Vite dev server that is not running, and errors are shown to visitors.
+
+### Who writes `storage/`
+
+PHP writes logs, traces, the file cache and rate-limit counters under `storage/` (counters live in
+`storage/cache` even with caching off, unless `app.rate_limit.path` points elsewhere). The user PHP
+runs as must be able to write there. `chmod` alone does not give that: with `770`, a directory owned
+by the deploy user is closed to `www-data` unless `www-data` is its group. Make it the owner, as
+above, or keep the deploy user as owner and hand over the group: `sudo chgrp -R www-data storage`.
+Substitute your PHP user for `www-data`: it is the `user` of the PHP-FPM pool (for example
+`/etc/php/8.4/fpm/pool.d/www.conf`) or the user Apache runs as.
+
+Run `health.php` as that same user. From the deploy user's shell it checks the deploy user's
+permissions and can report `ok: true` for a `storage/` that PHP cannot write.
+
+If PHP cannot write `storage/`, rate limits stop limiting: the limiter fails open so a broken disk
+never locks visitors out, and the line it writes about that goes to `storage/logs/errors/`, which is
+not writable either — nothing records it.
 
 ## Document root is `public/`
 
@@ -125,11 +146,16 @@ them.
 - [ ] document root points at `public/`
 - [ ] `composer install --no-dev --optimize-autoloader` done
 - [ ] `npm run build` done, `public/dist/` present
-- [ ] `storage/` writable by the web server
+- [ ] `storage/` writable by the user PHP runs as (logs, cache, rate-limit counters)
+- [ ] `PROXY_IPS` lists your reverse proxy / CDN addresses, if you have one; otherwise all visitors
+  share one rate limit
 - [ ] HTTPS on; consider `app.security.hsts`
-- [ ] keys set for whichever of captcha / alerts / mail you use
+- [ ] keys set for whichever of captcha / alerts / mail you use; a captcha enabled with a key missing
+  passes forms while `DEBUG` is on and rejects every submission with it off — look for
+  `Captcha is enabled without` in `storage/logs/errors/` and for the `captcha.misconfigured` event
+  in the traces
 - [ ] `app.captcha.allowed_hosts` lists your real domain, if the captcha is on
-- [ ] `php scripts/health.php` → `ok: true`
+- [ ] `sudo -u www-data php scripts/health.php` (your PHP user) → `ok: true`
 
 That is the whole engine. If something is missing from these docs, please
 [open an issue](https://github.com/golovanov-dev/weft/issues).

@@ -50,6 +50,25 @@ final class RedisStore implements Store
         }
     }
 
+    /**
+     * Add one to a fixed-window counter and return the new count, or null when Redis reports an
+     * error. INCR and the EXPIRE on the first hit run as one Lua script, so the window is never
+     * extended and a key never lives without TTL.
+     *
+     * @internal Used by RateLimiter; not part of the Store contract.
+     */
+    public function increment(string $key, int $ttl): ?int
+    {
+        $count = $this->redis->eval(
+            "local c = redis.call('INCR', KEYS[1]) "
+            . "if c == 1 and tonumber(ARGV[1]) > 0 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end "
+            . 'return c',
+            [$this->prefix . $key, $ttl],
+            1,
+        );
+        return is_int($count) ? $count : null;
+    }
+
     public function has(string $key): bool
     {
         return (bool) $this->redis->exists($this->prefix . $key);

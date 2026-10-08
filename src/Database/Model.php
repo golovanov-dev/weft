@@ -7,6 +7,10 @@ namespace Golovanov\Weft\Database;
 /**
  * Minimal active-record-ish base model. Subclasses set $table (and optionally $primaryKey).
  * Intentionally small — enough for simple sites, not an ORM.
+ *
+ * Array keys passed to create(), update() and the condition methods become column names in the
+ * SQL, so each must match [A-Za-z_][A-Za-z0-9_]*; anything else throws InvalidArgumentException
+ * before a query runs. Values are always bound as parameters.
  */
 abstract class Model
 {
@@ -56,7 +60,7 @@ abstract class Model
     /** @param array<string, mixed> $data */
     public function create(array $data): ?string
     {
-        $columns = array_keys($data);
+        $columns = self::columns($data);
         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
         $sql = "INSERT INTO {$this->table} (" . implode(', ', $columns) . ") VALUES ($placeholders)";
         $this->db()->execute($sql, array_values($data));
@@ -66,7 +70,7 @@ abstract class Model
     /** @param array<string, mixed> $data */
     public function update(int|string $id, array $data): bool
     {
-        $set = implode(', ', array_map(static fn(string $c): string => "$c = ?", array_keys($data)));
+        $set = implode(', ', array_map(static fn(string $c): string => "$c = ?", self::columns($data)));
         $params = array_values($data);
         $params[] = $id;
         return $this->db()->execute(
@@ -92,12 +96,26 @@ abstract class Model
         if ($conditions === []) {
             return ['', []];
         }
-        $clauses = [];
-        $params = [];
-        foreach ($conditions as $column => $value) {
-            $clauses[] = "$column = ?";
-            $params[] = $value;
+        $clauses = array_map(static fn(string $c): string => "$c = ?", self::columns($conditions));
+        return ['WHERE ' . implode(' AND ', $clauses), array_values($conditions)];
+    }
+
+    /**
+     * The keys of $data as column names, each checked to be a plain SQL identifier.
+     *
+     * @param array<mixed> $data
+     * @return list<string>
+     */
+    private static function columns(array $data): array
+    {
+        $columns = [];
+        foreach (array_keys($data) as $column) {
+            $column = (string) $column;
+            if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $column) !== 1) {
+                throw new \InvalidArgumentException(sprintf('Invalid column name "%s".', $column));
+            }
+            $columns[] = $column;
         }
-        return ['WHERE ' . implode(' AND ', $clauses), $params];
+        return $columns;
     }
 }

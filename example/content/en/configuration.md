@@ -50,7 +50,7 @@ Integrations:
 
 ```php
 define('RECAPTCHA_SITEKEY', '');    // public key → the frontend
-define('RECAPTCHA_SECRETKEY', '');  // secret key → verification; with the site key, enables the captcha
+define('RECAPTCHA_SECRETKEY', '');  // secret key → verification; setting it enables the captcha (needs the site key too)
 
 define('ALERTLOOP_BASE_URL', '');   // e.g. https://alerts.example.com
 define('ALERTLOOP_API_KEY', '');    // setting it enables alerts
@@ -61,7 +61,8 @@ define('MAIL_FROM', 'noreply@example.com');
 define('AUTH_JWT_KEY', '');         // JWT verification
 define('AUTH_JWT_ISSUER', '');
 
-define('PROXY_IPS', []);            // X-Client-Ip / X-Forwarded-For are trusted only from these
+define('PROXY_IPS', []);            // exact proxy/CDN addresses (no ranges); X-Client-Ip / X-Forwarded-For are trusted
+                                    // only from these. Left empty behind a proxy, all visitors share one rate limit
 define('TRACE_TRUST_INCOMING', false); // reuse an upstream X-Trace-Id / X-Request-Id
 ```
 
@@ -144,7 +145,7 @@ and without it is valid.
 ```php
 'vite'       => ['entry' => 'src/main.js', 'dev_server' => 'http://localhost:5173'],
 'cache'      => ['enabled' => true, 'driver' => 'file', 'path' => '…/storage/cache', 'prefix' => 'weft:'],  // on in this demo, see below; prefix applies to redis only
-'rate_limit' => ['max' => 20, 'window' => 60],       // per client IP per bucket
+'rate_limit' => ['max' => 20, 'window' => 60, 'path' => '…'],  // per client IP per bucket; path defaults to cache.path
 'captcha'    => ['enabled' => …, 'site_key' => …, 'secret_key' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],
 'alertloop'  => ['enabled' => …, 'base_url' => …, 'api_key' => …, 'source' => 'my-site', 'timeout' => 4],
 'trace'      => ['log_body' => true, 'sensitive_keys' => [], 'retention_days' => 30],    // see below

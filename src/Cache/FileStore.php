@@ -47,6 +47,42 @@ final class FileStore implements Store
         @file_put_contents($file, $raw, LOCK_EX);
     }
 
+    /**
+     * Add one to a fixed-window counter and return the new count, or null when the counter file
+     * cannot be opened, locked or written. The expiry is set by the first hit only, so later hits
+     * never extend the window. Read-modify-write runs under an exclusive flock.
+     *
+     * @internal Used by RateLimiter; not part of the Store contract.
+     */
+    public function increment(string $key, int $ttl): ?int
+    {
+        $handle = @fopen($this->path($key), 'c+');
+        if ($handle === false) {
+            return null;
+        }
+        try {
+            if (!flock($handle, LOCK_EX)) {
+                return null;
+            }
+            $now = time();
+            $payload = @unserialize((string) stream_get_contents($handle), ['allowed_classes' => false]);
+            $live = is_array($payload) && is_int($payload['e'] ?? null) && is_int($payload['v'] ?? null)
+                && ($payload['e'] === 0 || $payload['e'] >= $now);
+            $count = $live ? $payload['v'] + 1 : 1;
+            $expiry = $live ? $payload['e'] : ($ttl > 0 ? $now + $ttl : 0);
+
+            $raw = serialize(['e' => $expiry, 'v' => $count]);
+            if (!ftruncate($handle, 0) || !rewind($handle) || fwrite($handle, $raw) !== strlen($raw)) {
+                return null;
+            }
+            fflush($handle);
+            return $count;
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
+    }
+
     public function has(string $key): bool
     {
         return $this->get($key) !== null;

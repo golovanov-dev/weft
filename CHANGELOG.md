@@ -19,6 +19,25 @@ pre-1.0 the API may change between minor versions.
   those with `sensitive_keys`.
 - The query string is parsed into a `query` field and masked by key the same way, whatever
   `log_body` says. The `referer` header is still logged as sent, query string included.
+- `Model` rejects a column name that is not a plain identifier (`[A-Za-z_][A-Za-z0-9_]*`) with
+  `InvalidArgumentException` before any query runs, in `create()`, `update()`, `findBy()`, `where()`
+  and `exists()`. Array keys went into the SQL as-is, so `create($request->body())` was an SQL
+  injection. The check is not an allow-list: any valid column name in the array is still written,
+  so keep passing `create()` and `update()` only the fields you expect. If you pass quoted or
+  qualified names (`` `order` ``, `posts.id`), write that query with `Database` instead.
+- An enabled captcha with the site key or the secret key missing no longer passes every
+  submission. `Captcha::verify()` records a `captcha.misconfigured` trace event and a line in the
+  error log; outside `DEBUG` it also returns `ok => false` with the error code `misconfigured` and
+  sends a critical alert (category `security`, dedupe key `captcha:misconfigured`), with `DEBUG` on
+  it still passes. Set both keys wherever `app.captcha.enabled` is true, or set it to false.
+- `RateLimiter` now limits clients that send no session cookie. `allow()` and `throttle()` no longer
+  use the PHP session: they count in Redis when `app.cache.driver` is `redis`, otherwise in files
+  under the new `app.rate_limit.path` (default `app.cache.path`), whether caching is enabled or
+  not, and no longer use a store set with `Cache::use()`. Each increment is atomic, and a window
+  starts at its first hit instead of being extended by every hit. Make that directory writable
+  by the web server: if a counter cannot be written, the request is allowed and an error is logged.
+  Counters are per client IP, no longer per session: behind a reverse proxy or CDN, list its
+  addresses in `PROXY_IPS` (exact addresses, no ranges), or all visitors share one counter.
 
 ### Added
 
@@ -38,7 +57,7 @@ pre-1.0 the API may change between minor versions.
   `0` to keep them forever. The first request after the upgrade already deletes older files: if you
   need that history, set the key before upgrading.
 - `example/public/index.php` no longer calls `session_start()`; the session starts only when a form
-  needs it (`Csrf`, `RateLimiter`), so visitors who only read pages get no `PHPSESSID` cookie. Those
+  needs a CSRF token (`Csrf`), so visitors who only read pages get no `PHPSESSID` cookie. Those
   pages also lose the no-cache headers PHP sent with the session; if your site relied on them, send
   `Cache-Control` yourself. If your site copied this file, remove the `session_start()` line too,
   with the same effect on headers.

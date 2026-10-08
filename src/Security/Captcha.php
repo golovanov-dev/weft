@@ -6,16 +6,23 @@ namespace Golovanov\Weft\Security;
 
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\HttpClient;
+use Golovanov\Weft\Observability\Alert;
+use Golovanov\Weft\Observability\ErrorHandler;
+use Golovanov\Weft\Observability\Trace;
 
 /**
  * Google reCAPTCHA v3 verification, baked into the engine and toggled by config.
  *
  * When config('app.captcha.enabled') is false, verify() returns a passing result so forms keep
- * working in development without keys. The frontend obtains a token with the site key and posts
+ * working in development without keys. When it is true but the site key or the secret key is
+ * empty, verify() records a `captcha.misconfigured` trace event and a line in the error log
+ * either way; with DEBUG on it then passes, otherwise it fails with `misconfigured` and sends a
+ * security alert (deduplicated by key). The frontend obtains a token with the site key and posts
  * it as `recaptcha_token`; the backend verifies score/action/hostname here.
  */
 final class Captcha
 {
+    /** True when the captcha is switched on and both keys are set. */
     public static function enabled(): bool
     {
         return (bool) Config::get('app.captcha.enabled', false)
@@ -44,6 +51,14 @@ final class Captcha
         ];
 
         if (!self::enabled()) {
+            if (Config::get('app.captcha.enabled', false)) {
+                $debug = (bool) Config::env('DEBUG', false);
+                self::reportMisconfigured($debug);
+                if (!$debug) {
+                    $result['errorCodes'] = ['misconfigured'];
+                    return $result;
+                }
+            }
             $result['ok'] = true;
             $result['skipped'] = true;
             return $result;
@@ -82,5 +97,36 @@ final class Captcha
         $result['ok'] = $result['success'] && $result['hostOk'] && $result['actionOk'] && $result['score'] >= $threshold;
 
         return $result;
+    }
+
+    /** Trace event and error-log line always; the alert only when the form is actually rejected. */
+    private static function reportMisconfigured(bool $debug): void
+    {
+        $missing = [];
+        foreach (['site_key', 'secret_key'] as $key) {
+            if (Config::get('app.captcha.' . $key, '') === '') {
+                $missing[] = $key;
+            }
+        }
+        Trace::event('captcha.misconfigured', ['missing' => $missing]);
+        ErrorHandler::log(
+            'captcha',
+            500,
+            'Captcha is enabled without ' . implode(' and ', $missing) . '; form submissions '
+                . ($debug ? 'pass because DEBUG is on and will be rejected without it' : 'are rejected'),
+            __FILE__,
+            __LINE__,
+        );
+        if ($debug) {
+            return;
+        }
+        Alert::send(
+            'Captcha is enabled without its keys; form submissions are rejected',
+            Alert::CRITICAL,
+            'incident',
+            'captcha:misconfigured',
+            ['missing' => $missing],
+            'security',
+        );
     }
 }

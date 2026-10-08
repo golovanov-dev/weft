@@ -12,6 +12,7 @@ use Golovanov\Weft\I18n\I18n;
 use Golovanov\Weft\I18n\Locale;
 use Golovanov\Weft\Observability\Alert;
 use Golovanov\Weft\Observability\Trace;
+use Golovanov\Weft\Security\RateLimiter;
 use Golovanov\Weft\Seo\Seo;
 use Golovanov\Weft\View\View;
 use PHPUnit\Framework\TestCase as BaseTestCase;
@@ -41,6 +42,7 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(Locale::class, ['current' => null]);
         self::setStatics(I18n::class, ['dict' => [], 'locale' => 'en']);
         self::setStatics(Cache::class, ['store' => null]);
+        self::setStatics(RateLimiter::class, ['store' => null]);
         self::setStatics(View::class, ['shared' => []]);
         self::setStatics(Vite::class, ['manifest' => null]);
         self::setStatics(Alert::class, ['transport' => null, 'reporting' => false]);
@@ -66,6 +68,27 @@ abstract class TestCase extends BaseTestCase
         foreach ($values as $name => $value) {
             $ref->getProperty($name)->setValue(null, $value);
         }
+    }
+
+    /**
+     * Events recorded on the current trace, read back from the JSONL timeline.
+     *
+     * @return list<array<string, mixed>>
+     */
+    protected function traceEvents(string $traceId): array
+    {
+        Trace::flush();
+        $dir = sys_get_temp_dir() . '/weft-logs/requests';
+        $events = [];
+        foreach (glob($dir . '/*.jsonl') ?: [] as $file) {
+            foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+                $record = json_decode($line, true);
+                if (is_array($record) && ($record['trace_id'] ?? $record['id'] ?? null) === $traceId) {
+                    $events[] = $record;
+                }
+            }
+        }
+        return $events;
     }
 
     /** Create a scratch directory unique to the running test. */

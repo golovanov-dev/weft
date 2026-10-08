@@ -77,4 +77,24 @@ final class FileStoreTest extends TestCase
         $this->store->flush();
         $this->assertFalse($this->store->has('b'));
     }
+
+    public function testIncrementCountsWithinTheWindowSetByTheFirstHit(): void
+    {
+        $file = $this->dir . '/' . sha1('hits') . '.cache';
+
+        $this->assertSame(1, $this->store->increment('hits', 60));
+        $expiry = unserialize((string) file_get_contents($file))['e'];
+        $this->assertSame(2, $this->store->increment('hits', 3600));
+
+        $this->assertSame($expiry, unserialize((string) file_get_contents($file))['e']);
+        $this->assertSame(2, $this->store->get('hits'));
+    }
+
+    public function testIncrementStartsANewWindowAfterExpiry(): void
+    {
+        $file = $this->dir . '/' . sha1('hits') . '.cache';
+        file_put_contents($file, serialize(['e' => time() - 10, 'v' => 5]));
+
+        $this->assertSame(1, $this->store->increment('hits', 60));
+    }
 }

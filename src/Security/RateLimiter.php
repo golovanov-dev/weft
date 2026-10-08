@@ -4,21 +4,28 @@ declare(strict_types=1);
 
 namespace Golovanov\Weft\Security;
 
-use Golovanov\Weft\Cache\Cache;
+use Golovanov\Weft\Cache\FileStore;
+use Golovanov\Weft\Cache\RedisStore;
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\RequestContext;
+use Golovanov\Weft\Observability\ErrorHandler;
 
 /**
  * Rate limiting — ON by default (a sensible baseline for every form/API endpoint).
  *
- * Two complementary tools:
- *   - allow(): fixed-window counter keyed by bucket + client IP. Backed by the cache store when
- *     caching is enabled, otherwise by the PHP session. Fails OPEN if no backend is available,
- *     so a missing Redis never locks users out.
+ *   - allow(): fixed-window counter keyed by bucket + client IP.
+ *   - throttle(): at most one request per interval for a bucket + client IP.
  *   - honeypot(): treat a filled hidden field as a bot.
+ *
+ * Counters live in Redis when app.cache.driver is 'redis', otherwise in files under
+ * app.rate_limit.path (default: app.cache.path) — whether or not caching is enabled. Each
+ * increment is atomic and the window starts at the first hit; later hits never extend it. If the
+ * counter cannot be written, the request is allowed (fail-open) and the failure is logged.
  */
 final class RateLimiter
 {
+    private static FileStore|RedisStore|null $store = null;
+
     /**
      * @return bool true if the request is allowed (under the limit)
      */
@@ -30,13 +37,8 @@ final class RateLimiter
             return true;
         }
 
-        $ip = RequestContext::request()?->clientIp ?? ($_SERVER['REMOTE_ADDR'] ?? 'cli');
-        $key = 'ratelimit:' . $bucket . ':' . $ip;
-
-        if (Config::get('app.cache.enabled', false)) {
-            return self::allowViaCache($key, $max, $window);
-        }
-        return self::allowViaSession($bucket . ':' . $ip, $max, $window);
+        $count = self::hit('ratelimit:' . $bucket, $window);
+        return $count === null || $count <= $max;
     }
 
     /**
@@ -45,15 +47,12 @@ final class RateLimiter
      */
     public static function throttle(string $bucket, int $intervalSeconds = 5): bool
     {
-        self::startSession();
-        $ip = RequestContext::request()?->clientIp ?? ($_SERVER['REMOTE_ADDR'] ?? 'cli');
-        $slot = &$_SESSION['weft_throttle'][$bucket . ':' . $ip];
-        $last = isset($slot) ? (int) $slot : 0;
-        if (time() - $last < $intervalSeconds) {
-            return false;
+        if ($intervalSeconds <= 0) {
+            return true;
         }
-        $slot = time();
-        return true;
+
+        $count = self::hit('throttle:' . $bucket, $intervalSeconds);
+        return $count === null || $count <= 1;
     }
 
     /** True when a honeypot field is filled — treat the sender as a bot. */
@@ -62,37 +61,50 @@ final class RateLimiter
         return isset($body[$field]) && trim((string) $body[$field]) !== '';
     }
 
-    private static function allowViaCache(string $key, int $max, int $window): bool
+    /** Count one hit for the current client; null when the counter is unavailable. */
+    private static function hit(string $prefix, int $window): ?int
     {
-        $store = Cache::store();
-        $count = (int) ($store->get($key) ?? 0);
-        if ($count >= $max) {
-            return false;
+        $ip = RequestContext::request()?->clientIp ?? ($_SERVER['REMOTE_ADDR'] ?? 'cli');
+        try {
+            $count = self::store()->increment($prefix . ':' . $ip, $window);
+            $error = 'counter not writable';
+        } catch (\Throwable $e) {
+            $count = null;
+            $error = $e->getMessage();
         }
-        // Reset TTL on the first hit of a window; subsequent hits keep counting within it.
-        $store->set($key, $count + 1, $window);
-        return true;
+        if ($count === null) {
+            ErrorHandler::log('rate_limit', 500, 'Rate limit failed open: ' . $error, __FILE__, __LINE__);
+        }
+        return $count;
     }
 
-    private static function allowViaSession(string $key, int $max, int $window): bool
+    private static function store(): FileStore|RedisStore
     {
-        self::startSession();
-        $now = time();
-        $slot = &$_SESSION['weft_rate'][$key];
-        if (!isset($slot) || !is_array($slot) || ($slot['reset'] ?? 0) < $now) {
-            $slot = ['count' => 0, 'reset' => $now + $window];
+        if (self::$store !== null) {
+            return self::$store;
         }
-        if ($slot['count'] >= $max) {
-            return false;
-        }
-        $slot['count']++;
-        return true;
-    }
 
-    private static function startSession(): void
-    {
-        if (PHP_SAPI !== 'cli' && session_status() !== PHP_SESSION_ACTIVE) {
-            @session_start();
+        if ((string) Config::get('app.cache.driver', 'file') === 'redis') {
+            try {
+                return self::$store = new RedisStore(
+                    host: (string) Config::env('REDIS_HOST', '127.0.0.1'),
+                    port: (int) Config::env('REDIS_PORT', 6379),
+                    password: (string) Config::env('REDIS_PASSWORD', ''),
+                    database: (int) Config::env('REDIS_DB', 0),
+                    prefix: (string) Config::get('app.cache.prefix', 'weft:'),
+                );
+            } catch (\Throwable $e) {
+                ErrorHandler::log('rate_limit', 500, 'Redis unavailable, rate limits fall back to files: ' . $e->getMessage(), __FILE__, __LINE__);
+            }
         }
+
+        $dir = (string) Config::get('app.rate_limit.path', '');
+        if ($dir === '') {
+            $dir = (string) Config::get('app.cache.path', '');
+        }
+        if ($dir === '') {
+            $dir = (string) Config::env('APP_ROOT', sys_get_temp_dir()) . '/storage/cache';
+        }
+        return self::$store = new FileStore($dir);
     }
 }

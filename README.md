@@ -138,9 +138,11 @@ Everything optional is a flag:
 ```php
 'locales'   => ['enabled' => true, 'supported' => ['en', 'ru']],
 'cache'     => ['enabled' => true, 'driver' => 'redis'],
-'captcha'   => ['enabled' => true],
+'captcha'   => ['enabled' => true, 'site_key' => RECAPTCHA_SITEKEY, 'secret_key' => RECAPTCHA_SECRETKEY],
 'alertloop' => ['enabled' => true],
 ```
+
+The captcha needs both keys: enabled without them, it rejects every form submission unless `DEBUG` is on.
 
 ## Documentation
 

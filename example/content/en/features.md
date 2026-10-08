@@ -136,9 +136,25 @@ $result = Captcha::verify($body['recaptcha_token'] ?? '', 'contact');
 if (!$result['ok']) { /* reject */ }
 ```
 
-The rate limiter uses the cache when enabled, otherwise the session, and **fails open** — a missing
-backend never locks users out. The captcha is enabled by setting both `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY`; while it is
-off, `verify()` returns a pass (`skipped => true`) so forms work in development without keys.
+Rate-limit counters live in Redis when `app.cache.driver` is `redis` (in files if Redis is
+unreachable), otherwise in files under `app.rate_limit.path`, which defaults to `app.cache.path` —
+whether caching is enabled or not. A window starts at the first hit and later hits never extend it.
+If a counter cannot be written, the limiter **fails open**: the request is allowed and the failure
+goes to the error log, so a broken store never locks users out.
+
+Limits count per client IP, taken from `REMOTE_ADDR`. Behind a reverse proxy, load balancer or CDN
+that address is the proxy's, so every visitor shares one counter: the example's contact form then
+takes one submission per 5 seconds for the whole site. List the proxy addresses in the `PROXY_IPS`
+constant (`config/config.php`); requests from them are then counted by `X-Client-Ip` /
+`X-Forwarded-For`. Each entry is an exact address, not a range.
+
+The captcha is on when `app.captcha.enabled` is true and both keys are set; in this example the
+flag follows `RECAPTCHA_SECRETKEY`. While the flag is off, `verify()` returns a pass
+(`skipped => true`), so forms work in development without keys. With the flag on and a key
+missing, `verify()` records a `captcha.misconfigured` trace event and a line in the error log
+(`storage/logs/errors/`), then: with `DEBUG` on it passes, so the form works locally; with `DEBUG`
+off it fails with the error code `misconfigured` and sends a critical alert (category `security`),
+so in production every submission is rejected until both keys are set.
 
 The usual order in an endpoint: **honeypot → CSRF → rate limit → validation → captcha → service.**
 See `api/contact.php` in this example for the complete flow.
@@ -184,6 +200,11 @@ $db->transaction(fn($db) => /* … */);
 A thin PDO wrapper, one connection per process, with the DB session set to the application timezone
 so `NOW()` matches `Clock`. `Golovanov\Weft\Database\Model` adds simple CRUD (`find`, `findBy`,
 `where`, `create`, `update`, `delete`). It is not an ORM, and that is the point.
+
+Array keys become column names, so each must be a plain identifier (`[A-Za-z_][A-Za-z0-9_]*`);
+anything else throws `InvalidArgumentException` before a query runs. Values are always bound.
+A valid key is still written, so pass `create()` only the fields you expect, not the whole
+request body.
 
 ## JWT
 

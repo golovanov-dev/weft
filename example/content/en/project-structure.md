@@ -65,7 +65,7 @@ come from the parent directory name (`pages/docs/[slug].php` → `lang/<locale>/
 
 **`public/index.php`** — the web. It sets error handling and the session cookie parameters,
 requires `bootstrap.php` and calls `Golovanov\Weft\Kernel::handle()`. That is all it does. The
-session itself starts only when a form needs it (`Csrf`, `RateLimiter`), so a visitor who only
+session itself starts only when a form needs a CSRF token (`Csrf`), so a visitor who only
 reads pages gets no `PHPSESSID` cookie.
 
 **`scripts/*.php`** — the CLI. Each requires `bootstrap.php` and does its job.
