@@ -107,7 +107,7 @@ Headers::send();
 ### Observability
 
 ```php
-Trace::event($name, $data);  Trace::id();  Trace::isActive();
+Trace::event($name, $data);  Trace::id();  Trace::isActive();   // LOGS_PATH/requests on the web, LOGS_PATH/cli in scripts
 Alert::send($msg, $severity, $type, $dedupeKey, $context, $category);  Alert::critical($msg, $ctx);  Alert::notifier();  Alert::missingKeys();
 ErrorHandler::log($type, $code, $msg, $file, $line);  ErrorHandler::debug();
 ```

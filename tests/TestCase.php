@@ -85,7 +85,7 @@ abstract class TestCase extends BaseTestCase
     protected function traceEvents(string $traceId): array
     {
         Trace::flush();
-        $dir = sys_get_temp_dir() . '/weft-logs/requests';
+        $dir = Trace::directory();
         $events = [];
         foreach (glob($dir . '/*.jsonl') ?: [] as $file) {
             foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {

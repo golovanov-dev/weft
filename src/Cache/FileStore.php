@@ -7,7 +7,7 @@ namespace Golovanov\Weft\Cache;
 /**
  * Filesystem cache. Each entry is a PHP file storing an expiry timestamp and a serialized value.
  * No external dependency — the default store for simple sites. The directory is created on the
- * first write; directories and files get whatever mode the process umask gives.
+ * first write; Weft sets no permissions on it or on the files in it.
  */
 final class FileStore implements Store
 {

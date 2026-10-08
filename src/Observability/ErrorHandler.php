@@ -137,7 +137,7 @@ final class ErrorHandler
         }
     }
 
-    /** Append a line to today's error log; the directory and file get whatever mode the umask gives. */
+    /** Append a line to today's error log. */
     public static function log(string $type, int $code, string $message, string $file, int $line): void
     {
         $dir = self::directory();
@@ -160,17 +160,19 @@ final class ErrorHandler
     }
 
     /**
-     * What PHP cannot write among the logs, for health checks: the error log and trace directories
-     * and today's files in them; null when everything is writable. A missing directory counts as
-     * writable when PHP can create it. Only checks: creates nothing and changes nothing.
+     * What PHP cannot write among the logs, for health checks: the error log directory and the web's
+     * trace directory (LOGS_PATH/requests, whatever SAPI calls this), today's files in them and
+     * traceloom's lock file in requests/; null when everything is writable. A missing directory
+     * counts as writable when PHP can create it. Only checks: creates nothing and changes nothing.
      */
     public static function logsError(): ?string
     {
-        $traces = Trace::directory();
+        $traces = Trace::directory('fpm-fcgi');
         $problems = [
             ...self::unwritable(self::directory(), [Clock::date('Y-m-d') . '.log']),
-            // traceloom names trace files by the UTC date (Y-m-d.jsonl, Y-m-d-2.jsonl, ...) and
-            // takes its lock file on rotation.
+            // traceloom names trace files by the UTC date: Y-m-d.jsonl, Y-m-d-2.jsonl, ... Without
+            // its lock file it writes nothing. The lock may be left by a version where scripts wrote
+            // to requests/ too, owned by their user.
             ...self::unwritable($traces, [
                 ...array_map('basename', glob($traces . '/' . gmdate('Y-m-d') . '*.jsonl') ?: []),
                 '.traceloom.lock',

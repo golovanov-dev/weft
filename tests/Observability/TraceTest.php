@@ -44,7 +44,7 @@ final class TraceTest extends TestCase
         Trace::httpStart($request);
         Trace::flush();
 
-        foreach (glob(sys_get_temp_dir() . '/weft-logs/requests/*.jsonl') ?: [] as $file) {
+        foreach (glob(Trace::directory() . '/*.jsonl') ?: [] as $file) {
             foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
                 $record = json_decode($line, true);
                 if (is_array($record) && ($record['trace_id'] ?? null) === $id && ($record['event'] ?? null) === 'request_start') {
@@ -287,27 +287,19 @@ final class TraceTest extends TestCase
         $this->assertSame($expected, $this->configuration()->retentionDays);
     }
 
-    /** traceloom would chmod them to 0750 and 0640; Weft leaves the modes to the umask. */
-    public function testTraceDirectoryAndFilesGetTheModesTheUmaskGives(): void
+    /** A console script and the web never write to one trace directory. */
+    public function testScriptTracesGoToCliAndWebTracesToRequests(): void
     {
-        if (PHP_OS_FAMILY === 'Windows') {
-            $this->markTestSkipped('POSIX file modes');
-        }
-        $dir = Trace::directory();
-        @unlink($dir . '/.traceloom.lock');
-        $this->removeDir($dir);
+        $logs = sys_get_temp_dir() . '/weft-logs';
+        $this->assertSame($logs . '/requests', Trace::directory('cli-server'));
+        $this->assertSame($logs . '/cli', Trace::directory());
 
-        $previous = umask(0002);
-        try {
-            Trace::boot();
-            Trace::event('mode_check');
-            Trace::flush();
-        } finally {
-            umask($previous);
-        }
+        $id = Trace::boot();
+        Trace::event('script_step');
+        Trace::flush();
 
-        clearstatcache();
-        $this->assertSame('775', decoct(fileperms($dir) & 07777));
-        $this->assertSame('664', decoct(fileperms($dir . '/' . gmdate('Y-m-d') . '.jsonl') & 0777));
+        $file = $logs . '/cli/' . gmdate('Y-m-d') . '.jsonl';
+        $this->assertFileExists($file);
+        $this->assertStringContainsString($id, (string) file_get_contents($file));
     }
 }

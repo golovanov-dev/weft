@@ -58,8 +58,9 @@ pre-1.0 the API may change between minor versions.
   keys outside `DEBUG`. New fields: `cache_driver`, `rate_limit_store`, `rate_limit_path`,
   `rate_limit_writable`, `rate_limit_error` (why), `proxy_ips_error`, `proxy_ips_invalid`,
   `proxy_ips_trust_all`, `captcha_missing_keys`, `alertloop_missing_keys`, `logs_error`.
-  `logs_writable` now checks the `errors/` and `requests/` directories under `LOGS_PATH` and today's
-  files in them, not only `LOGS_PATH`. If your site copied the script, update the engine to 0.2.0 first, then
+  `logs_writable` now checks the `errors/` and `requests/` directories under `LOGS_PATH`, today's
+  files in them and traceloom's lock file in `requests/`, not only `LOGS_PATH`; `requests/` is the site's, even though the script runs from
+  the console. If your site copied the script, update the engine to 0.2.0 first, then
   copy the script again: on an older engine it stops with a fatal error. The engine side:
   `Captcha::missingKeys()`, `Alert::missingKeys()`, `ErrorHandler::logsError()`, `RateLimiter::storeStatus()`, `Request::invalidProxyIps()`,
   `Request::trustAllProxyIps()`, `Request::proxyIpsError()`.
@@ -116,16 +117,23 @@ pre-1.0 the API may change between minor versions.
   file. If your settings are already in `app.php`, alerts start being sent after the upgrade.
   Alerts enabled without `base_url` or `api_key` still send nothing, and now say so in the error
   log, once per request.
-- Weft sets no permissions on what it writes under `storage/`: error logs, traces, cache entries,
-  rate-limit counters and their directories get the mode the umask of the process gives. Before,
-  traces were forced to `0640` (their directory to `0750`) and other directories were created at
-  most `0770`; with the common umask `022` error logs and traces are now readable by other users
-  on the server unless `storage/` is closed to them (`o-rwx`, step 5 of the guide). Permissions
-  are the server's job: the deployment guide gives `storage/` one group for PHP and every other
-  writer (cron jobs, `scripts/sitemap.php`), setgid directories and `umask 002` for each of them.
-  When upgrading, apply steps 5 and 6 of the guide, add `umask 002;` to your cron lines and to
-  commands you run over ssh or from CI, exclude `storage/` and `config/config.php` if you deploy
-  with rsync, and run `health.php` as the PHP user.
+- Console scripts (`scripts/*.php`, cron jobs, anything run with the `cli` or `phpdbg` SAPI) write
+  their traces to `LOGS_PATH/cli/` instead of `LOGS_PATH/requests/`, which is now the site's alone
+  (PHP's built-in server counts as the site). A script and a web request no longer share a trace
+  directory, so each has one writer. `app.trace.retention_days` applies to both. To read a script's
+  trace, use `vendor/bin/eventtrace show <trace_id> --dir=storage/logs/cli`.
+- Weft sets no permissions on the error log, cache entries, rate-limit counters and their
+  directories: they get the mode the umask of the process gives. Before, these directories were
+  created at most `0770`; with the common umask `022` error logs are now readable by other users on
+  the server unless `storage/` is closed to them (`o-rwx`, step 5 of the guide). Traces keep
+  traceloom's modes (`0640`, directory `0750`), as before. PHP and scripts share the error log,
+  the cache and the counters: the deployment guide gives `storage/` one group for PHP and every
+  other writer (cron jobs, `scripts/sitemap.php`), setgid directories and `umask 002` for each of
+  them. When upgrading, apply steps 5 and 6 of the guide (step 5 also hands files your scripts
+  left in `storage/logs/requests/` to PHP's group), add `umask 002;` to your cron lines and to
+  commands you run over ssh or from CI, move cron jobs that run Weft scripts from the crontab of
+  `www-data` or `root` to the deploy user's, exclude `storage/` and `config/config.php` if you
+  deploy with rsync, and run `health.php` as the PHP user.
 
 ### Fixed
 

@@ -40,7 +40,7 @@ convention-driven core so a new site is mostly content.
 - **Request tracing** — one JSONL timeline per request via
   [traceloom](https://github.com/golovanov-dev/traceloom): JSON, form bodies and query strings logged
   as fields so redaction by key reaches them (other bodies as raw strings it cannot look inside),
-  trace files deleted after 30 days.
+  console scripts traced to a separate directory, trace files deleted after 30 days.
 - **Form protection by default** — rate limiting, CSRF, honeypot and Google reCAPTCHA v3.
 - **Alerting for sensitive spots** — push events to
   [AlertLoop](https://github.com/golovanov-dev/alertloop); best-effort with a timeout, and a failed

@@ -6,7 +6,8 @@ declare(strict_types=1);
  * CLI health check:  php scripts/health.php
  * Reports PHP version, writable storage, and whether optional integrations are wired.
  * Exits with 1 when something leaves the site broken or unprotected: logs not writable (the
- * error log or trace directory, or today's file in it; logs_error says which), the
+ * error log directory or the site's trace directory, requests/, or today's file in it;
+ * logs_error says which), the
  * rate-limit directory or a file in it (a counter or a cache entry) that PHP cannot write,
  * counters in files while app.cache.driver is redis (rate_limit_error says why),
  * PROXY_IPS not an array or with an entry that is invalid or too wide, or (outside DEBUG) a

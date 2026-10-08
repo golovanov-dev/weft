@@ -98,7 +98,8 @@ writes are skipped, and the error log gets one line per request.
 Always on. Every request gets a correlation id and a single event timeline written to
 `storage/logs/requests/<date>.jsonl` by [traceloom](https://github.com/golovanov-dev/traceloom),
 with rotation, size caps and automatic redaction of keys like `password`, `token` and `api_key`.
-Files older than 30 days are deleted.
+Console scripts (`scripts/*.php`, cron jobs) write theirs to `storage/logs/cli/<date>.jsonl`, so a
+script never shares a file with the site. Files older than 30 days are deleted.
 
 The engine records `request_start` (method, path, query, headers, client IP, body), `request_end`
 and outbound HTTP calls. JSON bodies (by content, whatever the content type), form bodies and
@@ -117,10 +118,11 @@ Trace::event('order_created', ['order_id' => $id, 'amount' => $sum]);
 Trace::id();   // the id, also returned to the client as X-Trace-Id
 ```
 
-Read one request's timeline:
+Read one request's timeline, or a script's:
 
 ```bash
 vendor/bin/eventtrace show <trace_id> --dir=storage/logs/requests
+vendor/bin/eventtrace show <trace_id> --dir=storage/logs/cli
 ```
 
 ## Forms: rate limiting, CSRF, honeypot, captcha

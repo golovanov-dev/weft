@@ -92,7 +92,7 @@ return [
         'timeout' => 4,            // seconds a send waits for AlertLoop
     ],
 
-    // Request traces in storage/logs/requests (traceloom).
+    // Traces (traceloom): web requests in storage/logs/requests, console scripts in storage/logs/cli.
     'trace' => [
         'log_body' => true,          // bodies are logged (JSON / form fields masked by key); false: size and type only
         'sensitive_keys' => [],      // extra whole key names to mask, e.g. ['passport', 'card_number'];

@@ -37,11 +37,14 @@ npm ci && npm run build
 
 # 5. storage/: one group for PHP and every other writer (www-data below; see "Who writes storage/")
 sudo usermod -aG www-data "$USER"      # you join PHP's group
-sudo mkdir -p storage/logs/errors storage/logs/requests storage/cache
+sudo mkdir -p storage/logs storage/cache
 sudo chgrp -R www-data storage
 sudo chmod -R g+rwX,o-rwx storage
 sudo find storage -type d -exec chmod g+s {} +
 echo 'umask 002' >> ~/.profile         # what you create stays group-writable
+#    LOGS_PATH outside storage/ (config/config.php)? Create it the same way, before PHP writes there:
+#    sudo mkdir -p /var/log/site && sudo chgrp -R www-data /var/log/site
+#    sudo chmod -R g+rwX,o-rwx /var/log/site && sudo find /var/log/site -type d -exec chmod g+s {} +
 #    now log out and back in: the group and the umask apply from your next login
 
 # 6. PHP-FPM creates group-writable files too (every pool of the service: see "Who writes storage/")
@@ -53,8 +56,8 @@ systemctl show -p UMask php8.4-fpm     # must print UMask=0002
 # 7. Optional: a static sitemap for a CDN
 php scripts/sitemap.php
 
-# 8. Verify, as the user PHP runs as
-sudo -u www-data php scripts/health.php
+# 8. Verify, as the user PHP runs as (sudo resets the umask, so set it for the check too)
+sudo -u www-data sh -c 'umask 002; php scripts/health.php'
 ```
 
 Run all of this on the server, in the site root (the directory holding `bootstrap.php`), as the
@@ -63,24 +66,31 @@ exception: run it on your machine, in the built site, with your deploy user, hos
 Substitute your PHP user and its group for `www-data`: they are `user` and `group` of the PHP-FPM
 pool (for example `/etc/php/8.4/fpm/pool.d/www.conf`) or the user Apache runs as. Substitute your PHP-FPM service for
 `php8.4-fpm` (`systemctl list-units '*fpm*'` shows it); with Apache's mod_php, use `apache2` (or
-`httpd`) in step 6 instead.
+`httpd`) in step 6 instead. In step 5, substitute your `LOGS_PATH` for `/var/log/site`.
 
 > **Non-negotiable in production:** `DEBUG=false` and `DEV_MODE=false`. Otherwise assets are fetched
 > from a Vite dev server that is not running, and errors are shown to visitors.
 
 ### Who writes `storage/`
 
-PHP writes logs, traces, the file cache and rate-limit counters under `storage/` (counters live in
-`storage/cache` even with caching off, unless `app.rate_limit.path` points elsewhere). Scripts write
-there too: `php scripts/sitemap.php`, your cron jobs; and you read the logs and traces.
+PHP writes the error log, traces, the file cache and rate-limit counters under `storage/` (counters
+live in `storage/cache` even with caching off, unless `app.rate_limit.path` points elsewhere).
+Scripts write there too (`php scripts/sitemap.php`, your cron jobs), and you read the logs and
+traces.
 
-Weft sets no permissions. Whatever it creates gets the mode the umask of the process gives, and the
-owner and group the system gives. Setting up permissions is the server's job, and steps 5 and 6 do
-it with one group for everyone who writes there; who owns a file does not matter:
+Each trace directory has one writer: `storage/logs/requests/` is written only by PHP serving the
+site (PHP's built-in server `php -S` counts as the site), `storage/logs/cli/` only by scripts.
+The rules below do not apply to them: whoever writes a trace first creates the directory, and
+traceloom gives it `0750`, which drops setgid, and its files `0640`. You read `requests/` through
+PHP's group and `cli/` as its owner, the deploy user.
 
-- `storage/` and everything in it has PHP's group, with group write; `o-rwx` keeps other users on
-  the server out of the logs.
-- Its directories are setgid (`g+s`): a file or directory created in them gets that group, whoever
+The error log in `storage/logs/errors/`, the cache and the counters are shared: PHP and scripts write
+the same files. Weft sets no permissions on them: they get the mode the umask of the process gives.
+Steps 5 and 6 give everyone who writes there one group; who owns a file does not matter:
+
+- `storage/` and everything in it but the trace directories has PHP's group, with group write;
+  `o-rwx` keeps other users on the server out of the logs.
+- Its directories, the trace ones aside, are setgid (`g+s`): a file or directory created in them gets that group, whoever
   creates it.
 - Every writer runs with `umask 002`, so what it creates stays group-writable: PHP-FPM through
   `UMask=` (step 6), your interactive shell through `~/.profile` (step 5), each cron job and each
@@ -109,9 +119,15 @@ set the umask in the command that starts FPM, for example the container entrypoi
 `health.php` runs from the command line and cannot see PHP-FPM's umask: check it with the
 `systemctl show` line of step 6 (in a container, `grep Umask /proc/$(pgrep -o php-fpm)/status`).
 
-Run scripts and cron jobs as the deploy user (its own `crontab -e`). Run `health.php` as the PHP user
-(step 8): it checks the permissions of the user who runs it, so from your own shell it can report
-`ok: true` for a `storage/` that PHP cannot write.
+Run every script and cron job as one user, the deploy user (its own `crontab -e`), not as
+`www-data` or root. A script run as another user takes `cli/`, and the deploy user's scripts then
+lose their traces: only stderr and `errors/` say `fopen(.../cli/.traceloom.lock)`, `health.php` does
+not check `cli/`. `sudo` also runs a command with umask `022`, so what it creates is not
+group-writable. To recover, run the `chgrp`, `chmod` and `find` lines of step 5 again.
+
+Run only `health.php` as the PHP user (step 8); it writes no trace. It checks the permissions of the
+user who runs it, so from your own shell it can report `ok: true` for a `storage/` that PHP cannot
+write.
 
 If PHP cannot write `storage/`, rate limits stop limiting: the limiter fails open so a broken disk
 never locks visitors out, and the line it writes about that goes to `storage/logs/errors/`, which is
@@ -123,7 +139,7 @@ It prints a JSON report and exits with 1 when `ok` is false. `ok` is false when 
 
 | Field | Bad value | What to do |
 |---|---|---|
-| `logs_writable` | `false` | `logs_error` names what PHP cannot write: `errors/` or `requests/` under `LOGS_PATH`, today's file in it, or the trace lock file. Run the `chgrp`, `chmod` and `find` lines of step 5 again, then find the writer that created it without `umask 002`: `ls -l` shows the owner. PHP's user: PHP-FPM, check step 6. Another user: a command that user runs — their cron lines (`sudo crontab -l -u <user>`), scripts, commands over ssh |
+| `logs_writable` | `false` | `logs_error` names what PHP cannot write: `errors/` or `requests/` under `LOGS_PATH`, today's file in it, or `requests/.traceloom.lock`. Run the `chgrp`, `chmod` and `find` lines of step 5 again, then find who created it: `ls -l` shows the owner. In `errors/`, a writer without `umask 002`: PHP-FPM (check step 6) or another user's cron lines (`sudo crontab -l -u <user>`), scripts, commands over ssh. In `requests/`, anyone but PHP, such as `php -S` started as another user |
 | `rate_limit_writable` | `false` | `rate_limit_error` names `rate_limit_path`, or how many files in it PHP cannot write and one of them: the same as for `logs_writable`; with Redis, see below |
 | `rate_limit_store` | `file` while `cache_driver` is `redis` | Redis is not used, the cache and counters are per server: see below |
 | `proxy_ips_error` | not `null` | `PROXY_IPS` is not an array, so no proxy is trusted: write `define('PROXY_IPS', [...])` |
@@ -275,15 +291,19 @@ grep -h '"request_start"' storage/logs/requests/*.jsonl | tail -n 1 | grep -o '"
 
 ```text
 storage/logs/
-├── requests/<date>.jsonl   request traces (traceloom): request_start/end, http_out_*, your events
-└── errors/<date>.log       errors, exceptions and fatals
+├── requests/<date>.jsonl   web request traces (traceloom): request_start/end, http_out_*, your events
+├── cli/<date>.jsonl        traces of console scripts (scripts/*.php, cron jobs): http_out_*, your events
+└── errors/<date>.log       errors, exceptions and fatals, of the site and of scripts
 ```
 
-Traces are line-delimited JSON grouped by `trace_id`. Every response carries `X-Trace-Id`, so a user
-report points straight at a timeline:
+Traces are line-delimited JSON grouped by `trace_id`; a web request and a script never share one.
+Every response carries `X-Trace-Id`, so a user report points straight at a timeline in `requests/`;
+a line in `errors/` ends with `trace:<id>`, in `requests/` for the site or `cli/` for a script:
 
 ```bash
-vendor/bin/eventtrace show <trace_id> --dir=storage/logs/requests
+vendor/bin/eventtrace show <trace_id> --dir=storage/logs/requests   # the site
+vendor/bin/eventtrace show <trace_id> --dir=storage/logs/cli        # a script
+grep -rl --include='*.jsonl' '<trace_id>' storage/logs                      # which one
 ```
 
 Request and outgoing bodies and query strings are logged as fields; values under sensitive key
@@ -296,9 +316,10 @@ as JSON nor is a form is logged as a raw string, and so is a form string your co
 itself for `HttpClient`: pass the fields as an array so their sensitive keys are masked. The `referer` header is logged as sent:
 within your site it is the full previous URL, query string included, and masking does not reach
 it. Trace files rotate by date and
-size and are deleted after `app.trace.retention_days` (30 by default; `0` keeps them forever). The first
-request after an engine update already deletes older files: set the key before updating if you need
-them.
+size and are deleted after `app.trace.retention_days` (30 by default; `0` keeps them forever), in
+both directories: the site cleans `requests/`, a script cleans `cli/` when it writes a trace. The
+first request after an engine update already deletes older files: set the key before updating if you
+need them.
 `errors/` is not cleaned up: rotate it at the OS level.
 
 ## Checklist
@@ -318,7 +339,7 @@ them.
   address send nothing — `health.php` lists the missing keys under `captcha_missing_keys` and
   `alertloop_missing_keys`
 - [ ] `app.captcha.allowed_hosts` lists your real domain, if the captcha is on
-- [ ] `sudo -u www-data php scripts/health.php` (your PHP user) → `ok: true`
+- [ ] `sudo -u www-data sh -c 'umask 002; php scripts/health.php'` (your PHP user) → `ok: true`
 
 That is the whole engine. If something is missing from these docs, please
 [open an issue](https://github.com/golovanov-dev/weft/issues).

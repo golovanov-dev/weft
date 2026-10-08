@@ -23,7 +23,7 @@ final class HttpClientTest extends TestCase
     {
         $id = Trace::id();
         Trace::flush();
-        foreach (glob(sys_get_temp_dir() . '/weft-logs/requests/*.jsonl') ?: [] as $file) {
+        foreach (glob(Trace::directory() . '/*.jsonl') ?: [] as $file) {
             foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
                 $record = json_decode($line, true);
                 if (is_array($record) && ($record['trace_id'] ?? null) === $id && ($record['event'] ?? null) === $event) {

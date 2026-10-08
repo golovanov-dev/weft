@@ -24,7 +24,7 @@ define('DEBUG', false);       // verbose errors, curl info, robots blocks indexi
 define('DEV_MODE', false);    // assets from the Vite dev server; HSTS off
 define('BASE_URI', '');       // sub-directory mount point, '' for a domain root
 define('APP_TIMEZONE', 'UTC');// every date, log and DB session uses this
-define('LOGS_PATH', dirname(__DIR__) . '/storage/logs');
+define('LOGS_PATH', dirname(__DIR__) . '/storage/logs'); // errors/, traces: requests/ (site), cli/ (scripts)
 ```
 
 Database (only if you use `Golovanov\Weft\Database`):
@@ -194,7 +194,7 @@ is sent, the error log gets a line, and `php scripts/health.php` lists the key u
 'trace' => [
     'log_body'       => true,   // false: log a body as its size and content type only
     'sensitive_keys' => [],     // e.g. ['passport', 'card_number'], Latin names only: masked on top of password, token, api_key, …
-    'retention_days' => 30,     // trace files older than this are deleted; 0 keeps them forever
+    'retention_days' => 30,     // trace files older than this are deleted, in requests/ and cli/; 0 keeps them forever
 ],
 ```
 

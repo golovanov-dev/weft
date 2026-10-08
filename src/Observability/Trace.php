@@ -15,7 +15,8 @@ use Golovanov\Weft\Support\Clock;
  * Request tracer — a thin static facade over golovanov/traceloom.
  *
  * Every request gets a correlation (trace) id and a single event timeline grouped by that id,
- * written as JSONL under LOGS_PATH/requests. Traceloom handles rotation, size caps, retention
+ * written as JSONL under LOGS_PATH/requests; a console script gets its own under LOGS_PATH/cli
+ * (see directory()). Traceloom handles rotation, size caps, retention
  * (app.trace.retention_days) and redaction of sensitive keys (its defaults plus
  * app.trace.sensitive_keys). Weft masks nothing itself: it hands traceloom request and outgoing
  * bodies and query strings parsed into arrays, so the redaction reaches their fields — see body()
@@ -45,16 +46,9 @@ final class Trace
         $trustIncoming = (bool) (defined('TRACE_TRUST_INCOMING') ? TRACE_TRUST_INCOMING : false);
 
         if (class_exists(Tracer::class)) {
-            // traceloom chmods the directory and each trace file it creates (0750 and 0640 by
-            // default). Create the directory here and give files the mode the umask gives anyway,
-            // so permissions stay the server's, as for everything else Weft writes.
-            if (!is_dir($dir)) {
-                @mkdir($dir, 0777, true);
-            }
             $config = Configuration::create(
                 logDirectory: $dir,
                 sensitiveKeys: self::sensitiveKeys(),
-                fileMode: 0666 & ~umask(),
                 retentionDays: self::retentionDays(),
                 trustIncomingTraceId: $trustIncoming,
             );
@@ -201,14 +195,17 @@ final class Trace
     }
 
     /**
-     * Where the traces go: LOGS_PATH/requests.
+     * Where a process of the given SAPI writes its traces: LOGS_PATH/cli for console scripts
+     * (`cli`, `phpdbg`), LOGS_PATH/requests for the web, PHP's built-in server included. A web
+     * request and a script never share a trace file, and each directory has one writer.
      *
-     * @internal Used by ErrorHandler::logsError().
+     * @internal $sapi is for ErrorHandler::logsError(), which checks the web's directory from a
+     *   console script, and for tests.
      */
-    public static function directory(): string
+    public static function directory(string $sapi = PHP_SAPI): string
     {
         $base = defined('LOGS_PATH') ? (string) LOGS_PATH : sys_get_temp_dir() . '/weft-logs';
-        return rtrim($base, '/\\') . '/requests';
+        return rtrim($base, '/\\') . (in_array($sapi, ['cli', 'phpdbg'], true) ? '/cli' : '/requests');
     }
 
     /**

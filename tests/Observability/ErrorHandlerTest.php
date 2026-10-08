@@ -44,6 +44,46 @@ final class ErrorHandlerTest extends TestCase
         $this->assertSame('PHP cannot write ' . $file, $error);
     }
 
+    /** health.php runs from the console, but the traces to check are the web's. */
+    public function testLogsErrorChecksTheWebTraceDirectoryFromAScript(): void
+    {
+        $dir = sys_get_temp_dir() . '/weft-logs/requests';
+        @mkdir($dir, 0777, true);
+        $file = $dir . '/' . gmdate('Y-m-d') . '.jsonl';
+        $existed = is_file($file);
+        touch($file);
+        chmod($file, 0444);
+        try {
+            $error = ErrorHandler::logsError();
+        } finally {
+            chmod($file, 0644);
+            if (!$existed) {
+                unlink($file);
+            }
+        }
+        $this->assertSame('PHP cannot write ' . $file, $error);
+    }
+
+    /** A lock file in requests/ PHP cannot open stops every web trace. */
+    public function testLogsErrorNamesTheTraceLockFilePhpCannotWrite(): void
+    {
+        $dir = sys_get_temp_dir() . '/weft-logs/requests';
+        @mkdir($dir, 0777, true);
+        $lock = $dir . '/.traceloom.lock';
+        $existed = is_file($lock);
+        touch($lock);
+        chmod($lock, 0444);
+        try {
+            $error = ErrorHandler::logsError();
+        } finally {
+            chmod($lock, 0644);
+            if (!$existed) {
+                unlink($lock);
+            }
+        }
+        $this->assertSame('PHP cannot write ' . $lock, $error);
+    }
+
     public function testLogsErrorNamesAFileInPlaceOfTheLogDirectory(): void
     {
         $dir = sys_get_temp_dir() . '/weft-logs/errors';

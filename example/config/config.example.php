@@ -19,7 +19,7 @@ define('DEV_MODE', false);    // true => Vite dev server + relaxed HTTPS
 // Sub-directory the app is mounted under, "" for a domain root (https://golovanov.dev).
 define('BASE_URI', '');
 
-// Absolute JSONL log directory (traceloom requests + error logs).
+// Absolute log directory: errors/, traces in requests/ (the site) and cli/ (scripts).
 define('LOGS_PATH', dirname(__DIR__) . '/storage/logs');
 
 // Application timezone — all dates, logs and the DB session use it. Name or offset; UTC if unset.

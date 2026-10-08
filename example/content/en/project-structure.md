@@ -77,7 +77,8 @@ requires `bootstrap.php` and calls `Golovanov\Weft\Kernel::handle()`. Under PHP'
 session itself starts only when a form needs a CSRF token (`Csrf`), so a visitor who only
 reads pages gets no `PHPSESSID` cookie.
 
-**`scripts/*.php`** — the CLI. Each requires `bootstrap.php` and does its job.
+**`scripts/*.php`** — the CLI. Each requires `bootstrap.php` and does its job. Its trace events go
+to `storage/logs/cli/`, not to the site's `storage/logs/requests/`.
 
 `bootstrap.php` is the single place where initialisation happens:
 
