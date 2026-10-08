@@ -29,26 +29,6 @@ final class ErrorHandlerTest extends TestCase
         $this->assertStringContainsString('Uncaught RuntimeException: boom', $text);
     }
 
-    public function testLogDirectoryAndFileAreGroupWritableWhateverTheUmask(): void
-    {
-        if (PHP_OS_FAMILY === 'Windows') {
-            $this->markTestSkipped('POSIX file modes');
-        }
-        $dir = sys_get_temp_dir() . '/weft-logs/errors';
-        $this->removeDir($dir);
-
-        $previous = umask(0077);
-        try {
-            ErrorHandler::log('test', 0, 'mode check', __FILE__, __LINE__);
-        } finally {
-            umask($previous);
-        }
-
-        clearstatcache();
-        $this->assertSame('2770', decoct(fileperms($dir) & 07777));
-        $this->assertSame('660', decoct(fileperms($dir . '/' . Clock::date('Y-m-d') . '.log') & 0777));
-    }
-
     public function testLogsErrorNamesTodaysLogFilePhpCannotWrite(): void
     {
         ErrorHandler::log('test', 0, 'make sure the file exists', __FILE__, __LINE__);
@@ -59,8 +39,29 @@ final class ErrorHandlerTest extends TestCase
         try {
             $error = ErrorHandler::logsError();
         } finally {
-            chmod($file, 0660);
+            chmod($file, 0644);
         }
-        $this->assertStringContainsString(Clock::date('Y-m-d') . '.log', (string) $error);
+        $this->assertSame('PHP cannot write ' . $file, $error);
+    }
+
+    public function testLogsErrorNamesAFileInPlaceOfTheLogDirectory(): void
+    {
+        $dir = sys_get_temp_dir() . '/weft-logs/errors';
+        $aside = $dir . '-aside-' . getmypid();
+        if (is_dir($dir)) {
+            rename($dir, $aside);
+        } else {
+            @mkdir(dirname($dir), 0777, true);
+        }
+        file_put_contents($dir, '');
+        try {
+            $error = ErrorHandler::logsError();
+        } finally {
+            unlink($dir);
+            if (is_dir($aside)) {
+                rename($aside, $dir);
+            }
+        }
+        $this->assertSame('PHP cannot write ' . $dir, $error);
     }
 }

@@ -97,25 +97,4 @@ final class FileStoreTest extends TestCase
 
         $this->assertSame(1, $this->store->increment('hits', 60));
     }
-
-    public function testNewFilesAreGroupWritableWhateverTheUmask(): void
-    {
-        if (PHP_OS_FAMILY === 'Windows') {
-            $this->markTestSkipped('POSIX file modes');
-        }
-
-        $previous = umask(0077);
-        try {
-            $this->store->set('entry', 'v');
-            $this->store->increment('counter', 60);
-        } finally {
-            umask($previous);
-        }
-
-        clearstatcache();
-        foreach (['entry', 'counter'] as $key) {
-            $mode = fileperms($this->dir . '/' . sha1($key) . '.cache') & 0777;
-            $this->assertSame('660', decoct($mode), $key);
-        }
-    }
 }

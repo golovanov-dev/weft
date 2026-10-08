@@ -10,15 +10,19 @@ order: 6
 
 Everything except local artefacts: `app/`, `config/` (with a real `config.php`), `pages/`, `api/`,
 `components/`, `lang/`, `content/`, `public/` (**including the built `public/dist/`**), `scripts/`,
-`storage/`, `bootstrap.php`, `composer.json` + `composer.lock`, `vendor/`.
+`bootstrap.php`, `composer.json` + `composer.lock`, `vendor/`.
 
-Not shipped as-is: `node_modules/`, the local `config/config.php` (created on the server),
-`storage/logs/*`, `storage/cache/*`. `frontend/` is only needed to build.
+Not shipped: `node_modules/`, the local `config/config.php` (created on the server), `storage/`
+(step 5 sets it up on the server). `frontend/` is only needed to build.
 
 ## Steps
 
 ```bash
 # 1. Code on the server (git pull / rsync)
+#    rsync runs on your machine and must skip what is not shipped: storage/ (or it undoes step 5)
+#    and config/config.php (or it replaces the server's config with your local one):
+#    rsync -a --exclude=/storage/ --exclude=/config/config.php --exclude=/node_modules/ \
+#      --exclude=/frontend/ ./ deploy@example.com:/var/www/site/
 
 # 2. PHP dependencies, production flavour
 composer install --no-dev --optimize-autoloader
@@ -31,24 +35,35 @@ cp config/config.example.php config/config.php
 # 4. Frontend (here or in CI)
 npm ci && npm run build
 
-# 5. Writable runtime, shared with the group PHP runs as (www-data below; see "Who writes storage/")
-sudo usermod -aG www-data "$USER"      # you join PHP's group; applies from your next login
-mkdir -p storage/logs/errors storage/logs/requests storage/cache
+# 5. storage/: one group for PHP and every other writer (www-data below; see "Who writes storage/")
+sudo usermod -aG www-data "$USER"      # you join PHP's group
+sudo mkdir -p storage/logs/errors storage/logs/requests storage/cache
 sudo chgrp -R www-data storage
 sudo chmod -R g+rwX,o-rwx storage
-sudo find storage -type d -exec chmod 2770 {} +
+sudo find storage -type d -exec chmod g+s {} +
+echo 'umask 002' >> ~/.profile         # what you create stays group-writable
+#    now log out and back in: the group and the umask apply from your next login
 
-# 6. Optional: a static sitemap for a CDN
+# 6. PHP-FPM creates group-writable files too (every pool of the service: see "Who writes storage/")
+sudo mkdir -p /etc/systemd/system/php8.4-fpm.service.d
+printf '[Service]\nUMask=0002\n' | sudo tee /etc/systemd/system/php8.4-fpm.service.d/umask.conf
+sudo systemctl daemon-reload && sudo systemctl restart php8.4-fpm
+systemctl show -p UMask php8.4-fpm     # must print UMask=0002
+
+# 7. Optional: a static sitemap for a CDN
 php scripts/sitemap.php
 
-# 7. Verify, as the user PHP runs as
+# 8. Verify, as the user PHP runs as
 sudo -u www-data php scripts/health.php
 ```
 
 Run all of this on the server, in the site root (the directory holding `bootstrap.php`), as the
-user who deploys the code; steps 5 and 7 need `sudo`. Substitute your PHP user and its group for
-`www-data`: they are `user` and `group` of the PHP-FPM pool (for example
-`/etc/php/8.4/fpm/pool.d/www.conf`) or the user Apache runs as.
+user who deploys the code; steps 5, 6 and 8 need `sudo`. The `rsync` line of step 1 is the
+exception: run it on your machine, in the built site, with your deploy user, host and site root.
+Substitute your PHP user and its group for `www-data`: they are `user` and `group` of the PHP-FPM
+pool (for example `/etc/php/8.4/fpm/pool.d/www.conf`) or the user Apache runs as. Substitute your PHP-FPM service for
+`php8.4-fpm` (`systemctl list-units '*fpm*'` shows it); with Apache's mod_php, use `apache2` (or
+`httpd`) in step 6 instead.
 
 > **Non-negotiable in production:** `DEBUG=false` and `DEV_MODE=false`. Otherwise assets are fetched
 > from a Vite dev server that is not running, and errors are shown to visitors.
@@ -56,20 +71,46 @@ user who deploys the code; steps 5 and 7 need `sudo`. Substitute your PHP user a
 ### Who writes `storage/`
 
 PHP writes logs, traces, the file cache and rate-limit counters under `storage/` (counters live in
-`storage/cache` even with caching off, unless `app.rate_limit.path` points elsewhere). The deploy
-user writes there too, from `php scripts/sitemap.php` and cron jobs, and reads the logs and traces.
+`storage/cache` even with caching off, unless `app.rate_limit.path` points elsewhere). Scripts write
+there too: `php scripts/sitemap.php`, your cron jobs; and you read the logs and traces.
 
-Step 5 lets both do that: `storage/` stays the deploy user's, its group is the PHP user's group, the
-deploy user joins that group, and the setgid bit (the `2` in `2770`) gives every file and directory
-created in it that group. The engine creates the directories and files it writes there with modes
-`2770` and `660` whatever the umask, so each side can write and read what the other created. Log out
-and back in after step 5 for the group to apply to your shell and cron jobs.
+Weft sets no permissions. Whatever it creates gets the mode the umask of the process gives, and the
+owner and group the system gives. Setting up permissions is the server's job, and steps 5 and 6 do
+it with one group for everyone who writes there; who owns a file does not matter:
 
-A site whose `storage/` belongs to the PHP user (an older version of this guide): run
-`sudo chown -R "$USER" storage` in the site root as the deploy user, then step 5.
+- `storage/` and everything in it has PHP's group, with group write; `o-rwx` keeps other users on
+  the server out of the logs.
+- Its directories are setgid (`g+s`): a file or directory created in them gets that group, whoever
+  creates it.
+- Every writer runs with `umask 002`, so what it creates stays group-writable: PHP-FPM through
+  `UMask=` (step 6), your interactive shell through `~/.profile` (step 5), each cron job and each
+  command a deploy script or CI runs over ssh in its own line (below).
+- The deploy user is in PHP's group (step 5), so it can write and read there.
+
+A cron line, for example the static sitemap every night:
+
+```text
+0 3 * * * umask 002; cd /var/www/site && php scripts/sitemap.php
+```
+
+The same from a deploy script or CI:
+
+```bash
+ssh deploy@example.com 'umask 002; cd /var/www/site && php scripts/sitemap.php'
+```
+
+`~/.profile` is read only by a login shell, and bash skips it when `~/.bash_profile` exists (then
+put the line there); a command run over ssh does not read either, so it needs its own `umask 002;`.
+
+`UMask=` in step 6 applies to the whole PHP-FPM service: every pool and every site it runs on the
+server creates group-writable files. Without systemd (the Docker `php:fpm` image, supervisord),
+set the umask in the command that starts FPM, for example the container entrypoint:
+`umask 0002 && exec php-fpm`.
+`health.php` runs from the command line and cannot see PHP-FPM's umask: check it with the
+`systemctl show` line of step 6 (in a container, `grep Umask /proc/$(pgrep -o php-fpm)/status`).
 
 Run scripts and cron jobs as the deploy user (its own `crontab -e`). Run `health.php` as the PHP user
-(step 7): from the deploy user's shell it checks the deploy user's permissions and can report
+(step 8): it checks the permissions of the user who runs it, so from your own shell it can report
 `ok: true` for a `storage/` that PHP cannot write.
 
 If PHP cannot write `storage/`, rate limits stop limiting: the limiter fails open so a broken disk
@@ -82,8 +123,8 @@ It prints a JSON report and exits with 1 when `ok` is false. `ok` is false when 
 
 | Field | Bad value | What to do |
 |---|---|---|
-| `logs_writable` | `false` | `logs_error` names what PHP cannot write: `errors/` or `requests/` under `LOGS_PATH`, or today's file in it; run step 5 (see above) |
-| `rate_limit_writable` | `false` | `rate_limit_error` says what PHP cannot write: give the PHP user write access to `rate_limit_path` and the files in it (see above); with Redis, see below |
+| `logs_writable` | `false` | `logs_error` names what PHP cannot write: `errors/` or `requests/` under `LOGS_PATH`, today's file in it, or the trace lock file. Run the `chgrp`, `chmod` and `find` lines of step 5 again, then find the writer that created it without `umask 002`: `ls -l` shows the owner. PHP's user: PHP-FPM, check step 6. Another user: a command that user runs — their cron lines (`sudo crontab -l -u <user>`), scripts, commands over ssh |
+| `rate_limit_writable` | `false` | `rate_limit_error` names `rate_limit_path`, or how many files in it PHP cannot write and one of them: the same as for `logs_writable`; with Redis, see below |
 | `rate_limit_store` | `file` while `cache_driver` is `redis` | Redis is not used, the cache and counters are per server: see below |
 | `proxy_ips_error` | not `null` | `PROXY_IPS` is not an array, so no proxy is trusted: write `define('PROXY_IPS', [...])` |
 | `proxy_ips_invalid` | not empty | these `PROXY_IPS` entries are ignored: replace them with IP addresses or CIDR ranges; for `localhost` write `'127.0.0.1'` and/or `'::1'` |
@@ -106,7 +147,7 @@ a site with its own config, set `app.captcha.enabled` to `false`.
 `rate_limit_path` is `app.rate_limit.path`, else `app.cache.path`; a relative one is taken from the
 site root (`APP_ROOT`), so `health.php` and the site use the same directory whatever their working
 directory. By default it is also the cache directory, so a file in it that PHP cannot overwrite (a
-cache entry or a counter, created by a script run as another user) also makes `rate_limit_writable`
+cache entry or a counter created by a script without `umask 002`) also makes `rate_limit_writable`
 false; `rate_limit_error` names one of them.
 
 With `app.cache.driver` set to `redis`, the engine sends `PING` after connecting, and `health.php`
@@ -267,7 +308,8 @@ them.
 - [ ] document root points at `public/`
 - [ ] `composer install --no-dev --optimize-autoloader` done
 - [ ] `npm run build` done, `public/dist/` present
-- [ ] `storage/` writable by the user PHP runs as (logs, cache, rate-limit counters)
+- [ ] `storage/` has PHP's group and setgid directories; PHP-FPM (`UMask=0002`), cron jobs, deploy
+  commands and your shell run with `umask 002` (steps 5 and 6)
 - [ ] `client_ip` in the newest `request_start` trace is your own address, not a proxy's (see
   "Behind a proxy or CDN" above); otherwise all visitors share one rate limit
 - [ ] HTTPS on; consider `app.security.hsts`

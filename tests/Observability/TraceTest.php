@@ -287,7 +287,8 @@ final class TraceTest extends TestCase
         $this->assertSame($expected, $this->configuration()->retentionDays);
     }
 
-    public function testTraceDirectoryAndFilesAreGroupWritableWhateverTheUmask(): void
+    /** traceloom would chmod them to 0750 and 0640; Weft leaves the modes to the umask. */
+    public function testTraceDirectoryAndFilesGetTheModesTheUmaskGives(): void
     {
         if (PHP_OS_FAMILY === 'Windows') {
             $this->markTestSkipped('POSIX file modes');
@@ -296,7 +297,7 @@ final class TraceTest extends TestCase
         @unlink($dir . '/.traceloom.lock');
         $this->removeDir($dir);
 
-        $previous = umask(0077);
+        $previous = umask(0002);
         try {
             Trace::boot();
             Trace::event('mode_check');
@@ -306,8 +307,7 @@ final class TraceTest extends TestCase
         }
 
         clearstatcache();
-        $this->assertSame('2770', decoct(fileperms($dir) & 07777));
-        $this->assertSame('660', decoct(fileperms($dir . '/' . gmdate('Y-m-d') . '.jsonl') & 0777));
-        $this->assertSame('660', decoct(fileperms($dir . '/.traceloom.lock') & 0777));
+        $this->assertSame('775', decoct(fileperms($dir) & 07777));
+        $this->assertSame('664', decoct(fileperms($dir . '/' . gmdate('Y-m-d') . '.jsonl') & 0777));
     }
 }

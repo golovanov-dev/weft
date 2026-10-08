@@ -69,9 +69,10 @@ final class RateLimiter
      * Where counters are kept and whether they can be written, for health checks: the store
      * allow() and throttle() use, with the same fallback from Redis to files. `path` is the
      * counter directory, null for Redis; `writable` is false when PHP cannot write the store. For
-     * Redis it is a real write: a probe counter with a short TTL, deleted afterwards. For files,
-     * existing files in the directory must be writable too. `error` says what is wrong: why Redis
-     * was not used or rejected the probe, or what in the directory cannot be written.
+     * Redis it is a real write: a probe counter with a short TTL, deleted afterwards. For files it
+     * only checks, creating nothing: existing files in the directory must be writable too, and a
+     * missing directory counts as writable when PHP can create it. `error` says what is wrong: why
+     * Redis was not used or rejected the probe, or what PHP cannot write.
      *
      * @return array{store: 'redis'|'file', path: ?string, writable: bool, error: ?string}
      */
@@ -91,23 +92,22 @@ final class RateLimiter
         }
 
         $dir = self::directory();
-        // A file another user owns (a counter, or a cache entry in the shared default directory)
-        // cannot be overwritten: a counter in it fails open just like an unwritable directory.
-        $locked = is_dir($dir) && is_writable($dir)
-            ? array_values(array_filter(glob($dir . '/*.cache') ?: [], fn (string $file) => !is_writable($file)))
-            : null;
+        // A file PHP cannot overwrite (a counter, or a cache entry in the shared default directory)
+        // makes a counter in it fail open just like an unwritable directory.
+        $unwritable = ErrorHandler::unwritable($dir, array_map('basename', glob($dir . '/*.cache') ?: []));
         $errors = array_filter([
             self::$redisError !== null ? 'Redis not used: ' . self::$redisError : null,
             match (true) {
-                $locked === null => 'the directory is not writable',
-                $locked !== [] => count($locked) . ' file(s) in the directory that PHP cannot overwrite (cache entries or counters), e.g. ' . basename($locked[0]),
-                default => null,
+                $unwritable === [] => null,
+                $unwritable === [$dir] => 'PHP cannot write ' . $dir,
+                default => 'PHP cannot write ' . count($unwritable) . ' file(s) in ' . $dir
+                    . ' (cache entries or counters), e.g. ' . basename($unwritable[0]),
             },
         ]);
         return [
             'store' => 'file',
             'path' => $dir,
-            'writable' => $locked === [],
+            'writable' => $unwritable === [],
             'error' => $errors !== [] ? implode('; ', $errors) : null,
         ];
     }

@@ -94,7 +94,7 @@ final class RateLimiterTest extends TestCase
         Config::set('app.rate_limit.path', $notADir);
 
         $this->assertSame(
-            ['store' => 'file', 'path' => $notADir, 'writable' => false, 'error' => 'the directory is not writable'],
+            ['store' => 'file', 'path' => $notADir, 'writable' => false, 'error' => 'PHP cannot write ' . $notADir],
             RateLimiter::storeStatus(),
         );
     }
@@ -115,7 +115,7 @@ final class RateLimiterTest extends TestCase
                     'store' => 'file',
                     'path' => $this->dir,
                     'writable' => false,
-                    'error' => '1 file(s) in the directory that PHP cannot overwrite (cache entries or counters), e.g. ' . basename($files[0]),
+                    'error' => 'PHP cannot write 1 file(s) in ' . $this->dir . ' (cache entries or counters), e.g. ' . basename($files[0]),
                 ],
                 RateLimiter::storeStatus(),
             );
@@ -134,6 +134,7 @@ final class RateLimiterTest extends TestCase
                 ['store' => 'file', 'path' => APP_ROOT . '/' . $relative, 'writable' => true, 'error' => null],
                 RateLimiter::storeStatus(),
             );
+            $this->assertDirectoryDoesNotExist(APP_ROOT . '/' . $relative, 'a health check creates nothing');
             $this->assertTrue(RateLimiter::allow('rel', 1, 60));
             $this->assertCount(1, glob(APP_ROOT . '/' . $relative . '/*.cache') ?: []);
         } finally {

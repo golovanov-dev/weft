@@ -137,18 +137,12 @@ final class ErrorHandler
         }
     }
 
-    /**
-     * Append a line to today's error log. The directory and the file it creates get modes 2770 and
-     * 0660 whatever the umask, so PHP and the deploy user's scripts (one group) both keep writing.
-     */
+    /** Append a line to today's error log; the directory and file get whatever mode the umask gives. */
     public static function log(string $type, int $code, string $message, string $file, int $line): void
     {
         $dir = self::directory();
-        if (!is_dir($dir)) {
-            if (!@mkdir($dir, 0770, true) && !is_dir($dir)) {
-                return;
-            }
-            @chmod($dir, 02770);
+        if (!is_dir($dir) && !@mkdir($dir, 0777, true) && !is_dir($dir)) {
+            return;
         }
 
         $line = sprintf(
@@ -162,17 +156,13 @@ final class ErrorHandler
             RequestContext::traceId(),
         );
 
-        $path = $dir . '/' . Clock::date('Y-m-d') . '.log';
-        $created = !is_file($path);
-        if (@file_put_contents($path, $line, FILE_APPEND | LOCK_EX) !== false && $created) {
-            @chmod($path, 0660);
-        }
+        @file_put_contents($dir . '/' . Clock::date('Y-m-d') . '.log', $line, FILE_APPEND | LOCK_EX);
     }
 
     /**
      * What PHP cannot write among the logs, for health checks: the error log and trace directories
      * and today's files in them; null when everything is writable. A missing directory counts as
-     * writable when PHP can create it.
+     * writable when PHP can create it. Only checks: creates nothing and changes nothing.
      */
     public static function logsError(): ?string
     {
@@ -186,25 +176,27 @@ final class ErrorHandler
                 '.traceloom.lock',
             ]),
         ];
-        return $problems !== [] ? 'not writable by PHP: ' . implode(', ', $problems) : null;
+        return $problems !== [] ? 'PHP cannot write ' . implode(', ', $problems) : null;
     }
 
     /**
-     * The directory, or those of the named files in it that exist, PHP cannot write.
+     * The directory, or those of the named files in it that exist, PHP cannot write. A directory
+     * that does not exist yet is writable when its nearest existing parent is.
      *
+     * @internal Also used by RateLimiter::storeStatus().
      * @param list<string> $files
      * @return list<string>
      */
-    private static function unwritable(string $dir, array $files): array
+    public static function unwritable(string $dir, array $files): array
     {
-        if (!is_dir($dir)) {
+        if (!file_exists($dir)) {
             $parent = dirname($dir);
-            while (!is_dir($parent) && dirname($parent) !== $parent) {
+            while (!file_exists($parent) && dirname($parent) !== $parent) {
                 $parent = dirname($parent);
             }
-            return is_writable($parent) ? [] : [$dir];
+            return is_dir($parent) && is_writable($parent) ? [] : [$dir];
         }
-        if (!is_writable($dir)) {
+        if (!is_dir($dir) || !is_writable($dir)) {
             return [$dir];
         }
         $paths = array_map(fn (string $file) => $dir . '/' . $file, $files);

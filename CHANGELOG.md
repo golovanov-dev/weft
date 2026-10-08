@@ -116,12 +116,16 @@ pre-1.0 the API may change between minor versions.
   file. If your settings are already in `app.php`, alerts start being sent after the upgrade.
   Alerts enabled without `base_url` or `api_key` still send nothing, and now say so in the error
   log, once per request.
-- Error logs, traces, cache entries and rate-limit counters are created with modes `2770`
-  (directories) and `660` (files) whatever the umask, so PHP and `scripts/sitemap.php` or a cron job
-  run as the deploy user can write each other's files. The deployment guide now keeps `storage/`
-  the deploy user's, with the PHP user's group and setgid directories, and adds the deploy user to
-  that group to read logs, traces and cache entries. To switch, in the site root as the deploy user:
-  `sudo chown -R "$USER" storage`, then step 5 of the guide, then log out and back in.
+- Weft sets no permissions on what it writes under `storage/`: error logs, traces, cache entries,
+  rate-limit counters and their directories get the mode the umask of the process gives. Before,
+  traces were forced to `0640` (their directory to `0750`) and other directories were created at
+  most `0770`; with the common umask `022` error logs and traces are now readable by other users
+  on the server unless `storage/` is closed to them (`o-rwx`, step 5 of the guide). Permissions
+  are the server's job: the deployment guide gives `storage/` one group for PHP and every other
+  writer (cron jobs, `scripts/sitemap.php`), setgid directories and `umask 002` for each of them.
+  When upgrading, apply steps 5 and 6 of the guide, add `umask 002;` to your cron lines and to
+  commands you run over ssh or from CI, exclude `storage/` and `config/config.php` if you deploy
+  with rsync, and run `health.php` as the PHP user.
 
 ### Fixed
 
