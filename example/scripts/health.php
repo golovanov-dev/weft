@@ -5,16 +5,18 @@ declare(strict_types=1);
 /**
  * CLI health check:  php scripts/health.php
  * Reports PHP version, writable storage, and whether optional integrations are wired.
- * Exits with 1 when something leaves the site broken or unprotected: logs or rate-limit counters
- * not writable, counters in files while app.cache.driver is redis (rate_limit_error says why),
+ * Exits with 1 when something leaves the site broken or unprotected: logs not writable, the
+ * rate-limit directory or a file in it (a counter or a cache entry) that PHP cannot write,
+ * counters in files while app.cache.driver is redis (rate_limit_error says why),
  * PROXY_IPS not an array or with an entry that is invalid or too wide, or (outside DEBUG) a
- * captcha enabled without its keys.
+ * captcha or alerts enabled without their keys.
  */
 
 require dirname(__DIR__) . '/bootstrap.php';
 
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\Request;
+use Golovanov\Weft\Observability\Alert;
 use Golovanov\Weft\Security\Captcha;
 use Golovanov\Weft\Security\RateLimiter;
 
@@ -42,6 +44,7 @@ $report = [
     'captcha_enabled' => (bool) Config::get('app.captcha.enabled', false),
     'captcha_missing_keys' => Captcha::missingKeys(),
     'alertloop_enabled' => (bool) Config::get('app.alertloop.enabled', false),
+    'alertloop_missing_keys' => Alert::missingKeys(),
 ];
 
 $report['ok'] = $report['logs_writable']
@@ -50,7 +53,8 @@ $report['ok'] = $report['logs_writable']
     && $report['proxy_ips_error'] === null
     && $report['proxy_ips_invalid'] === []
     && $report['proxy_ips_trust_all'] === []
-    && ($report['captcha_missing_keys'] === [] || $report['debug']);
+    && ($report['captcha_missing_keys'] === [] || $report['debug'])
+    && ($report['alertloop_missing_keys'] === [] || $report['debug']);
 
 echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
 exit($report['ok'] ? 0 : 1);

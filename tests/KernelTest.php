@@ -9,7 +9,10 @@ use Golovanov\Weft\Http\Request;
 use Golovanov\Weft\Http\Response;
 use Golovanov\Weft\I18n\Locale;
 use Golovanov\Weft\Kernel;
+use Golovanov\Weft\Observability\Alert;
+use Golovanov\Weft\Observability\ErrorHandler;
 use Golovanov\Weft\Seo\Seo;
+use Golovanov\Weft\View\View;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
@@ -288,5 +291,56 @@ final class KernelTest extends TestCase
         $this->assertSame('/about', $response->headers['Location']);
         // One redirect straight to the final address.
         $this->assertSame('/', $this->route('/en/home/')->headers['Location']);
+    }
+
+    public function testApiEndpointThatThrowsLeavesNoBufferOpen(): void
+    {
+        $level = ob_get_level();
+        try {
+            $this->route('/api/broken');
+            $this->fail('the endpoint exception must reach the kernel');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('endpoint failed', $e->getMessage());
+        }
+        $this->assertSame($level, ob_get_level());
+    }
+
+    /** handle() end to end: a page that throws is a 500 without its half-rendered HTML, then alerts. */
+    public function testPageExceptionIsA500WithoutPartialOutputAndRaisesTheAlert(): void
+    {
+        Config::set('app.alertloop', ['enabled' => true, 'base_url' => 'https://alerts.example', 'api_key' => 'k']);
+        $alerts = [];
+        $sentBeforeAlert = [];
+        (new \ReflectionProperty(Alert::class, 'transport'))->setValue(
+            null,
+            static function (string $url, string $key, array $payload) use (&$alerts, &$sentBeforeAlert): array {
+                $alerts[] = $payload;
+                $sentBeforeAlert[] = (string) ob_get_contents();
+                return ['status' => 202, 'error' => ''];
+            },
+        );
+        $_SERVER['REQUEST_URI'] = '/broken';
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+
+        $level = ob_get_level();
+        ob_start();
+        Kernel::handle();
+        $output = (string) ob_get_clean();
+
+        $this->assertSame($level, ob_get_level());
+        $this->assertStringContainsString('<h1>500</h1>', $output);
+        $this->assertStringNotContainsString('half a page', $output);
+        // The 500 went out before the alert waited for AlertLoop.
+        $this->assertStringContainsString('<h1>500</h1>', $sentBeforeAlert[0] ?? '');
+
+        // The alert is the one the exception handler raises for the same throw site.
+        try {
+            View::render(APP_ROOT . '/pages/broken.php');
+        } catch (\RuntimeException $e) {
+            ErrorHandler::report($e, 'exception');
+        }
+        $this->assertCount(2, $alerts);
+        $this->assertSame('Unhandled exception: render failed', $alerts[0]['message']);
+        $this->assertSame($alerts[1], $alerts[0]);
     }
 }

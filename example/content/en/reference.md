@@ -108,7 +108,7 @@ Headers::send();
 
 ```php
 Trace::event($name, $data);  Trace::id();  Trace::isActive();
-Alert::send($msg, $severity, $type, $dedupeKey, $context, $category);  Alert::critical($msg, $ctx);  Alert::notifier();
+Alert::send($msg, $severity, $type, $dedupeKey, $context, $category);  Alert::critical($msg, $ctx);  Alert::notifier();  Alert::missingKeys();
 ErrorHandler::log($type, $code, $msg, $file, $line);  ErrorHandler::debug();
 ```
 

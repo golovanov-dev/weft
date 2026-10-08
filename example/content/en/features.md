@@ -86,7 +86,9 @@ Also `Cache::get/set/has/forget/flush`, and `php scripts/cache-clear.php`.
 Two properties worth knowing: when caching is **off**, a NullStore is used — `remember()` still runs
 the callback, so wrapping code in it is always safe and you can enable the cache later. And if Redis
 is unreachable or rejects `REDIS_PASSWORD` or `REDIS_DB`, the engine falls back to the file store
-instead of failing the request; `php scripts/health.php` then fails and says why.
+instead of failing the request; `php scripts/health.php` then fails and says why. A store that fails
+later (a read-only replica, `maxmemory` reached) does not fail the page either: reads are misses,
+writes are skipped, and the error log gets one line per request.
 
 > A useful trick used by this very site: put the file's `mtime` in the cache key. Editing content
 > invalidates the entry automatically.
@@ -174,8 +176,17 @@ See `api/contact.php` in this example for the complete flow.
 
 ## Alerts for sensitive spots
 
+In `app/Configs/app.php`, with `ALERTLOOP_BASE_URL` and `ALERTLOOP_API_KEY` set in
+`config/config.php` (see [Configuration](/docs/configuration)):
+
 ```php
-'alertloop' => ['enabled' => true, 'base_url' => ALERTLOOP_BASE_URL, 'api_key' => ALERTLOOP_API_KEY],
+'alertloop' => [
+    'enabled' => defined('ALERTLOOP_API_KEY') && ALERTLOOP_API_KEY !== '',
+    'base_url' => defined('ALERTLOOP_BASE_URL') ? ALERTLOOP_BASE_URL : '',
+    'api_key' => defined('ALERTLOOP_API_KEY') ? ALERTLOOP_API_KEY : '',
+    'source' => 'weft-docs',   // this site's name in AlertLoop events
+    'timeout' => 4,            // seconds a send waits for AlertLoop
+],
 ```
 
 ```php
@@ -191,11 +202,15 @@ is sent as the event's `payload`, the current trace id travels as the top-level 
 `$type` is an AlertLoop event type (`incident`, `business_event`, `audit`) — use `category` for your
 own labels.
 
-Delivery is best-effort and non-blocking: nothing is retried and no failure reaches your code. It is
-not silent, though — a delivery that fails is recorded on the request trace as an `alert.failed`
-event (status, transport flag, event type and category; never the alert body). Unhandled exceptions
-and fatals alert automatically; database errors alert once the site registers a notifier, as this
-example's `app/Bootstrap.php` does with `Database::setErrorNotifier(Alert::notifier())`.
+Delivery is synchronous and best-effort: a send waits for AlertLoop up to `app.alertloop.timeout`
+seconds, nothing is retried and no failure reaches your code. It is not silent, though — a delivery
+that fails is recorded on the request trace as an `alert.failed` event (status, transport flag, event
+type and category; never the alert body).
+
+Unhandled exceptions and fatals alert automatically. For an exception thrown by a page or an API
+endpoint the 500 response goes out first and the alert after it, so under PHP-FPM the visitor does
+not wait for AlertLoop. Database errors alert once the site registers a notifier, as this example's
+`app/Bootstrap.php` does with `Database::setErrorNotifier(Alert::notifier())`.
 
 ## Database
 

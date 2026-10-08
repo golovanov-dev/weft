@@ -54,12 +54,12 @@ pre-1.0 the API may change between minor versions.
   cannot be written (with Redis, a probe write; with files, the directory or a counter file in it)
   or went to files while `app.cache.driver` is `redis`, when `PROXY_IPS` is not an array or has an
   entry that is not an IP or a CIDR range or is too wide for a proxy (`/0`, an IPv4 range wider
-  than `/8`, an IPv6 one wider than `/16`), or when a captcha is enabled without its keys outside
-  `DEBUG`. New fields: `cache_driver`, `rate_limit_store`, `rate_limit_path`,
+  than `/8`, an IPv6 one wider than `/16`), or when a captcha or alerts are enabled without their
+  keys outside `DEBUG`. New fields: `cache_driver`, `rate_limit_store`, `rate_limit_path`,
   `rate_limit_writable`, `rate_limit_error` (why), `proxy_ips_error`, `proxy_ips_invalid`,
-  `proxy_ips_trust_all`, `captcha_missing_keys`. If your site copied the script, update the engine to 0.2.0 first, then
+  `proxy_ips_trust_all`, `captcha_missing_keys`, `alertloop_missing_keys`. If your site copied the script, update the engine to 0.2.0 first, then
   copy the script again: on an older engine it stops with a fatal error. The engine side:
-  `Captcha::missingKeys()`, `RateLimiter::storeStatus()`, `Request::invalidProxyIps()`,
+  `Captcha::missingKeys()`, `Alert::missingKeys()`, `RateLimiter::storeStatus()`, `Request::invalidProxyIps()`,
   `Request::trustAllProxyIps()`, `Request::proxyIpsError()`.
 - `PROXY_IPS` accepts CIDR ranges, IPv4 and IPv6 (`'173.245.48.0/20'`, `'2400:cb00::/32'`), next
   to exact addresses, so a CDN such as Cloudflare can be listed by its published ranges. An entry
@@ -107,6 +107,17 @@ pre-1.0 the API may change between minor versions.
   pages also lose the no-cache headers PHP sent with the session; if your site relied on them, send
   `Cache-Control` yourself. If your site copied this file, remove the `session_start()` line too,
   with the same effect on headers.
+- `Alert` reads its settings only from `app.alertloop.*`, the `'alertloop'` block of
+  `app/Configs/app.php`, as documented. It used to read a top-level `alertloop.*`, so alerts
+  configured as documented were silently off, and only a separate `app/Configs/alertloop.php`
+  worked. If you have that file, move its array into `app.php` under `'alertloop'` and delete the
+  file. If your settings are already in `app.php`, alerts start being sent after the upgrade.
+  Alerts enabled without `base_url` or `api_key` still send nothing, and now say so in the error
+  log, once per request.
+- The file cache creates its entries and rate-limit counters with mode `660` whatever the umask, so
+  PHP can overwrite a cache file that `scripts/sitemap.php` or a cron job created as the deploy user.
+  The deployment guide now gives `storage/` the PHP user's group with setgid directories instead of
+  making PHP its owner; to switch, run step 5 of the guide once.
 
 ### Fixed
 
@@ -120,6 +131,14 @@ pre-1.0 the API may change between minor versions.
   a Redis that requires one made cached pages fail with 500, and a `REDIS_DB` out of range was
   ignored (database 0 was used). If
   `health.php` reports `rate_limit_store: file`, `rate_limit_error` says why.
+- A Redis that accepts the connection but rejects commands (a read-only replica, `maxmemory` reached
+  under `noeviction`) no longer makes every cached page fail with 500. A cache read it rejects is
+  a miss, a write is skipped, and the error log gets one `Cache store failed` line per request.
+- An exception thrown by a page or an API endpoint now raises the same critical alert as any other
+  unhandled exception (same message and dedupe key); before, it was only logged. The alert is sent
+  after the 500 response, so under PHP-FPM the visitor does not wait for AlertLoop (up to
+  `app.alertloop.timeout` seconds). Its half-rendered output is discarded instead of being sent
+  ahead of the 500 response.
 
 ## 0.1.3 - 2026-08-24
 

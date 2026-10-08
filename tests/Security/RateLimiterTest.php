@@ -115,7 +115,7 @@ final class RateLimiterTest extends TestCase
                     'store' => 'file',
                     'path' => $this->dir,
                     'writable' => false,
-                    'error' => '1 file(s) in the directory are not writable, e.g. ' . basename($files[0]),
+                    'error' => '1 file(s) in the directory that PHP cannot overwrite (cache entries or counters), e.g. ' . basename($files[0]),
                 ],
                 RateLimiter::storeStatus(),
             );
@@ -244,6 +244,33 @@ final class RateLimiterTest extends TestCase
         $this->assertTrue(RateLimiter::allow('api', 2, 30));
         $this->assertFalse(RateLimiter::allow('api', 2, 30));
         $this->assertSame(['site:ratelimit:api:cli' => 30], $redis->ttls);
+    }
+
+    public function testFailsOpenAndLogsWhenRedisRejectsTheIncrement(): void
+    {
+        if (!extension_loaded('redis')) {
+            $this->markTestSkipped('ext-redis is not installed');
+        }
+
+        // phpredis 6 throws on an error reply to EVAL (read-only replica, maxmemory under noeviction).
+        $redis = new class extends \Redis {
+            public function eval(string $script, array $args = [], int $num_keys = 0): mixed
+            {
+                throw new \RedisException("READONLY You can't write against a read only replica.");
+            }
+        };
+        $store = (new \ReflectionClass(RedisStore::class))->newInstanceWithoutConstructor();
+        (new \ReflectionProperty(RedisStore::class, 'redis'))->setValue($store, $redis);
+        (new \ReflectionProperty(RedisStore::class, 'prefix'))->setValue($store, 'site:');
+        (new \ReflectionProperty(RateLimiter::class, 'store'))->setValue(null, $store);
+        $logOffset = self::errorLogSize();
+
+        $this->assertTrue(RateLimiter::allow('form', 1, 60));
+        $this->assertTrue(RateLimiter::allow('form', 1, 60));
+        $this->assertStringContainsString(
+            "RATE_LIMIT ERRNO:500 | Rate limit failed open: READONLY You can't write against a read only replica.",
+            self::errorLogSince($logOffset),
+        );
     }
 
     public function testHoneypotDetectsFilledHiddenField(): void

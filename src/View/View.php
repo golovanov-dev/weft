@@ -20,7 +20,8 @@ final class View
     }
 
     /**
-     * Render a template file to a string in an isolated scope.
+     * Render a template file to a string in an isolated scope. If the template throws, its output
+     * is discarded and the throwable propagates.
      *
      * @param array<string, mixed> $data
      */
@@ -32,9 +33,18 @@ final class View
 
         $render = static function (string $__file, array $__data): string {
             extract($__data, EXTR_SKIP);
+            $__level = ob_get_level();
             ob_start();
-            include $__file;
-            return (string) ob_get_clean();
+            try {
+                include $__file;
+                return (string) ob_get_clean();
+            } finally {
+                // A template that threw leaves half a page (and any buffer it opened) behind;
+                // drop it so it is not sent ahead of the error page.
+                while (ob_get_level() > $__level) {
+                    ob_end_clean();
+                }
+            }
         };
 
         return $render($file, array_merge(self::$shared, $data));

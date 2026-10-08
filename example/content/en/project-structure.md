@@ -109,7 +109,8 @@ App\Bootstrap::init();                        // 6) site wiring
 ```
 
 Any uncaught `Throwable` is logged, alerted (if AlertLoop is on) and turned into a 500 — JSON when
-the client wanted JSON, HTML otherwise, with a stack trace only when `DEBUG` is on.
+the client wanted JSON, HTML otherwise, with a stack trace only when `DEBUG` is on. Whatever the
+page or endpoint printed before it threw is dropped.
 
 ## How a page becomes HTML
 

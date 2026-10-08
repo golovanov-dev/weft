@@ -28,17 +28,23 @@ final class RedisStore implements Store
     ) {
         $this->redis = $client ?? new Redis();
         $this->redis->connect($host, $port, 2.0);
-        // phpredis returns false (no exception) on a rejected password or database number.
+        // phpredis throws RedisException for some rejections (WRONGPASS, NOAUTH) and returns false
+        // for plain ERR replies (Redis 5's "ERR invalid password", a database out of range).
         if ($password !== '' && $this->redis->auth($password) !== true) {
-            throw new \RuntimeException('Redis AUTH failed: ' . ($this->redis->getLastError() ?? 'rejected'));
+            throw new \RuntimeException('Redis AUTH failed: ' . $this->lastError());
         }
         if ($database !== 0 && $this->redis->select($database) !== true) {
-            throw new \RuntimeException('Redis SELECT ' . $database . ' failed: ' . ($this->redis->getLastError() ?? 'rejected'));
+            throw new \RuntimeException('Redis SELECT ' . $database . ' failed: ' . $this->lastError());
         }
         // A Redis that requires a password nobody sent answers NOAUTH only to the first command.
         if ($this->redis->ping() === false) {
-            throw new \RuntimeException('Redis PING failed: ' . ($this->redis->getLastError() ?? 'no reply'));
+            throw new \RuntimeException('Redis PING failed: ' . $this->lastError());
         }
+    }
+
+    private function lastError(): string
+    {
+        return $this->redis->getLastError() ?? 'rejected';
     }
 
     public function get(string $key): mixed

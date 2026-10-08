@@ -53,7 +53,7 @@ define('RECAPTCHA_SITEKEY', '');    // public key → the frontend
 define('RECAPTCHA_SECRETKEY', '');  // secret key → verification; setting it enables the captcha (needs the site key too)
 
 define('ALERTLOOP_BASE_URL', '');   // e.g. https://alerts.example.com
-define('ALERTLOOP_API_KEY', '');    // setting it enables alerts
+define('ALERTLOOP_API_KEY', '');    // setting it enables alerts; needs ALERTLOOP_BASE_URL too
 
 define('MAIL_TO', 'hello@example.com');
 define('MAIL_FROM', 'noreply@example.com');
@@ -148,7 +148,6 @@ and without it is valid.
 'cache'      => ['enabled' => true, 'driver' => 'file', 'path' => '…/storage/cache', 'prefix' => 'weft:'],  // on in this demo, see below; path: absolute or relative to APP_ROOT, defaults to storage/cache; prefix applies to redis only
 'rate_limit' => ['max' => 20, 'window' => 60, 'path' => '…'],  // per client IP per bucket; path: absolute or relative to APP_ROOT, defaults to cache.path
 'captcha'    => ['enabled' => …, 'site_key' => …, 'secret_key' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],
-'alertloop'  => ['enabled' => …, 'base_url' => …, 'api_key' => …, 'source' => 'my-site', 'timeout' => 4],
 'trace'      => ['log_body' => true, 'sensitive_keys' => [], 'retention_days' => 30],    // see below
 'security'   => ['frame_options' => 'SAMEORIGIN', 'referrer_policy' => 'strict-origin-when-cross-origin',
                  'permissions_policy' => 'geolocation=(), microphone=(), camera=()', 'hsts' => true, 'csp' => ''],
@@ -172,6 +171,22 @@ Note how feature flags derive from the environment, so there is one source of tr
 So the keys `php scripts/health.php` names under `captcha_missing_keys` (`site_key`, `secret_key`)
 are set as `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` in `config/config.php`. To disable the
 captcha in this example, set `RECAPTCHA_SECRETKEY` to `''`.
+
+### AlertLoop
+
+```php
+'alertloop' => [
+    'enabled' => defined('ALERTLOOP_API_KEY') && ALERTLOOP_API_KEY !== '',
+    'base_url' => defined('ALERTLOOP_BASE_URL') ? ALERTLOOP_BASE_URL : '',
+    'api_key' => defined('ALERTLOOP_API_KEY') ? ALERTLOOP_API_KEY : '',
+    'source' => 'weft-docs',   // this site's name in AlertLoop events
+    'timeout' => 4,            // seconds a send waits for AlertLoop
+],
+```
+
+Alerts are on once `ALERTLOOP_API_KEY` is set and need `ALERTLOOP_BASE_URL` too: without it nothing
+is sent, the error log gets a line, and `php scripts/health.php` lists the key under
+`alertloop_missing_keys`. To turn alerts off, set `ALERTLOOP_API_KEY` to `''`.
 
 ### Trace
 

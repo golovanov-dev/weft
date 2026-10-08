@@ -40,6 +40,20 @@ final class ViewTest extends TestCase
         View::render(self::VIEWS . '/nope.php');
     }
 
+    public function testTemplateThatThrowsLeavesNoOutputBehind(): void
+    {
+        $level = ob_get_level();
+        ob_start();
+        try {
+            View::render(self::VIEWS . '/throws.php');
+            $this->fail('the template exception must propagate');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('render failed', $e->getMessage());
+        }
+        $this->assertSame($level + 1, ob_get_level());
+        $this->assertSame('', ob_get_clean());
+    }
+
     public function testPageWrapsContentInLayout(): void
     {
         $html = View::page(self::SITE . '/pages/about.php', self::SITE . '/components/layout.php');

@@ -7,6 +7,7 @@ namespace Golovanov\Weft\Tests\Cache;
 use Golovanov\Weft\Cache\Cache;
 use Golovanov\Weft\Cache\FileStore;
 use Golovanov\Weft\Cache\NullStore;
+use Golovanov\Weft\Cache\Store;
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Tests\TestCase;
 
@@ -100,5 +101,67 @@ final class CacheTest extends TestCase
         Cache::set('k', 'v');
 
         $this->assertCount(1, glob($this->dir . '/*.cache') ?: []);
+    }
+
+    /**
+     * A store that accepts the connection and then fails every call, as Redis does when it is a
+     * read-only replica or out of memory under noeviction.
+     */
+    private static function failingStore(): Store
+    {
+        return new class implements Store {
+            public function get(string $key): mixed
+            {
+                throw new \RuntimeException('OOM command not allowed');
+            }
+
+            public function set(string $key, mixed $value, int $ttl = 0): void
+            {
+                throw new \RuntimeException('OOM command not allowed');
+            }
+
+            public function has(string $key): bool
+            {
+                throw new \RuntimeException('OOM command not allowed');
+            }
+
+            public function forget(string $key): void
+            {
+                throw new \RuntimeException('OOM command not allowed');
+            }
+
+            public function flush(): void
+            {
+                throw new \RuntimeException('OOM command not allowed');
+            }
+        };
+    }
+
+    public function testAFailingStoreIsAMissAndLogsOncePerRequest(): void
+    {
+        Cache::use(self::failingStore());
+        $logOffset = self::errorLogSize();
+
+        $this->assertSame('page', Cache::remember('page', 60, fn (): string => 'page'));
+        $this->assertSame('d', Cache::get('k', 'd'));
+        $this->assertFalse(Cache::has('k'));
+        Cache::set('k', 'v');
+        Cache::forget('k');
+        Cache::flush();
+
+        $log = self::errorLogSince($logOffset);
+        $this->assertStringContainsString('CACHE ERRNO:500 | Cache store failed, continuing without cache: OOM command not allowed', $log);
+        $this->assertSame(1, substr_count($log, "\n"));
+        // The line points at the store that threw, not at the facade.
+        $this->assertStringContainsString('| ' . __FILE__ . ':', $log);
+    }
+
+    public function testRememberStillThrowsWhatTheCallbackThrows(): void
+    {
+        // Even with a failing store, only store calls are guarded: the callback's own error is not a miss.
+        Cache::use(self::failingStore());
+
+        $this->expectExceptionMessage('callback failed');
+        Cache::remember('k', 60, fn () => throw new \LogicException('callback failed'));
     }
 }

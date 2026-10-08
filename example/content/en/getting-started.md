@@ -92,7 +92,8 @@ php scripts/health.php
   "cache_enabled": true,
   "captcha_enabled": false,
   "captcha_missing_keys": [],
-  "alertloop_enabled": false
+  "alertloop_enabled": false,
+  "alertloop_missing_keys": []
 }
 ```
 

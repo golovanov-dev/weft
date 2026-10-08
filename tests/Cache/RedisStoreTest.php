@@ -11,28 +11,30 @@ use PHPUnit\Framework\Attributes\DataProvider;
 final class RedisStoreTest extends TestCase
 {
     /**
-     * @return array<string, array{string, int, array<string, mixed>, list<string>, ?string}>
+     * @return array<string, array{string, int, array<string, string>, list<string>, ?string}>
      */
     public static function connections(): array
     {
         return [
             'no password, database 0' => ['', 0, [], ['connect', 'ping'], null],
             'password and database accepted' => ['secret', 3, [], ['connect', 'auth', 'select', 'ping'], null],
-            'password rejected' => ['wrong', 3, ['auth' => false], ['connect', 'auth'], 'Redis AUTH failed: ERR rejected'],
-            'database rejected' => ['', 99, ['select' => false], ['connect', 'select'], 'Redis SELECT 99 failed: ERR rejected'],
-            'password required, none sent' => ['', 0, ['ping' => false], ['connect', 'ping'], 'Redis PING failed: ERR rejected'],
+            'password rejected, Redis 6+' => ['wrong', 3, ['auth' => 'WRONGPASS invalid username-password pair'], ['connect', 'auth'], 'WRONGPASS invalid username-password pair'],
+            'password rejected, Redis 5' => ['wrong', 3, ['auth' => 'ERR invalid password'], ['connect', 'auth'], 'Redis AUTH failed: ERR invalid password'],
+            'database rejected' => ['', 99, ['select' => 'ERR DB index is out of range'], ['connect', 'select'], 'Redis SELECT 99 failed: ERR DB index is out of range'],
+            'password required, none sent' => ['', 0, ['ping' => 'NOAUTH Authentication required.'], ['connect', 'ping'], 'NOAUTH Authentication required.'],
+            'first command refused with ERR' => ['', 0, ['ping' => 'ERR max number of clients reached'], ['connect', 'ping'], 'Redis PING failed: ERR max number of clients reached'],
         ];
     }
 
     /**
-     * @param array<string, mixed> $replies
-     * @param list<string>         $calls
+     * @param array<string, string> $rejects command => Redis error reply
+     * @param list<string>          $calls
      */
     #[DataProvider('connections')]
     public function testConnectChecksTheConnectionBeforeUse(
         string $password,
         int $database,
-        array $replies,
+        array $rejects,
         array $calls,
         ?string $error,
     ): void {
@@ -40,12 +42,15 @@ final class RedisStoreTest extends TestCase
             $this->markTestSkipped('ext-redis is not installed');
         }
 
-        // No Redis server in tests: the client answers every command with its canned reply.
+        // No Redis server in tests. The client answers a rejected command the way phpredis does:
+        // a plain "ERR ..." reply returns false with the reply in getLastError(), any other
+        // (WRONGPASS, NOAUTH) throws RedisException.
         $client = new class extends \Redis {
-            /** @var array<string, mixed> */
-            public array $replies = [];
+            /** @var array<string, string> */
+            public array $rejects = [];
             /** @var list<string> */
             public array $calls = [];
+            private ?string $lastError = null;
 
             public function connect(string $host, int $port = 6379, float $timeout = 0, ?string $persistent_id = null, int $retry_interval = 0, float $read_timeout = 0, ?array $context = null): bool
             {
@@ -55,28 +60,39 @@ final class RedisStoreTest extends TestCase
 
             public function auth(mixed $credentials): \Redis|bool
             {
-                $this->calls[] = 'auth';
-                return $this->replies['auth'] ?? true;
+                return $this->reply('auth');
             }
 
             public function select(int $db): \Redis|bool
             {
-                $this->calls[] = 'select';
-                return $this->replies['select'] ?? true;
+                return $this->reply('select');
             }
 
             public function ping(?string $message = null): \Redis|string|bool
             {
-                $this->calls[] = 'ping';
-                return $this->replies['ping'] ?? true;
+                return $this->reply('ping');
             }
 
             public function getLastError(): ?string
             {
-                return 'ERR rejected';
+                return $this->lastError;
+            }
+
+            private function reply(string $command): bool
+            {
+                $this->calls[] = $command;
+                $error = $this->rejects[$command] ?? null;
+                if ($error === null) {
+                    return true;
+                }
+                if (!str_starts_with($error, 'ERR ')) {
+                    throw new \RedisException($error);
+                }
+                $this->lastError = $error;
+                return false;
             }
         };
-        $client->replies = $replies;
+        $client->rejects = $rejects;
 
         try {
             new RedisStore(password: $password, database: $database, client: $client);

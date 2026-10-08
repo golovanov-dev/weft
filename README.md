@@ -43,8 +43,8 @@ convention-driven core so a new site is mostly content.
   trace files deleted after 30 days.
 - **Form protection by default** — rate limiting, CSRF, honeypot and Google reCAPTCHA v3.
 - **Alerting for sensitive spots** — push events to
-  [AlertLoop](https://github.com/golovanov-dev/alertloop); best-effort, never blocks a request,
-  and a failed delivery is recorded on the request trace instead of vanishing.
+  [AlertLoop](https://github.com/golovanov-dev/alertloop); best-effort with a timeout, and a failed
+  delivery is recorded on the request trace instead of vanishing.
 - **Batteries in the engine** — HTTP client, PDO wrapper, JWT (firebase/php-jwt), security headers.
 - **Vite** — dev server with HMR, hashed production assets from the manifest, with
   preload hints for the entry and its statically imported chunks.
@@ -134,17 +134,24 @@ config('app.seo.site_name');
 config('app.cache.enabled', false);
 ```
 
-Everything optional is a flag:
+Everything optional is a flag in `app/Configs/app.php`:
 
 ```php
 'locales'   => ['enabled' => true, 'supported' => ['en', 'ru']],
 'cache'     => ['enabled' => true, 'driver' => 'redis'],
 'captcha'   => ['enabled' => true, 'site_key' => RECAPTCHA_SITEKEY, 'secret_key' => RECAPTCHA_SECRETKEY],
-'alertloop' => ['enabled' => true],
+'alertloop' => [
+    'enabled' => defined('ALERTLOOP_API_KEY') && ALERTLOOP_API_KEY !== '',
+    'base_url' => defined('ALERTLOOP_BASE_URL') ? ALERTLOOP_BASE_URL : '',
+    'api_key' => defined('ALERTLOOP_API_KEY') ? ALERTLOOP_API_KEY : '',
+    'source' => 'weft-docs',   // this site's name in AlertLoop events
+    'timeout' => 4,            // seconds a send waits for AlertLoop
+],
 ```
 
 The captcha needs both keys: enabled without them, it rejects every form submission unless `DEBUG` is on.
-`php scripts/health.php` lists the missing keys.
+Alerts need both `ALERTLOOP_*` constants in `config/config.php`: without the address nothing is sent.
+`php scripts/health.php` lists the missing keys of either.
 
 ## Documentation
 

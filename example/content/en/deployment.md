@@ -31,20 +31,23 @@ cp config/config.example.php config/config.php
 # 4. Frontend (here or in CI)
 npm ci && npm run build
 
-# 5. Writable runtime, owned by the user PHP runs as (www-data below; see "Who writes storage/")
+# 5. Writable runtime: storage/ gets the group PHP runs as (www-data below; see "Who writes storage/")
 mkdir -p storage/logs storage/cache
-sudo chown -R www-data:www-data storage
-sudo chmod -R 770 storage
+sudo chgrp -R www-data storage
+sudo chmod -R g+rwX,o-rwx storage
+sudo find storage -type d -exec chmod 2770 {} +
 
 # 6. Optional: a static sitemap for a CDN
 php scripts/sitemap.php
 
-# 7. Verify, as the same user PHP runs as
+# 7. Verify, as the user PHP runs as
 sudo -u www-data php scripts/health.php
 ```
 
 Run all of this on the server, in the site root (the directory holding `bootstrap.php`), as the
-user who deploys the code; steps 5 and 7 need `sudo`.
+user who deploys the code; steps 5 and 7 need `sudo`. Substitute your PHP user and its group for
+`www-data`: they are `user` and `group` of the PHP-FPM pool (for example
+`/etc/php/8.4/fpm/pool.d/www.conf`) or the user Apache runs as.
 
 > **Non-negotiable in production:** `DEBUG=false` and `DEV_MODE=false`. Otherwise assets are fetched
 > from a Vite dev server that is not running, and errors are shown to visitors.
@@ -52,15 +55,17 @@ user who deploys the code; steps 5 and 7 need `sudo`.
 ### Who writes `storage/`
 
 PHP writes logs, traces, the file cache and rate-limit counters under `storage/` (counters live in
-`storage/cache` even with caching off, unless `app.rate_limit.path` points elsewhere). The user PHP
-runs as must be able to write there. `chmod` alone does not give that: with `770`, a directory owned
-by the deploy user is closed to `www-data` unless `www-data` is its group. Make it the owner, as
-above, or keep the deploy user as owner and hand over the group: `sudo chgrp -R www-data storage`.
-Substitute your PHP user for `www-data`: it is the `user` of the PHP-FPM pool (for example
-`/etc/php/8.4/fpm/pool.d/www.conf`) or the user Apache runs as.
+`storage/cache` even with caching off, unless `app.rate_limit.path` points elsewhere). The deploy
+user writes cache files there too, from `php scripts/sitemap.php` and cron jobs.
 
-Run `health.php` as that same user. From the deploy user's shell it checks the deploy user's
-permissions and can report `ok: true` for a `storage/` that PHP cannot write.
+Step 5 lets both write: `storage/` stays the deploy user's, its group is the PHP user's group, and the
+setgid bit (the `2` in `2770`) gives every file and directory created in it that group. The engine
+creates cache entries and counters with mode `660` whatever the umask, so PHP can overwrite an entry a
+script of the deploy user created.
+
+Run scripts and cron jobs as the deploy user (its own `crontab -e`). Run `health.php` as the PHP user
+(step 7): from the deploy user's shell it checks the deploy user's permissions and can report
+`ok: true` for a `storage/` that PHP cannot write.
 
 If PHP cannot write `storage/`, rate limits stop limiting: the limiter fails open so a broken disk
 never locks visitors out, and the line it writes about that goes to `storage/logs/errors/`, which is
@@ -73,24 +78,31 @@ It prints a JSON report and exits with 1 when `ok` is false. `ok` is false when 
 | Field | Bad value | What to do |
 |---|---|---|
 | `logs_writable` | `false` | give the PHP user write access to `LOGS_PATH` (see above) |
-| `rate_limit_writable` | `false` | rate limits are off; `rate_limit_error` says why: give the PHP user write access to `rate_limit_path` and the files in it; with Redis, see below |
+| `rate_limit_writable` | `false` | `rate_limit_error` says what PHP cannot write: give the PHP user write access to `rate_limit_path` and the files in it (see above); with Redis, see below |
 | `rate_limit_store` | `file` while `cache_driver` is `redis` | Redis is not used, the cache and counters are per server: see below |
 | `proxy_ips_error` | not `null` | `PROXY_IPS` is not an array, so no proxy is trusted: write `define('PROXY_IPS', [...])` |
 | `proxy_ips_invalid` | not empty | these `PROXY_IPS` entries are ignored: replace them with IP addresses or CIDR ranges; for `localhost` write `'127.0.0.1'` and/or `'::1'` |
 | `proxy_ips_trust_all` | not empty | these entries are too wide for a proxy (`0.0.0.0/0`, `::/0`, an IPv4 range wider than `/8`, an IPv6 one wider than `/16`): list only your proxies (below) |
 | `captcha_missing_keys` | not empty, with `DEBUG` off | every form submission is rejected: set the keys or disable the captcha (below) |
+| `alertloop_missing_keys` | not empty, with `DEBUG` off | alerts are on but nothing is sent: set the keys or turn alerts off (below) |
 
-With `DEBUG` on, `captcha_missing_keys` is still listed but does not fail the check: forms pass then.
+With `DEBUG` on, `captcha_missing_keys` and `alertloop_missing_keys` are still listed but do not fail
+the check.
 
 `captcha_missing_keys` names keys of `app.captcha`: `site_key`, `secret_key`. In this example they
 come from `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` in `config/config.php`, and the captcha is
 on whenever `RECAPTCHA_SECRETKEY` is not empty. To disable it, set `RECAPTCHA_SECRETKEY` to `''`; on
 a site with its own config, set `app.captcha.enabled` to `false`.
 
+`alertloop_missing_keys` names keys of `app.alertloop`: `base_url`, `api_key`. They come from
+`ALERTLOOP_BASE_URL` and `ALERTLOOP_API_KEY` in `config/config.php`, and alerts are on whenever
+`ALERTLOOP_API_KEY` is not empty. To turn them off, set `ALERTLOOP_API_KEY` to `''`.
+
 `rate_limit_path` is `app.rate_limit.path`, else `app.cache.path`; a relative one is taken from the
 site root (`APP_ROOT`), so `health.php` and the site use the same directory whatever their working
-directory. A counter file in it that the PHP user cannot write (left by another user) also makes
-`rate_limit_writable` false; `rate_limit_error` names one of them.
+directory. By default it is also the cache directory, so a file in it that PHP cannot overwrite (a
+cache entry or a counter, created by a script run as another user) also makes `rate_limit_writable`
+false; `rate_limit_error` names one of them.
 
 With `app.cache.driver` set to `redis`, the engine sends `PING` after connecting, and `health.php`
 writes a probe counter to Redis (ten-second TTL, deleted at once).
@@ -100,14 +112,28 @@ writes a probe counter to Redis (ten-second TTL, deleted at once).
 | `file` | `Class "Redis" not found` | ext-redis is not installed |
 | `file` | a connection error, such as `Connection refused` | Redis is not reachable at `REDIS_HOST`:`REDIS_PORT` |
 | `file` | `NOAUTH` | Redis requires a password and `REDIS_PASSWORD` is empty |
-| `file` | `WRONGPASS` or `AUTH failed` | `REDIS_PASSWORD` is wrong |
+| `file` | `WRONGPASS`, or `Redis AUTH failed` (Redis 5 and older) | `REDIS_PASSWORD` is wrong |
 | `file` | `called without any password configured` | `REDIS_PASSWORD` is set, but Redis has no password: set it to `''` |
 | `file` | `DB index is out of range` | `REDIS_DB` is higher than Redis allows (16 databases by default) |
 | `redis` | `Redis rejected the probe write` | a read-only replica, `maxmemory` reached under the `noeviction` policy, or a Redis user not allowed to run `EVAL` |
 
-When Redis is not used, the cache falls back to files as well. The site logs the reason to
-`errors/<date>.log` under `LOGS_PATH`, in a line like
-`[2026-10-08 12:00:00] RATE_LIMIT ERRNO:500 | Redis unavailable, rate limits fall back to files: <reason> | …`.
+When Redis is not used, the cache falls back to files as well. If Redis does not answer at all, every
+page that uses the cache waits about 2 seconds for the connection timeout, on every request, until
+Redis is back; so does `health.php`. In the `redis` row pages are still served: a cache read or
+write Redis rejects is skipped, and a form submission whose counter it rejects is allowed.
+
+The site logs the reason to `errors/<date>.log` under `LOGS_PATH`, in lines like these (time in
+`APP_TIMEZONE`):
+
+```text
+[2026-10-08 12:00:00] RATE_LIMIT ERRNO:500 | Redis unavailable, rate limits fall back to files: <reason> | …
+[2026-10-08 12:00:00] CACHE ERRNO:500 | Cache init failed, falling back to file: <reason> | …
+[2026-10-08 12:00:00] CACHE ERRNO:500 | Cache store failed, continuing without cache: <reason> | …
+[2026-10-08 12:00:00] RATE_LIMIT ERRNO:500 | Rate limit failed open: <reason> | …
+```
+
+The first line comes from form submissions and `health.php`, the second from page views; both mean
+Redis is not used. The last two mean Redis rejects commands, as in the `redis` row.
 
 ## Document root is `public/`
 
@@ -240,8 +266,9 @@ them.
   "Behind a proxy or CDN" above); otherwise all visitors share one rate limit
 - [ ] HTTPS on; consider `app.security.hsts`
 - [ ] keys set for whichever of captcha / alerts / mail you use; a captcha enabled with a key missing
-  passes forms while `DEBUG` is on and rejects every submission with it off — `health.php` lists
-  the missing keys under `captcha_missing_keys`
+  passes forms while `DEBUG` is on and rejects every submission with it off, alerts without the
+  address send nothing — `health.php` lists the missing keys under `captcha_missing_keys` and
+  `alertloop_missing_keys`
 - [ ] `app.captcha.allowed_hosts` lists your real domain, if the captcha is on
 - [ ] `sudo -u www-data php scripts/health.php` (your PHP user) → `ok: true`
 

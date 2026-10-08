@@ -43,8 +43,8 @@ define('RECAPTCHA_SITEKEY', '');
 define('RECAPTCHA_SECRETKEY', '');
 
 // --- AlertLoop (notifications for sensitive spots) ---------------------------------------
-define('ALERTLOOP_BASE_URL', '');   // e.g. https://alerts.golovanov.dev
-define('ALERTLOOP_API_KEY', '');
+define('ALERTLOOP_BASE_URL', '');   // e.g. https://alerts.example.com
+define('ALERTLOOP_API_KEY', '');    // setting it enables alerts; needs ALERTLOOP_BASE_URL too
 
 // --- Contact form email (optional; uses PHP mail() or an SMTP service you wire up) --------
 define('MAIL_TO', 'hello@golovanov.dev');

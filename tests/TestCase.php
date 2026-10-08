@@ -15,6 +15,7 @@ use Golovanov\Weft\Observability\Alert;
 use Golovanov\Weft\Observability\Trace;
 use Golovanov\Weft\Security\RateLimiter;
 use Golovanov\Weft\Seo\Seo;
+use Golovanov\Weft\Support\Clock;
 use Golovanov\Weft\View\View;
 use PHPUnit\Framework\TestCase as BaseTestCase;
 
@@ -43,11 +44,11 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(Locale::class, ['current' => null]);
         self::setStatics(Url::class, ['route' => null]);
         self::setStatics(I18n::class, ['dict' => [], 'locale' => 'en']);
-        self::setStatics(Cache::class, ['store' => null]);
+        self::setStatics(Cache::class, ['store' => null, 'failureLogged' => false]);
         self::setStatics(RateLimiter::class, ['store' => null, 'redisError' => null]);
         self::setStatics(View::class, ['shared' => []]);
         self::setStatics(Vite::class, ['manifest' => null]);
-        self::setStatics(Alert::class, ['transport' => null, 'reporting' => false]);
+        self::setStatics(Alert::class, ['transport' => null, 'reporting' => false, 'misconfiguredLogged' => false]);
         self::setStatics(Trace::class, ['tracer' => null, 'trace' => null, 'id' => '', 'booted' => false]);
         self::setStatics(RequestContext::class, [
             'request' => null,
@@ -95,6 +96,25 @@ abstract class TestCase extends BaseTestCase
             }
         }
         return $events;
+    }
+
+    /** Size of today's error log (ErrorHandler::log() without LOGS_PATH), to read what a test adds. */
+    protected static function errorLogSize(): int
+    {
+        clearstatcache();
+        return is_file(self::errorLogFile()) ? (int) filesize(self::errorLogFile()) : 0;
+    }
+
+    /** What the error log gained after the given byte offset. */
+    protected static function errorLogSince(int $offset): string
+    {
+        clearstatcache();
+        return is_file(self::errorLogFile()) ? (string) file_get_contents(self::errorLogFile(), false, null, $offset) : '';
+    }
+
+    private static function errorLogFile(): string
+    {
+        return sys_get_temp_dir() . '/weft-logs/errors/' . Clock::date('Y-m-d') . '.log';
     }
 
     /** Create a scratch directory unique to the running test. */

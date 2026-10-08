@@ -7,6 +7,9 @@ namespace Golovanov\Weft\Cache;
 /**
  * Filesystem cache. Each entry is a PHP file storing an expiry timestamp and a serialized value.
  * No external dependency — the default store for simple sites.
+ *
+ * Files it creates get mode 0660 whatever the umask, so a cache entry or a counter created by one
+ * user (a script run by the deploy user) stays writable for another in the same group (PHP).
  */
 final class FileStore implements Store
 {
@@ -44,7 +47,10 @@ final class FileStore implements Store
         $expiry = $ttl > 0 ? time() + $ttl : 0;
         $raw = serialize(['e' => $expiry, 'v' => $value]);
         $file = $this->path($key);
-        @file_put_contents($file, $raw, LOCK_EX);
+        $created = !is_file($file);
+        if (@file_put_contents($file, $raw, LOCK_EX) !== false && $created) {
+            @chmod($file, 0660);
+        }
     }
 
     /**
@@ -56,9 +62,14 @@ final class FileStore implements Store
      */
     public function increment(string $key, int $ttl): ?int
     {
-        $handle = @fopen($this->path($key), 'c+');
+        $file = $this->path($key);
+        $created = !is_file($file);
+        $handle = @fopen($file, 'c+');
         if ($handle === false) {
             return null;
+        }
+        if ($created) {
+            @chmod($file, 0660);
         }
         try {
             if (!flock($handle, LOCK_EX)) {

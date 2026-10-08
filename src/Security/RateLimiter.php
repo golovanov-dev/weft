@@ -68,7 +68,7 @@ final class RateLimiter
     /**
      * Where counters are kept and whether they can be written, for health checks: the store
      * allow() and throttle() use, with the same fallback from Redis to files. `path` is the
-     * counter directory, null for Redis; `writable` is false when limits would fail open. For
+     * counter directory, null for Redis; `writable` is false when PHP cannot write the store. For
      * Redis it is a real write: a probe counter with a short TTL, deleted afterwards. For files,
      * existing files in the directory must be writable too. `error` says what is wrong: why Redis
      * was not used or rejected the probe, or what in the directory cannot be written.
@@ -91,7 +91,8 @@ final class RateLimiter
         }
 
         $dir = self::directory();
-        // An existing counter file another user owns fails open just like an unwritable directory.
+        // A file another user owns (a counter, or a cache entry in the shared default directory)
+        // cannot be overwritten: a counter in it fails open just like an unwritable directory.
         $locked = is_dir($dir) && is_writable($dir)
             ? array_values(array_filter(glob($dir . '/*.cache') ?: [], fn (string $file) => !is_writable($file)))
             : null;
@@ -99,7 +100,7 @@ final class RateLimiter
             self::$redisError !== null ? 'Redis not used: ' . self::$redisError : null,
             match (true) {
                 $locked === null => 'the directory is not writable',
-                $locked !== [] => count($locked) . ' file(s) in the directory are not writable, e.g. ' . basename($locked[0]),
+                $locked !== [] => count($locked) . ' file(s) in the directory that PHP cannot overwrite (cache entries or counters), e.g. ' . basename($locked[0]),
                 default => null,
             },
         ]);

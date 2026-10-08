@@ -12,10 +12,12 @@ use Golovanov\Weft\Http\RequestContext;
  * hard-fails, unhandled errors, suspicious input, ...).
  *
  * Sends a single event to the AlertLoop ingest API (POST /v1/events, X-API-Key auth).
- * Delivery is best-effort and non-blocking: nothing is retried, no exception ever leaves
- * this class, and a failure never breaks the main request flow. It is not silent, though —
- * a failed delivery is recorded as an `alert.failed` trace event (metadata only, never the
- * alert payload). Enabled via config('alertloop.enabled').
+ * Delivery is synchronous and best-effort: the call waits for AlertLoop up to
+ * app.alertloop.timeout seconds, nothing is retried, no exception ever leaves this class, and a
+ * failure never breaks the main request flow. It is not silent, though — a failed delivery is
+ * recorded as an `alert.failed` trace event (metadata only, never the alert payload), and alerts
+ * switched on without base_url or api_key leave a line in the error log. Configured by the
+ * 'alertloop' block of app/Configs/app.php (app.alertloop.*).
  *
  * @see https://github.com/golovanov-dev/alertloop
  */
@@ -27,6 +29,9 @@ final class Alert
 
     /** Re-entry guard: reporting a failed alert must never trigger another alert. */
     private static bool $reporting = false;
+
+    /** Alerts switched on without their keys are logged once per request, not on every send. */
+    private static bool $misconfiguredLogged = false;
 
     /**
      * Transport seam. Null means the built-in curl transport; tests replace it to exercise
@@ -47,15 +52,20 @@ final class Alert
         array $context = [],
         ?string $category = null,
     ): bool {
-        if (!Config::get('alertloop.enabled', false)) {
+        if (!Config::get('app.alertloop.enabled', false)) {
             return false;
         }
 
-        $baseUrl = rtrim((string) Config::get('alertloop.base_url', ''), '/');
-        $apiKey = (string) Config::get('alertloop.api_key', '');
-        if ($baseUrl === '' || $apiKey === '') {
+        $missing = self::missingKeys();
+        if ($missing !== []) {
+            if (!self::$misconfiguredLogged) {
+                self::$misconfiguredLogged = true;
+                ErrorHandler::log('alert', 500, 'AlertLoop is enabled without ' . implode(', ', $missing) . ', alerts are not sent', __FILE__, __LINE__);
+            }
             return false;
         }
+        $baseUrl = rtrim((string) Config::get('app.alertloop.base_url', ''), '/');
+        $apiKey = (string) Config::get('app.alertloop.api_key', '');
 
         // trace_id is a top-level field of the AlertLoop event schema, not payload data:
         // lift it out of $context so correlation with the trace survives ingestion.
@@ -65,7 +75,7 @@ final class Alert
         $payload = [
             'type' => $type,
             'severity' => $severity,
-            'source' => (string) Config::get('alertloop.source', 'weft-site'),
+            'source' => (string) Config::get('app.alertloop.source', 'weft-site'),
             'message' => $message,
         ];
         if ($category !== null && $category !== '') {
@@ -82,6 +92,26 @@ final class Alert
         }
 
         return self::post($baseUrl . '/v1/events', $apiKey, $payload);
+    }
+
+    /**
+     * Keys the switched-on alerting lacks ('base_url', 'api_key'); empty when both are set or
+     * alerting is off. Non-empty means send() sends nothing.
+     *
+     * @return list<string>
+     */
+    public static function missingKeys(): array
+    {
+        if (!Config::get('app.alertloop.enabled', false)) {
+            return [];
+        }
+        $missing = [];
+        foreach (['base_url', 'api_key'] as $key) {
+            if ((string) Config::get('app.alertloop.' . $key, '') === '') {
+                $missing[] = $key;
+            }
+        }
+        return $missing;
     }
 
     /**
@@ -153,7 +183,7 @@ final class Alert
                 'Content-Type: application/json',
                 'X-API-Key: ' . $apiKey,
             ],
-            CURLOPT_TIMEOUT => (int) Config::get('alertloop.timeout', 4),
+            CURLOPT_TIMEOUT => (int) Config::get('app.alertloop.timeout', 4),
             CURLOPT_CONNECTTIMEOUT => 3,
         ]);
 

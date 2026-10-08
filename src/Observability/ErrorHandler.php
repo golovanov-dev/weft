@@ -12,7 +12,8 @@ use Golovanov\Weft\Support\Clock;
  * Central error/exception handler.
  *
  * Writes human-readable lines to LOGS_PATH/errors/YYYY-mm-dd.log and, for exceptions and
- * fatal errors, raises an AlertLoop notification (sensitive spot). Registered once in bootstrap.
+ * fatal errors, raises an AlertLoop notification (sensitive spot). Registered once in bootstrap;
+ * the Kernel reports exceptions thrown by pages and endpoints through report().
  */
 final class ErrorHandler
 {
@@ -42,13 +43,42 @@ final class ErrorHandler
 
     public static function handleException(\Throwable $e): void
     {
-        self::log('exception', (int) $e->getCode(), $e->getMessage(), $e->getFile(), $e->getLine());
+        self::report($e, 'exception');
+        self::exitIfCli($e);
+    }
+
+    /**
+     * Log a throwable nobody handled and raise a critical alert for it; $type only labels the log
+     * line.
+     */
+    public static function report(\Throwable $e, string $type): void
+    {
+        self::logException($e, $type);
+        self::alertException($e);
+    }
+
+    /**
+     * The log line of report(). The Kernel writes it before the 500 response, the alert after.
+     *
+     * @internal Used by the Kernel.
+     */
+    public static function logException(\Throwable $e, string $type): void
+    {
+        self::log($type, (int) $e->getCode(), $e->getMessage(), $e->getFile(), $e->getLine());
+    }
+
+    /**
+     * The alert of report(): the exception handler and the Kernel (for a page or endpoint that
+     * threw) share it, so an error gets the same alert message and dedupe key wherever it is caught.
+     *
+     * @internal Used by the Kernel.
+     */
+    public static function alertException(\Throwable $e): void
+    {
         self::alert('Unhandled exception: ' . $e->getMessage(), [
             'file' => $e->getFile() . ':' . $e->getLine(),
             'trace_id' => RequestContext::traceId(),
         ], 'exception:' . md5($e->getFile() . $e->getLine()));
-
-        self::exitIfCli($e);
     }
 
     public static function handleShutdown(): void

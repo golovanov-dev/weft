@@ -43,16 +43,28 @@ final class Kernel
         Trace::httpStart($request);
         Headers::send();
 
+        $failure = null;
         try {
             $response = self::route($request);
         } catch (\Throwable $e) {
-            ErrorHandler::log('kernel', (int) $e->getCode(), $e->getMessage(), $e->getFile(), $e->getLine());
+            $failure = $e;
+            ErrorHandler::logException($e, 'kernel');
             $response = self::errorResponse($request, $e);
         }
 
         Trace::httpEnd($response->status, RequestContext::elapsed());
         Trace::flush();
         $response->send();
+
+        if ($failure !== null) {
+            // The alert waits for AlertLoop (up to app.alertloop.timeout): under PHP-FPM the 500
+            // is handed to the client first; elsewhere it is sent but the connection stays open.
+            if (function_exists('fastcgi_finish_request')) {
+                fastcgi_finish_request();
+            }
+            ErrorHandler::alertException($failure);
+            Trace::flush();
+        }
     }
 
     private static function route(Request $request): Response
@@ -250,9 +262,18 @@ final class Kernel
             require $__file;
         };
 
+        $level = ob_get_level();
         ob_start();
-        $run($file, $request);
-        $body = (string) ob_get_clean();
+        try {
+            $run($file, $request);
+            $body = (string) ob_get_clean();
+        } finally {
+            // An endpoint that threw leaves its half-written output (and any buffer it opened)
+            // behind; drop it so only the error response is sent.
+            while (ob_get_level() > $level) {
+                ob_end_clean();
+            }
+        }
         $status = http_response_code();
 
         return new Response(is_int($status) ? $status : 200, $body, ['Content-Type' => 'application/json; charset=utf-8']);

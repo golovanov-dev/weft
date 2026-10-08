@@ -32,10 +32,10 @@ final class AlertTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        Config::set('alertloop.enabled', true);
-        Config::set('alertloop.base_url', 'https://alerts.example/');
-        Config::set('alertloop.api_key', 'test-key');
-        Config::set('alertloop.source', 'weft-tests');
+        Config::set('app.alertloop.enabled', true);
+        Config::set('app.alertloop.base_url', 'https://alerts.example/');
+        Config::set('app.alertloop.api_key', 'test-key');
+        Config::set('app.alertloop.source', 'weft-tests');
     }
 
     /**
@@ -69,20 +69,37 @@ final class AlertTest extends TestCase
 
     public function testDisabledAlertingSendsNothing(): void
     {
-        Config::set('alertloop.enabled', false);
+        Config::set('app.alertloop.enabled', false);
         $this->fakeTransport(['status' => 200, 'error' => ''], $captured);
 
         $this->assertFalse(Alert::send('nope'));
         $this->assertNull($captured);
     }
 
-    public function testMissingCredentialsSendNothing(): void
+    public function testEnabledWithoutAKeySendsNothingAndLogsOncePerRequest(): void
     {
-        Config::set('alertloop.api_key', '');
+        Config::set('app.alertloop.api_key', '');
         $this->fakeTransport(['status' => 200, 'error' => ''], $captured);
+        $logOffset = self::errorLogSize();
 
+        $this->assertSame(['api_key'], Alert::missingKeys());
         $this->assertFalse(Alert::send('nope'));
+        $this->assertFalse(Alert::critical('nope again'));
         $this->assertNull($captured);
+
+        $log = self::errorLogSince($logOffset);
+        $this->assertStringContainsString('ALERT ERRNO:500 | AlertLoop is enabled without api_key, alerts are not sent', $log);
+        $this->assertSame(1, substr_count($log, "
+"));
+    }
+
+    public function testMissingKeysAreReportedOnlyWhileAlertingIsOn(): void
+    {
+        Config::set('app.alertloop.base_url', '');
+        $this->assertSame(['base_url'], Alert::missingKeys());
+
+        Config::set('app.alertloop.enabled', false);
+        $this->assertSame([], Alert::missingKeys());
     }
 
     public function testPayloadUsesOnlyFieldsFromTheAlertLoopSchema(): void

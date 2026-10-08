@@ -8,7 +8,6 @@ use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Observability\Alert;
 use Golovanov\Weft\Observability\Trace;
 use Golovanov\Weft\Security\Captcha;
-use Golovanov\Weft\Support\Clock;
 use Golovanov\Weft\Tests\TestCase;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
@@ -25,7 +24,7 @@ final class CaptchaTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        Config::set('alertloop', ['enabled' => true, 'base_url' => 'https://alerts.example', 'api_key' => 'k']);
+        Config::set('app.alertloop', ['enabled' => true, 'base_url' => 'https://alerts.example', 'api_key' => 'k']);
         $this->alerts = [];
         $alerts = &$this->alerts;
         (new \ReflectionClass(Alert::class))->getProperty('transport')->setValue(
@@ -119,23 +118,5 @@ final class CaptchaTest extends TestCase
             'Captcha is enabled without site_key and secret_key; form submissions pass because DEBUG is on',
             self::errorLogSince($logOffset),
         );
-    }
-
-    private static function errorLogFile(): string
-    {
-        return sys_get_temp_dir() . '/weft-logs/errors/' . Clock::date('Y-m-d') . '.log';
-    }
-
-    private static function errorLogSize(): int
-    {
-        clearstatcache();
-        return is_file(self::errorLogFile()) ? (int) filesize(self::errorLogFile()) : 0;
-    }
-
-    /** What the error log gained after the given byte offset. */
-    private static function errorLogSince(int $offset): string
-    {
-        clearstatcache();
-        return is_file(self::errorLogFile()) ? (string) file_get_contents(self::errorLogFile(), false, null, $offset) : '';
     }
 }

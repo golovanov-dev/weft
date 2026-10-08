@@ -88,8 +88,8 @@ return [
         'enabled' => defined('ALERTLOOP_API_KEY') && ALERTLOOP_API_KEY !== '',
         'base_url' => defined('ALERTLOOP_BASE_URL') ? ALERTLOOP_BASE_URL : '',
         'api_key' => defined('ALERTLOOP_API_KEY') ? ALERTLOOP_API_KEY : '',
-        'source' => 'weft-docs',
-        'timeout' => 4,
+        'source' => 'weft-docs',   // this site's name in AlertLoop events
+        'timeout' => 4,            // seconds a send waits for AlertLoop
     ],
 
     // Request traces in storage/logs/requests (traceloom).

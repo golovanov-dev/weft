@@ -13,13 +13,18 @@ use Golovanov\Weft\Observability\ErrorHandler;
  *
  * Driver (config 'app.cache.driver'): 'file' (default, no deps; app.cache.path, a relative one
  * from APP_ROOT, default storage/cache) or 'redis'. If Redis is unreachable or rejects the
- * password or database, the facade degrades to the file store rather than throwing.
+ * password or database, the facade degrades to the file store rather than throwing. A store that
+ * fails later (a read-only replica, maxmemory under noeviction) never fails the request either:
+ * a read is a miss, a write is skipped, and the first failure of the request is logged.
  *
  *   $tariffs = Cache::remember('tariffs', 600, fn() => $api->tariffs());
  */
 final class Cache
 {
     private static ?Store $store = null;
+
+    /** A store failure is logged once per request, not on every cache call of the page. */
+    private static bool $failureLogged = false;
 
     public static function store(): Store
     {
@@ -50,33 +55,32 @@ final class Cache
 
     public static function get(string $key, mixed $default = null): mixed
     {
-        $value = self::store()->get($key);
-        return $value ?? $default;
+        return self::attempt(static fn () => self::store()->get($key)) ?? $default;
     }
 
     public static function set(string $key, mixed $value, int $ttl = 0): void
     {
-        self::store()->set($key, $value, $ttl);
+        self::attempt(static fn () => self::store()->set($key, $value, $ttl));
     }
 
     public static function has(string $key): bool
     {
-        return self::store()->has($key);
+        return self::attempt(static fn () => self::store()->has($key)) === true;
     }
 
     public static function forget(string $key): void
     {
-        self::store()->forget($key);
+        self::attempt(static fn () => self::store()->forget($key));
     }
 
     public static function flush(): void
     {
-        self::store()->flush();
+        self::attempt(static fn () => self::store()->flush());
     }
 
     /**
      * Return the cached value for $key, or compute it with $callback, store it for $ttl seconds
-     * and return it.
+     * and return it. A throw from $callback propagates; a store failure does not.
      *
      * @template T
      * @param callable():T $callback
@@ -85,15 +89,32 @@ final class Cache
     public static function remember(string $key, int $ttl, callable $callback): mixed
     {
         $store = self::store();
-        $cached = $store->get($key);
+        $cached = self::attempt(static fn () => $store->get($key));
         if ($cached !== null) {
             return $cached;
         }
         $value = $callback();
         if ($value !== null) {
-            $store->set($key, $value, $ttl);
+            self::attempt(static fn () => $store->set($key, $value, $ttl));
         }
         return $value;
+    }
+
+    /**
+     * Run one store call (never the remember() callback); if the store throws, log it once per
+     * request, at the place it was thrown, and return null.
+     */
+    private static function attempt(\Closure $call): mixed
+    {
+        try {
+            return $call();
+        } catch (\Throwable $e) {
+            if (!self::$failureLogged) {
+                self::$failureLogged = true;
+                ErrorHandler::log('cache', 500, 'Cache store failed, continuing without cache: ' . $e->getMessage(), $e->getFile(), $e->getLine());
+            }
+            return null;
+        }
     }
 
     private static function makeFile(): FileStore
