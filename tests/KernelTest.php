@@ -9,6 +9,9 @@ use Golovanov\Weft\Http\Request;
 use Golovanov\Weft\Http\Response;
 use Golovanov\Weft\I18n\Locale;
 use Golovanov\Weft\Kernel;
+use Golovanov\Weft\Seo\Seo;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
 /**
  * Routing tests drive Kernel::route() directly (via reflection — it is private on purpose)
@@ -17,26 +20,15 @@ use Golovanov\Weft\Kernel;
  */
 final class KernelTest extends TestCase
 {
-    protected function setUp(): void
+    /** Route $uri the way production does: the Request (and its path) comes from Request::fromGlobals(). */
+    private function route(string $uri, string $method = 'GET'): Response
     {
-        parent::setUp();
-        // dispatchPage() honours a non-200 http_response_code() left by a page; make sure
-        // no earlier test (or a previous route) leaks one into this process-wide state.
-        http_response_code(200);
-    }
+        $server = $_SERVER;
+        $_SERVER['REQUEST_URI'] = $uri;
+        $_SERVER['REQUEST_METHOD'] = $method;
+        $request = Request::fromGlobals();
+        $_SERVER = $server;
 
-    private function route(string $path, string $method = 'GET'): Response
-    {
-        $request = new Request(
-            method: $method,
-            uri: $path,
-            path: $path,
-            clientIp: '203.0.113.7',
-            headers: [],
-            query: [],
-            post: [],
-            rawBody: null,
-        );
         $m = new \ReflectionMethod(Kernel::class, 'route');
         return $m->invoke(null, $request);
     }
@@ -78,11 +70,156 @@ final class KernelTest extends TestCase
         $this->assertStringContainsString('custom-404', $response->body);
     }
 
-    public function testTraversalPathsAreSanitisedNotServed(): void
+    /** A path Sanitize::path() would change is a 404, not the page its clean form names. */
+    #[DataProvider('garbagePaths')]
+    public function testPathThatIsNotCleanIsNotFound(string $path): void
     {
-        // "../.." segments are stripped, the remaining route simply does not exist.
-        $response = $this->route('/../../etc/passwd');
+        $response = $this->route($path);
         $this->assertSame(404, $response->status);
+        $this->assertStringContainsString('custom-404', $response->body);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function garbagePaths(): array
+    {
+        return [
+            'dropped characters' => ['/about!!'],
+            'dropped characters and a trailing slash' => ['/about!!/'],
+            'raw UTF-8' => ['/привет'],
+            'traversal' => ['/../../etc/passwd'],
+            'two trailing slashes' => ['/about//'],
+            'two leading slashes' => ['//about'],
+            'three leading slashes and a trailing one' => ['///about/'],
+            'a host-like first segment' => ['//evil.com/'],
+            'only two slashes' => ['//'],
+        ];
+    }
+
+    /** Leading slashes are never redirected, even on GET: the target would not be this path. */
+    public function testLeadingSlashesAreNotRedirected(): void
+    {
+        $this->assertSame(404, $this->route('//about/?next=x')->status);
+        $this->assertSame(404, $this->route('///')->status);
+    }
+
+    #[RunInSeparateProcess]
+    public function testLeadingSlashesAfterTheBaseUriAreNotFound(): void
+    {
+        define('BASE_URI', '/site');
+        $this->assertSame(404, $this->route('/site//about')->status);
+        $this->assertSame(404, $this->route('/site//')->status);
+    }
+
+    public function testLeadingSlashesUnderApiAreAJson404(): void
+    {
+        $response = $this->route('//api/ping');
+        $this->assertSame(404, $response->status);
+        $this->assertSame('Not Found', json_decode($response->body, true)['error']);
+    }
+
+    /** pages/blog/index.php has one address, /blog; /blog/index is a 404, not a redirect. */
+    public function testDirectoryIndexByItsFileNameIsNotFound(): void
+    {
+        $response = $this->route('/blog/index');
+        $this->assertSame(404, $response->status);
+        $this->assertStringContainsString('custom-404', $response->body);
+        $this->assertSame(404, $this->route('/blog/index/')->status);
+    }
+
+    /** pages/404.php is what a 404 renders, not a page of its own. */
+    public function testTheNotFoundPageRequestedDirectlyIsNotFound(): void
+    {
+        Config::set('app.locales', ['enabled' => true, 'supported' => ['en', 'ru'], 'default' => 'en']);
+
+        $response = $this->route('/404');
+        $this->assertSame(404, $response->status);
+        $this->assertStringContainsString('custom-404', $response->body);
+        $this->assertSame(404, $this->route('/ru/404')->status);
+    }
+
+    public function testPathThatIsNotCleanUnderApiIsAJson404(): void
+    {
+        $response = $this->route('/api/ping!!', 'POST');
+        $this->assertSame(404, $response->status);
+        $this->assertSame('Not Found', json_decode($response->body, true)['error']);
+    }
+
+    public function testTrailingSlashRedirectsKeepingTheQueryString(): void
+    {
+        $response = $this->route('/about/?ref=nav');
+        $this->assertSame(301, $response->status);
+        $this->assertSame('/about?ref=nav', $response->headers['Location']);
+    }
+
+    #[RunInSeparateProcess]
+    public function testRedirectKeepsTheBaseUri(): void
+    {
+        define('BASE_URI', '/site');
+        $response = $this->route('/site/notes/hello/', 'HEAD');
+        $this->assertSame(301, $response->status);
+        $this->assertSame('/site/notes/hello', $response->headers['Location']);
+    }
+
+    public function testTrailingSlashOnPostIsServed(): void
+    {
+        $response = $this->route('/api/ping/', 'POST');
+        $this->assertSame(200, $response->status);
+        $this->assertSame(['ok' => true, 'method' => 'POST'], json_decode($response->body, true));
+    }
+
+    public function testDefaultRouteRedirectsToTheLocaleRoot(): void
+    {
+        Config::set('app.locales', ['enabled' => true, 'supported' => ['en', 'ru'], 'default' => 'en']);
+
+        $this->assertSame('/', $this->route('/home')->headers['Location']);
+        $this->assertSame('/ru', $this->route('/ru/home/')->headers['Location']);
+        $this->assertSame('/ru', $this->route('/ru/')->headers['Location']);
+    }
+
+    public function testCanonicalComesFromTheMatchedRoute(): void
+    {
+        Config::set('app.url.base', 'https://example.com');
+        $_SERVER['REQUEST_URI'] = '/about!!';
+
+        $this->route('/notes/hello');
+        $this->assertStringContainsString('<link rel="canonical" href="https://example.com/notes/hello" />', Seo::render());
+    }
+
+    public function testNotFoundPageHasNoCanonical(): void
+    {
+        Config::set('app.url.base', 'https://example.com');
+        $_SERVER['REQUEST_URI'] = '/about!!';
+
+        $this->route('/about!!');
+        $html = Seo::render();
+        $this->assertStringNotContainsString('canonical', $html);
+        $this->assertStringNotContainsString('og:url', $html);
+    }
+
+    /** A dynamic page that answers 404 itself gets the same head as the engine's 404. */
+    public function testPageThatAnswersNotFoundHasNoCanonicalOrHreflang(): void
+    {
+        Config::set('app.url.base', 'https://example.com');
+        Config::set('app.locales', ['enabled' => true, 'supported' => ['en', 'ru'], 'default' => 'en']);
+
+        $response = $this->route('/ru/notes/missing');
+        $this->assertSame(404, $response->status);
+        $this->assertStringContainsString('note-missing', $response->body);
+        $html = Seo::render();
+        $this->assertStringNotContainsString('canonical', $html);
+        $this->assertStringNotContainsString('og:url', $html);
+        $this->assertStringNotContainsString('hreflang', $html);
+    }
+
+    public function testFoundPageHasHreflangFromTheMatchedRoute(): void
+    {
+        Config::set('app.url.base', 'https://example.com');
+        Config::set('app.locales', ['enabled' => true, 'supported' => ['en', 'ru'], 'default' => 'en']);
+
+        $this->route('/ru/notes/hello');
+        $html = Seo::render();
+        $this->assertStringContainsString('<link rel="alternate" hreflang="en" href="https://example.com/notes/hello" />', $html);
+        $this->assertStringContainsString('<link rel="alternate" hreflang="ru" href="https://example.com/ru/notes/hello" />', $html);
     }
 
     public function testSitemapXmlIsServedFromConfig(): void
@@ -149,5 +286,7 @@ final class KernelTest extends TestCase
         $response = $this->route('/en/about');
         $this->assertSame(301, $response->status);
         $this->assertSame('/about', $response->headers['Location']);
+        // One redirect straight to the final address.
+        $this->assertSame('/', $this->route('/en/home/')->headers['Location']);
     }
 }

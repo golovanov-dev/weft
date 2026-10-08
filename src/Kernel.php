@@ -30,6 +30,8 @@ use Golovanov\Weft\View\View;
  *   /components/layout.php     the page layout (receives $content)
  *
  * The default locale is served without a URL prefix; other locales use /<locale>/...
+ * Every page has one address: GET/HEAD of /about/, /home or /en/about is redirected (301) to
+ * /about, / or /about; a path with characters Sanitize::path() would drop or fold is a 404.
  */
 final class Kernel
 {
@@ -55,34 +57,58 @@ final class Kernel
 
     private static function route(Request $request): Response
     {
-        // 1) Path relative to the mount point, sanitised.
-        $path = '/' . Sanitize::path(self::stripBaseUri($request->path));
+        // 1) Path relative to the mount point. A path that Sanitize::path() would change is not
+        //    an address of any page: it gets a 404, never the page its clean form points to.
+        //    One trailing slash is not part of the path (redirected below, served as is on POST);
+        //    "//" is not the root with a trailing slash but an empty segment, so it is a 404 too.
+        $raw = self::stripBaseUri($request->path);
+        $requested = ($raw !== '/' && $raw !== '//' && str_ends_with($raw, '/')) ? substr($raw, 0, -1) : $raw;
+        $path = '/' . Sanitize::path($requested);
+        $clean = $path === $requested;
+        // GET/HEAD of a clean path is redirected to its one canonical address.
+        $canonicalise = $clean && ($request->method === 'GET' || $request->method === 'HEAD');
+        $redirect = $canonicalise && $requested !== $raw;
 
         // 2) Locale from the first segment (default locale has no prefix).
+        $locale = Locale::default();
         if (Locale::enabled() && $path !== '/') {
             $parts = explode('/', ltrim($path, '/'), 2);
             $seg = strtolower($parts[0] ?? '');
-
-            if ($seg === Locale::default() && $request->method === 'GET') {
-                // Canonicalise /en/about -> /about (avoid duplicate content).
-                $target = Url::baseUri() . '/' . ($parts[1] ?? '');
-                return Response::redirect(rtrim($target, '/') ?: '/', 301);
-            }
             if ($seg !== '' && Locale::isSupported($seg)) {
-                Locale::set($seg);
+                $locale = $seg;
                 $path = '/' . ($parts[1] ?? '');
-            } else {
-                Locale::set(Locale::default());
+                // /en/about -> /about: the default locale is served without a prefix.
+                $redirect = $redirect || ($canonicalise && $seg === Locale::default());
             }
-        } else {
-            Locale::set(Locale::default());
         }
+        Locale::set($locale);
 
         if (!defined('LOCALE')) {
             define('LOCALE', Locale::current());
         }
 
-        // 3) SEO endpoints, generated on the fly from config.
+        // pages/404.php and pages/<dir>/index.php have no address of their own (the latter is
+        // served at /<dir>): /404 and /<dir>/index are a 404, with or without a slash, never a redirect.
+        $isApi = $path === '/api' || str_starts_with($path, '/api/');
+        if (!$isApi && ($path === '/404' || ($path !== '/index' && str_ends_with($path, '/index')))) {
+            $clean = $canonicalise = $redirect = false;
+        }
+
+        // 3) The default route is the locale root: /home -> /, /ru/home -> /ru.
+        if ($canonicalise && trim($path, '/') === (string) Config::get('app.default_route', 'home')) {
+            $path = '/';
+            $redirect = true;
+        }
+        if ($redirect) {
+            $query = (string) parse_url($request->uri, PHP_URL_QUERY);
+            return Response::redirect(Url::link($path) . ($query !== '' ? '?' . $query : ''), 301);
+        }
+
+        if (!$clean) {
+            return $isApi ? self::apiNotFound(ltrim(substr($path, 4), '/')) : self::dispatchPage($request, null);
+        }
+
+        // 4) SEO endpoints, generated on the fly from config.
         if ($path === '/sitemap.xml') {
             $xml = Sitemap::xml(Sitemap::routes());
             return new Response(200, $xml, ['Content-Type' => 'application/xml; charset=utf-8']);
@@ -91,46 +117,54 @@ final class Kernel
             return new Response(200, Robots::text(), ['Content-Type' => 'text/plain; charset=utf-8']);
         }
 
-        // 4) API vs page.
-        if ($path === '/api' || str_starts_with($path, '/api/')) {
+        // 5) API vs page.
+        if ($isApi) {
             return self::dispatchApi($request, ltrim(substr($path, 4), '/'));
         }
 
         return self::dispatchPage($request, trim($path, '/'));
     }
 
-    private static function dispatchPage(Request $request, string $route): Response
+    /** @param string|null $route route relative to pages/, or null for a request that is a 404 as is */
+    private static function dispatchPage(Request $request, ?string $route): Response
     {
+        $path = $route === null ? null : '/' . $route;
         $route = $route === '' ? (string) Config::get('app.default_route', 'home') : $route;
         $pagesDir = self::root() . '/pages';
 
         /** @var array<string, string> $params */
         $params = [];
         $i18nRoute = $route;
+        $file = null;
 
-        // 1) Exact file: /about -> pages/about.php
-        $file = $pagesDir . '/' . $route . '.php';
+        if ($route !== null) {
+            // 1) Exact file: /about -> pages/about.php
+            $file = $pagesDir . '/' . $route . '.php';
 
-        // 2) Directory index: /blog -> pages/blog/index.php
-        if (!is_file($file)) {
-            $indexFile = $pagesDir . '/' . $route . '/index.php';
-            $file = is_file($indexFile) ? $indexFile : null;
-        }
+            // 2) Directory index: /blog -> pages/blog/index.php
+            if (!is_file($file)) {
+                $indexFile = $pagesDir . '/' . $route . '/index.php';
+                $file = is_file($indexFile) ? $indexFile : null;
+            }
 
-        // 3) Dynamic segment: /docs/installation -> pages/docs/[slug].php with $params['slug'].
-        if ($file === null) {
-            $dynamic = self::matchDynamicPage($pagesDir, $route);
-            if ($dynamic !== null) {
-                [$file, $params, $i18nRoute] = $dynamic;
+            // 3) Dynamic segment: /docs/installation -> pages/docs/[slug].php with $params['slug'].
+            if ($file === null) {
+                $dynamic = self::matchDynamicPage($pagesDir, $route);
+                if ($dynamic !== null) {
+                    [$file, $params, $i18nRoute] = $dynamic;
+                }
             }
         }
 
         $status = 200;
         if ($file === null) {
             $status = 404;
+            $path = null;
             $i18nRoute = $route = '404';
             $file = is_file($pagesDir . '/404.php') ? $pagesDir . '/404.php' : null;
         }
+        // Canonical, og:url and hreflang are built from the matched route (Seo::render()).
+        Url::setRoute($path);
 
         // Translations for this route (no-op when the lang files don't exist).
         I18n::boot(Locale::current(), $i18nRoute);
@@ -207,7 +241,7 @@ final class Kernel
         }
 
         if ($file === null) {
-            return Response::json(['success' => false, 'error' => 'Not Found', 'route' => $route], 404);
+            return self::apiNotFound($route);
         }
 
         // The endpoint manages its own JSON output (echo / http_response_code); we capture it so
@@ -224,6 +258,11 @@ final class Kernel
         return new Response(is_int($status) ? $status : 200, $body, ['Content-Type' => 'application/json; charset=utf-8']);
     }
 
+    private static function apiNotFound(string $route): Response
+    {
+        return Response::json(['success' => false, 'error' => 'Not Found', 'route' => $route], 404);
+    }
+
     private static function errorResponse(Request $request, \Throwable $e): Response
     {
         $debug = ErrorHandler::debug();
@@ -236,6 +275,7 @@ final class Kernel
 
         $errorPage = self::root() . '/pages/500.php';
         if (is_file($errorPage)) {
+            Url::setRoute(null);
             return Response::html(View::page($errorPage, self::layoutFile(), ['error' => $e]), 500);
         }
 

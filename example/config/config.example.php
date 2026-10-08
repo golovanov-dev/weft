@@ -54,7 +54,7 @@ define('MAIL_FROM', 'noreply@golovanov.dev');
 define('AUTH_JWT_KEY', '');
 define('AUTH_JWT_ISSUER', '');
 
-// --- Trusted reverse proxies (X-Forwarded-For / X-Client-Ip honoured only from these) ----
+// --- Trusted reverse proxies: addresses or CIDR ranges; X-Forwarded-For is read only from these
 define('PROXY_IPS', []);
 
 // Reuse an incoming X-Trace-Id / X-Request-Id (internal services) instead of generating one.

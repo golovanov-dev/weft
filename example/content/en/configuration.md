@@ -61,8 +61,9 @@ define('MAIL_FROM', 'noreply@example.com');
 define('AUTH_JWT_KEY', '');         // JWT verification
 define('AUTH_JWT_ISSUER', '');
 
-define('PROXY_IPS', []);            // exact proxy/CDN addresses (no ranges); X-Client-Ip / X-Forwarded-For are trusted
-                                    // only from these. Left empty behind a proxy, all visitors share one rate limit
+define('PROXY_IPS', []);            // IPs or CIDR ranges of a CDN / proxy in front of PHP (not host names);
+                                    // X-Forwarded-For is read only from these. Empty on shared hosting
+                                    // and nginx + php-fpm; behind a proxy, empty means one rate limit for all
 define('TRACE_TRUST_INCOMING', false); // reuse an upstream X-Trace-Id / X-Request-Id
 ```
 
@@ -74,7 +75,7 @@ define('TRACE_TRUST_INCOMING', false); // reuse an upstream X-Trace-Id / X-Reque
 The file returns an array. Read it anywhere with `config('app.<path>')`.
 
 ```php
-'default_route' => 'home',    // which pages/*.php answers "/"
+'default_route' => 'home',    // which pages/*.php answers "/"; /home redirects to "/"
 'layout' => 'layout',          // components/<layout>.php
 'url' => ['base' => 'https://example.com'],   // origin for canonical / OG / sitemap
 ```

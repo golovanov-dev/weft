@@ -6,6 +6,7 @@ namespace Golovanov\Weft\Tests\Http;
 
 use Golovanov\Weft\Http\Request;
 use Golovanov\Weft\Tests\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 final class RequestTest extends TestCase
 {
@@ -63,6 +64,63 @@ final class RequestTest extends TestCase
         $this->assertSame('203.0.113.7', $request->clientIp);
 
         unset($_SERVER['HTTP_X_FORWARDED_FOR']);
+    }
+
+    /**
+     * @param array<string, string> $server
+     * @param array<mixed>          $trusted
+     */
+    #[DataProvider('proxyChains')]
+    public function testClientIpBehindTrustedProxies(array $server, array $trusted, string $expected): void
+    {
+        $resolve = new \ReflectionMethod(Request::class, 'resolveClientIp');
+        $this->assertSame($expected, $resolve->invoke(null, $server, $trusted));
+    }
+
+    /** @return array<string, array{0: array<string, string>, 1: array<mixed>, 2: string}> */
+    public static function proxyChains(): array
+    {
+        $cdn = ['REMOTE_ADDR' => '173.245.48.10'];
+        return [
+            'exact address' => [
+                ['REMOTE_ADDR' => '203.0.113.10', 'HTTP_X_FORWARDED_FOR' => '198.51.100.1'],
+                ['203.0.113.10'], '198.51.100.1',
+            ],
+            'remote not trusted' => [
+                ['REMOTE_ADDR' => '203.0.113.11', 'HTTP_X_FORWARDED_FOR' => '198.51.100.1'],
+                ['203.0.113.10'], '203.0.113.11',
+            ],
+            'ipv4 range, two trusted hops, forged left entry' => [
+                $cdn + ['HTTP_X_FORWARDED_FOR' => '1.1.1.1, 198.51.100.1, 10.0.0.2'],
+                ['173.245.48.0/20', '10.0.0.0/8'], '198.51.100.1',
+            ],
+            'range boundary inside a byte' => [
+                ['REMOTE_ADDR' => '192.0.2.200', 'HTTP_X_FORWARDED_FOR' => '198.51.100.1'],
+                ['192.0.2.0/25'], '192.0.2.200',
+            ],
+            'ipv6 range' => [
+                ['REMOTE_ADDR' => '2400:cb00:2049::1', 'HTTP_X_FORWARDED_FOR' => '2001:db8::7'],
+                ['2400:cb00::/32'], '2001:db8::7',
+            ],
+            'X-Client-Ip is not read' => [
+                $cdn + ['HTTP_X_CLIENT_IP' => '1.1.1.1', 'HTTP_X_FORWARDED_FOR' => '198.51.100.1'],
+                ['173.245.48.0/20'], '198.51.100.1',
+            ],
+            'no X-Forwarded-For' => [$cdn, ['173.245.48.0/20'], '173.245.48.10'],
+            'invalid entry on the way' => [
+                $cdn + ['HTTP_X_FORWARDED_FOR' => '198.51.100.1, unknown'],
+                ['173.245.48.0/20'], '173.245.48.10',
+            ],
+            'every entry trusted' => [
+                $cdn + ['HTTP_X_FORWARDED_FOR' => '10.0.0.2'],
+                ['173.245.48.0/20', '10.0.0.0/8'], '173.245.48.10',
+            ],
+            'invalid PROXY_IPS entries are skipped' => [
+                $cdn + ['HTTP_X_FORWARDED_FOR' => '198.51.100.1'],
+                ['proxy', 42, '173.245.48.0/99', '173.245.48.0/x', '173.245.48.0/', '173.245.48.10'],
+                '198.51.100.1',
+            ],
+        ];
     }
 
     public function testHeaderLookupIsCaseInsensitiveWithDefault(): void

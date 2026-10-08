@@ -37,9 +37,22 @@ pre-1.0 the API may change between minor versions.
   starts at its first hit instead of being extended by every hit. Make that directory writable
   by the web server: if a counter cannot be written, the request is allowed and an error is logged.
   Counters are per client IP, no longer per session: behind a reverse proxy or CDN, list its
-  addresses in `PROXY_IPS` (exact addresses, no ranges), or all visitors share one counter.
+  addresses or ranges in `PROXY_IPS`, or all visitors share one counter.
+- `X-Client-Ip` is no longer read. For a request from a proxy in `PROXY_IPS`, the client IP is now
+  the rightmost `X-Forwarded-For` entry that is not in `PROXY_IPS`; before, it was `X-Client-Ip` or
+  the leftmost `X-Forwarded-For` entry, both set by the client, so a forged header got around rate
+  limits. If your proxy passes the client address only in `X-Client-Ip` or `X-Real-IP`, make it
+  append `X-Forwarded-For`; until then every visitor is counted as the proxy and shares one limit.
+  On shared hosting and with nginx + php-fpm on one machine `REMOTE_ADDR` is usually the visitor
+  and `PROXY_IPS` stays empty. To check, compare `client_ip` in the newest `request_start` trace
+  with your own address.
 
 ### Added
+
+- `PROXY_IPS` accepts CIDR ranges, IPv4 and IPv6 (`'173.245.48.0/20'`, `'2400:cb00::/32'`), next
+  to exact addresses, so a CDN such as Cloudflare can be listed by its published ranges. An entry
+  that is neither is ignored, host names included (`localhost`, a Docker service name): write the
+  address.
 
 - `app.trace.log_body` (default `true`) and `app.trace.sensitive_keys` — extra keys to mask in
   traces, on top of traceloom's defaults (`password`, `token`, `api_key`, …). Each must match a
@@ -47,6 +60,23 @@ pre-1.0 the API may change between minor versions.
 
 ### Changed
 
+- Each page has one address. A GET or HEAD request for `/about/` now gets a 301 to `/about`, `/home`
+  (the `app.default_route` page) to `/`, `/ru/home` and `/ru/` to `/ru`; the query string is kept.
+  Other methods are served as before, so forms posting to a path with a trailing slash keep working.
+  Old links keep working through the redirect; point your own links at the final address.
+  `Url::link('/', 'ru')` (and hreflang and sitemap entries for a locale root) is now `/ru`, not `/ru/`;
+  if you write a static `public/sitemap.xml` with `php scripts/sitemap.php`, run it again.
+  `/404` and `/<dir>/index` (a directory's `index.php` by its file name) are a 404, not a second
+  address of the 404 page or of `/<dir>`.
+- A path that Weft used to clean up silently is now a 404 (JSON under `/api`) instead of the page
+  its clean form names with 200: `/about!!`, non-ASCII or percent-encoded characters, empty, `.` or
+  `..` segments, leading `//` (`//about` used to serve the home page). Pages are reachable only by paths of `A-Z a-z 0-9 / _ - .`; fix links that use
+  anything else.
+- Canonical, `og:url` and hreflang are built from the route the engine matched, never from the
+  request URI, so `/about!!` can no longer declare itself canonical; a 404 gets none of the
+  three, including a page that answers `http_response_code(404)` itself. `Seo::set(['canonical' => …])` still wins. The matched path is available as
+  `Url::routePath()` (`null` on a 404); on a 404 `Url::currentPath()` is `/` and `Url::isActive()`
+  is false.
 - Trace format, for anything that parses traces: `body` in `request_start` and `http_out_request`
   is now an object `{size, content_type, data}` instead of a string, or `null` when the request has
   no body (`data` is an array, or the raw string for a body that is not JSON or a form, and is
@@ -61,6 +91,13 @@ pre-1.0 the API may change between minor versions.
   pages also lose the no-cache headers PHP sent with the session; if your site relied on them, send
   `Cache-Control` yourself. If your site copied this file, remove the `session_start()` line too,
   with the same effect on headers.
+
+### Fixed
+
+- The example under PHP's built-in server (`php -S … -t public public/index.php`) now serves its
+  CSS, JS and images; before, every asset request went to the engine and returned 404. Production
+  servers (nginx, Apache) are not affected. If your site copied `example/public/index.php` and you
+  develop with `php -S`, copy the new `cli-server` block at its top.
 
 ## 0.1.3 - 2026-08-24
 

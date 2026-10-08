@@ -30,13 +30,19 @@ final class Request
     {
         $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
         $uri = (string) ($_SERVER['REQUEST_URI'] ?? '/');
-        $path = parse_url($uri, PHP_URL_PATH) ?: '/';
+        // The path is the request target up to the query string, as sent. Not parse_url(): it reads
+        // "//about" as a host named "about" and returns no path, which would serve the home page.
+        $path = substr($uri, 0, strcspn($uri, '?#'));
+        if (!str_starts_with($path, '/')) {
+            // Absolute form ("http://host/about") or an empty target.
+            $path = parse_url($uri, PHP_URL_PATH) ?: '/';
+        }
 
         return new self(
             method: $method,
             uri: $uri,
             path: $path,
-            clientIp: self::resolveClientIp(),
+            clientIp: self::resolveClientIp($_SERVER, defined('PROXY_IPS') && is_array(PROXY_IPS) ? PROXY_IPS : []),
             headers: self::collectHeaders(),
             query: $_GET,
             post: $_POST,
@@ -101,23 +107,78 @@ final class Request
     }
 
     /**
-     * Client IP. Trusts X-Forwarded-For / X-Client-Ip ONLY when the request comes from a
-     * proxy listed in the PROXY_IPS constant; otherwise uses REMOTE_ADDR.
+     * Client IP. REMOTE_ADDR, unless it is a trusted proxy (an address or CIDR range in the
+     * PROXY_IPS constant): then the rightmost X-Forwarded-For entry that is not a trusted proxy.
+     * An empty header, an invalid entry or a chain of trusted proxies only falls back to
+     * REMOTE_ADDR. Entries left of the client are written by the client and never read.
+     *
+     * @param array<string, mixed> $server
+     * @param array<mixed>         $trusted
      */
-    private static function resolveClientIp(): string
+    private static function resolveClientIp(array $server, array $trusted): string
     {
-        $remote = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
-        $trusted = defined('PROXY_IPS') && is_array(PROXY_IPS) ? PROXY_IPS : [];
+        $remote = (string) ($server['REMOTE_ADDR'] ?? '');
+        if (!filter_var($remote, FILTER_VALIDATE_IP)) {
+            return '';
+        }
+        if (!self::isTrusted($remote, $trusted)) {
+            return $remote;
+        }
 
-        if ($trusted !== [] && in_array($remote, $trusted, true)) {
-            $forwarded = (string) ($_SERVER['HTTP_X_CLIENT_IP'] ?? $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '');
-            $candidate = trim(explode(',', $forwarded)[0] ?? '');
-            if ($candidate !== '' && filter_var($candidate, FILTER_VALIDATE_IP)) {
-                return $candidate;
+        $hops = explode(',', (string) ($server['HTTP_X_FORWARDED_FOR'] ?? ''));
+        foreach (array_reverse($hops) as $hop) {
+            $hop = trim($hop);
+            if (!filter_var($hop, FILTER_VALIDATE_IP)) {
+                return $remote;
+            }
+            if (!self::isTrusted($hop, $trusted)) {
+                return $hop;
             }
         }
 
-        return filter_var($remote, FILTER_VALIDATE_IP) ? $remote : '';
+        return $remote;
+    }
+
+    /**
+     * Whether a valid IP matches an entry of PROXY_IPS: an exact IPv4/IPv6 address or a CIDR range
+     * ("173.245.48.0/20", "2400:cb00::/32"). Entries that are neither are ignored.
+     *
+     * @param array<mixed> $trusted
+     */
+    private static function isTrusted(string $ip, array $trusted): bool
+    {
+        $ipBin = (string) inet_pton($ip);
+        foreach ($trusted as $entry) {
+            if (!is_string($entry)) {
+                continue;
+            }
+            [$net, $bits] = array_pad(explode('/', trim($entry), 2), 2, null);
+            if (!filter_var($net, FILTER_VALIDATE_IP)) {
+                continue;
+            }
+            $netBin = (string) inet_pton($net);
+            $max = strlen($netBin) * 8;
+            if ($bits !== null && (!ctype_digit($bits) || (int) $bits > $max)) {
+                continue;
+            }
+            if (strlen($ipBin) !== strlen($netBin)) {
+                continue;
+            }
+            $bits = $bits === null ? $max : (int) $bits;
+            $bytes = intdiv($bits, 8);
+            if (substr($ipBin, 0, $bytes) !== substr($netBin, 0, $bytes)) {
+                continue;
+            }
+            $rest = $bits % 8;
+            if ($rest === 0) {
+                return true;
+            }
+            $mask = chr((0xFF << (8 - $rest)) & 0xFF);
+            if (($ipBin[$bytes] & $mask) === ($netBin[$bytes] & $mask)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static function readRawBody(string $method): ?string

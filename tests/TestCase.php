@@ -10,6 +10,7 @@ use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\RequestContext;
 use Golovanov\Weft\I18n\I18n;
 use Golovanov\Weft\I18n\Locale;
+use Golovanov\Weft\I18n\Url;
 use Golovanov\Weft\Observability\Alert;
 use Golovanov\Weft\Observability\Trace;
 use Golovanov\Weft\Security\RateLimiter;
@@ -40,6 +41,7 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(Config::class, ['items' => [], 'loaded' => false]);
         self::setStatics(Seo::class, ['data' => [], 'jsonLd' => [], 'booted' => false]);
         self::setStatics(Locale::class, ['current' => null]);
+        self::setStatics(Url::class, ['route' => null]);
         self::setStatics(I18n::class, ['dict' => [], 'locale' => 'en']);
         self::setStatics(Cache::class, ['store' => null]);
         self::setStatics(RateLimiter::class, ['store' => null]);
@@ -53,6 +55,10 @@ abstract class TestCase extends BaseTestCase
             'startedAt' => 0.0,
             'logPath' => 'requests',
         ]);
+
+        // A page may set its own status (http_response_code(404)) and Seo::render() reads it;
+        // keep one test's status from leaking into the next through this process-wide state.
+        http_response_code(200);
 
         $_SESSION = [];
         $_GET = [];

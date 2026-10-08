@@ -100,6 +100,47 @@ server {
 }
 ```
 
+## Behind a proxy or CDN
+
+Rate limits count per visitor IP, so PHP has to see the visitor's address. Which one it sees depends
+on what stands in front of it:
+
+- **Shared hosting, Apache, or nginx + php-fpm on one machine (the config above)** — `REMOTE_ADDR`
+  is usually the visitor already. Leave `PROXY_IPS` empty and check it as below.
+- **Another server forwards requests to the one running PHP** — a CDN such as Cloudflare, a load
+  balancer, nginx proxying to Apache or to a container. `REMOTE_ADDR` is that server, and every
+  visitor shares one limit until you list it in `PROXY_IPS` in `config/config.php`:
+
+```php
+define('PROXY_IPS', ['203.0.113.10', '173.245.48.0/20', '2400:cb00::/32']);
+```
+
+Each entry is an IP address or a CIDR range. A host name (`localhost`, a Docker service name such as
+`nginx`) is ignored without an error — write the address.
+
+- **Cloudflare** — every range from [cloudflare.com/ips](https://www.cloudflare.com/ips/), IPv4 and
+  IPv6. The list changes now and then; compare it when you update the site.
+- **A chain** (Cloudflare → your nginx → PHP) — every link: the Cloudflare ranges and the address
+  your nginx connects to PHP from.
+- **Docker** — the proxy container's address, or the narrowest range it gets addresses from, not the
+  whole Docker network without need. Everything listed is believed about the client's address: with a
+  port of the PHP container published directly, visitors arrive from the network's gateway, and if
+  that address is trusted, a visitor's own `X-Forwarded-For` header picks the IP their limit counts.
+
+Every listed proxy must append the address it got the request from to `X-Forwarded-For`. Cloudflare
+does it; in your own nginx, set `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` in the
+`location` that proxies to PHP. Weft reads no other header: a proxy that passes the address only in
+`X-Real-IP` or `X-Client-Ip` leaves every visitor counted as the proxy, one limit for the whole site.
+
+**Check it.** Open any page of the site from your browser, then on the server, in the site directory:
+
+```bash
+grep -h '"request_start"' storage/logs/requests/*.jsonl | tail -n 1 | grep -o '"client_ip":"[^"]*"'
+```
+
+`client_ip` must be your own public address (any "what is my IP" page shows it), not the proxy's,
+`127.0.0.1` or a Docker address.
+
 ## Updating
 
 - **The site** — `git pull`, `composer install --no-dev`, `npm run build` if the frontend changed.
@@ -147,8 +188,8 @@ them.
 - [ ] `composer install --no-dev --optimize-autoloader` done
 - [ ] `npm run build` done, `public/dist/` present
 - [ ] `storage/` writable by the user PHP runs as (logs, cache, rate-limit counters)
-- [ ] `PROXY_IPS` lists your reverse proxy / CDN addresses, if you have one; otherwise all visitors
-  share one rate limit
+- [ ] `client_ip` in the newest `request_start` trace is your own address, not a proxy's (see
+  "Behind a proxy or CDN" above); otherwise all visitors share one rate limit
 - [ ] HTTPS on; consider `app.security.hsts`
 - [ ] keys set for whichever of captcha / alerts / mail you use; a captcha enabled with a key missing
   passes forms while `DEBUG` is on and rejects every submission with it off — look for

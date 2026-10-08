@@ -41,6 +41,8 @@ final class UrlTest extends TestCase
     {
         $this->enableLocales();
         $this->assertSame('/ru/about', Url::link('/about', 'ru'));
+        // A locale root has no trailing slash either: the kernel redirects /ru/ to /ru.
+        $this->assertSame('/ru', Url::link('/', 'ru'));
         // The default locale never gets a prefix.
         $this->assertSame('/about', Url::link('/about', 'en'));
     }

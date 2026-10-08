@@ -30,7 +30,8 @@ convention-driven core so a new site is mostly content.
 ## Features
 
 - **Convention routing** — `pages/about.php` → `/about`, `api/contact.php` → `/api/contact`,
-  `pages/notes/[slug].php` → `/notes/anything`.
+  `pages/notes/[slug].php` → `/notes/anything`. One address per page: `/about/` and `/home`
+  redirect, a malformed path is a 404.
 - **SEO under the hood** — title templates, canonical, Open Graph, Twitter cards, hreflang and
   JSON-LD rendered from config + per-page overrides. Generated `/sitemap.xml` and `/robots.txt`.
 - **Optional i18n** — off by default. Turn it on and the default locale stays prefix-free

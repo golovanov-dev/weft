@@ -59,7 +59,7 @@ $http = new HttpClient();  $http->get($url, $query, $opts);  $http->post($url, $
 Locale::enabled();  Locale::supported();  Locale::default();  Locale::current();  Locale::name('ru');
 I18n::t($key, $vars);  I18n::has($key);  I18n::raw($key, $def);
 Url::link($path, $locale);  Url::asset($path);  Url::api($path);  Url::absolute($path, $locale);
-Url::inLocale('ru', $path);  Url::currentPath();  Url::isActive('about');
+Url::inLocale('ru', $path);  Url::currentPath();  Url::routePath();  Url::isActive('about');
 ```
 
 ### SEO

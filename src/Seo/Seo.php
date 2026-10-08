@@ -41,7 +41,7 @@ final class Seo
         self::$data = [
             'title' => null,
             'description' => (string) Config::get('app.seo.description', ''),
-            'canonical' => null,               // auto from current path when null
+            'canonical' => null,               // null: from the matched route (none on a 404)
             'robots' => (string) Config::get('app.seo.robots', 'index, follow'),
             'image' => (string) Config::get('app.seo.og_image', ''),
             'image_alt' => null,               // null = not set by the page, see render()
@@ -114,7 +114,11 @@ final class Seo
 
         $title = self::documentTitle();
         $description = (string) self::$data['description'];
-        $canonical = self::$data['canonical'] ?: Url::absolute(Url::currentPath());
+        // Default canonical, og:url and hreflang come from the route the Kernel matched, never from
+        // the raw request URI; a 404 has no route and gets none of them unless the page sets one.
+        // A page that answers 404 itself (a dynamic page with an unknown slug) counts as a 404.
+        $path = http_response_code() === 404 ? null : Url::routePath();
+        $canonical = (string) (self::$data['canonical'] ?: ($path !== null ? Url::absolute($path) : ''));
         $robots = (string) self::$data['robots'];
         $image = (string) self::$data['image'];
         $type = (string) self::$data['type'];
@@ -126,7 +130,9 @@ final class Seo
             $out[] = '<meta name="description" content="' . $e($description) . '" />';
         }
         $out[] = '<meta name="robots" content="' . $e($robots) . '" />';
-        $out[] = '<link rel="canonical" href="' . $e($canonical) . '" />';
+        if ($canonical !== '') {
+            $out[] = '<link rel="canonical" href="' . $e($canonical) . '" />';
+        }
 
         // Open Graph.
         $out[] = '<meta property="og:type" content="' . $e($type) . '" />';
@@ -134,7 +140,9 @@ final class Seo
         if ($description !== '') {
             $out[] = '<meta property="og:description" content="' . $e($description) . '" />';
         }
-        $out[] = '<meta property="og:url" content="' . $e($canonical) . '" />';
+        if ($canonical !== '') {
+            $out[] = '<meta property="og:url" content="' . $e($canonical) . '" />';
+        }
         if ($siteName !== '') {
             $out[] = '<meta property="og:site_name" content="' . $e($siteName) . '" />';
         }
@@ -174,8 +182,7 @@ final class Seo
         }
 
         // hreflang alternates.
-        if (self::$data['alternates'] && Locale::enabled()) {
-            $path = Url::currentPath();
+        if (self::$data['alternates'] && Locale::enabled() && $path !== null) {
             foreach (Locale::supported() as $locale) {
                 $out[] = '<link rel="alternate" hreflang="' . $e($locale) . '" href="' . $e(Url::absolute($path, $locale)) . '" />';
             }

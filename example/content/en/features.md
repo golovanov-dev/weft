@@ -57,14 +57,16 @@ Seo::set([
     'image'       => '/img/og-about.png',
     'image_alt'   => 'The About page card',
     'type'        => 'article',
-    'canonical'   => null,           // null ⇒ derived from the current path
+    'canonical'   => null,           // null ⇒ from the matched route; none on a 404
 ]);
 Seo::noindex();
 Seo::jsonLd(['@type' => 'TechArticle', 'headline' => '…']);
 ```
 
 Rendered for you: title, description, robots, canonical, full Open Graph, Twitter card, hreflang
-alternates and every JSON-LD block. `/sitemap.xml` and `/robots.txt` are generated too; in `DEBUG`
+alternates and every JSON-LD block. Canonical, `og:url` and hreflang are built from the page the
+engine matched, never from the URL as requested. A 404 gets none of the three — the engine's own and
+a page that answers `http_response_code(404)` itself, like an unknown slug on a dynamic page. `/sitemap.xml` and `/robots.txt` are generated too; in `DEBUG`
 robots blocks indexing automatically.
 
 ## Caching
@@ -142,11 +144,18 @@ whether caching is enabled or not. A window starts at the first hit and later hi
 If a counter cannot be written, the limiter **fails open**: the request is allowed and the failure
 goes to the error log, so a broken store never locks users out.
 
-Limits count per client IP, taken from `REMOTE_ADDR`. Behind a reverse proxy, load balancer or CDN
-that address is the proxy's, so every visitor shares one counter: the example's contact form then
-takes one submission per 5 seconds for the whole site. List the proxy addresses in the `PROXY_IPS`
-constant (`config/config.php`); requests from them are then counted by `X-Client-Ip` /
-`X-Forwarded-For`. Each entry is an exact address, not a range.
+Limits count per client IP, taken from `REMOTE_ADDR`. On shared hosting and with nginx + php-fpm on
+one machine that is usually the visitor, and `PROXY_IPS` stays empty. Behind a CDN, load balancer or
+another server proxying to PHP it is the proxy's address, so every visitor shares one counter: the
+example's contact form then takes one submission per 5 seconds for the whole site. List the proxies
+in the `PROXY_IPS` constant (`config/config.php`) as IP addresses or CIDR ranges
+(`'173.245.48.0/20'`, `'2400:cb00::/32'`); a host name such as `localhost` or a Docker service name
+is ignored. For a request from one of them, the client IP is the rightmost `X-Forwarded-For` entry
+that is not in `PROXY_IPS`; entries further left are set by the client and ignored. No other header
+is read: a proxy that passes the address only in `X-Real-IP` or `X-Client-Ip`, or an entry that is
+not an IP, leaves the proxy's address in place. To see which address Weft took, look at `client_ip`
+in the `request_start` trace event. What to list for Cloudflare, a chain of proxies or Docker, and
+how to check it: [Deployment](/docs/deployment).
 
 The captcha is on when `app.captcha.enabled` is true and both keys are set; in this example the
 flag follows `RECAPTCHA_SECRETKEY`. While the flag is off, `verify()` returns a pass

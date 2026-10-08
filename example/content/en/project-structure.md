@@ -48,6 +48,14 @@ There is no route file. The URL path maps straight onto a file:
 | anything else | `pages/404.php` |
 | an uncaught exception in a page | `pages/500.php`, if present (receives `$error`) |
 
+Each page has one address. A GET or HEAD request for `/about/` gets a 301 to `/about`, `/home` (the
+`app.default_route` page) to `/`, `/ru/home` and `/ru/` to `/ru`, `/en/about` (default locale) to
+`/about`; the query string is kept. Other methods are served without a redirect, so a form posting
+to `/api/contact/` still works. A path with any character other than `A-Z a-z 0-9 / _ - .` (so
+also non-ASCII and any percent-encoding), or with an empty, `.` or `..` segment (`//about` too), is
+a 404 — a JSON one under `/api` — and is never redirected. So are `/404` and `/blog/index`:
+`pages/404.php` is what a 404 shows, and `pages/blog/index.php` is served at `/blog` only.
+
 ### Dynamic segments
 
 When no exact file matches, the engine looks for a `[name].php` template in the same directory and
@@ -64,7 +72,8 @@ come from the parent directory name (`pages/docs/[slug].php` → `lang/<locale>/
 ## Two entry points
 
 **`public/index.php`** — the web. It sets error handling and the session cookie parameters,
-requires `bootstrap.php` and calls `Golovanov\Weft\Kernel::handle()`. That is all it does. The
+requires `bootstrap.php` and calls `Golovanov\Weft\Kernel::handle()`. Under PHP's built-in server
+(`php -S`) it first hands an existing file in `public/` (CSS, JS, images) back to the server. The
 session itself starts only when a form needs a CSRF token (`Csrf`), so a visitor who only
 reads pages gets no `PHPSESSID` cookie.
 
@@ -89,8 +98,9 @@ App\Bootstrap::init();                        // 6) site wiring
 2. Trace::boot() + httpStart() assign a trace id, record request_start (query, body as fields)
 3. Headers::send()             security headers + X-Trace-Id
 4. Resolve the path
-   ├─ strip BASE_URI, sanitise
-   ├─ extract the locale (if i18n is on); /en/x redirects to /x
+   ├─ strip BASE_URI; a path that is not clean → 404
+   ├─ extract the locale (if i18n is on)
+   ├─ GET/HEAD: /x/, /en/x, /home → 301 to the one address
    ├─ /sitemap.xml, /robots.txt → generated response
    ├─ /api/… → run the endpoint, capture its JSON
    └─ otherwise → find the page, load translations, wrap in the layout

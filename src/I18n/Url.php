@@ -15,6 +15,9 @@ use Golovanov\Weft\Config\Config;
  */
 final class Url
 {
+    /** Path of the route the Kernel matched; '' when it matched none (404), null outside the Kernel. */
+    private static ?string $route = null;
+
     public static function baseUri(): string
     {
         return rtrim((string) Config::env('BASE_URI', ''), '/');
@@ -41,16 +44,13 @@ final class Url
             $path = substr($path, 0, -strlen($suffix));
         }
 
-        $path = '/' . ltrim($path, '/');
-        $built = self::baseUri() . self::localePrefix($locale) . $path;
-        // Collapse a trailing slash on non-root paths ("/about/" -> "/about").
-        if ($path !== '/' && str_ends_with($built, '/')) {
+        // No trailing slash except on the site root: "/about/" -> "/about", "/ru/" -> "/ru".
+        // The kernel redirects a trailing slash away, so links never point at a redirect.
+        $built = self::localePrefix($locale) . '/' . ltrim($path, '/');
+        if ($built !== '/') {
             $built = rtrim($built, '/');
         }
-        if ($built === '') {
-            $built = '/';
-        }
-        return $built . $suffix;
+        return self::baseUri() . $built . $suffix;
     }
 
     /** Same route as $path but in a specific locale (for language switchers / hreflang). */
@@ -78,11 +78,24 @@ final class Url
     }
 
     /**
-     * Current route path with base URI and any locale prefix stripped, so page lookups and
-     * hreflang generation work off a locale-independent path ("/", "/about", "/contact").
+     * @internal Called by the Kernel once it has routed the request: the locale-independent
+     * path of the matched page, or null when nothing matched (404).
      */
-    public static function currentPath(): string
+    public static function setRoute(?string $path): void
     {
+        self::$route = $path ?? '';
+    }
+
+    /**
+     * Locale-independent path of the page being served ("/", "/about", "/notes/hello"), used for
+     * canonical, og:url and hreflang: the route the Kernel matched, never the raw request URI.
+     * Null when the request is a 404. Outside the Kernel (CLI, tests) it is read from REQUEST_URI.
+     */
+    public static function routePath(): ?string
+    {
+        if (self::$route !== null) {
+            return self::$route === '' ? null : self::$route;
+        }
         $path = parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/';
         $base = self::baseUri();
         if ($base !== '' && str_starts_with($path, $base)) {
@@ -95,9 +108,23 @@ final class Url
         return '/' . ltrim($path, '/');
     }
 
+    /**
+     * Current route path with base URI and any locale prefix stripped, so page lookups and
+     * language switchers work off a locale-independent path ("/", "/about", "/contact").
+     * On a 404 it is "/", so a language switcher there leads to the home page.
+     */
+    public static function currentPath(): string
+    {
+        return self::routePath() ?? '/';
+    }
+
     public static function isActive(string $route): bool
     {
-        $current = trim(self::currentPath(), '/');
+        $path = self::routePath();
+        if ($path === null) {
+            return false;
+        }
+        $current = trim($path, '/');
         $current = $current === '' ? 'home' : $current;
         return $current === trim($route, '/');
     }
