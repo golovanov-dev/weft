@@ -32,6 +32,7 @@ final class Trace
     private static mixed $trace = null;
     private static string $id = '';
     private static bool $booted = false;
+    private static bool $lockShared = false;
 
     public static function boot(?Request $request = null): string
     {
@@ -40,7 +41,7 @@ final class Trace
         }
         self::$booted = true;
 
-        $dir = self::logDir();
+        $dir = self::directory();
         $incoming = $request?->header('x-trace-id') ?? $request?->header('x-request-id');
         $trustIncoming = (bool) (defined('TRACE_TRUST_INCOMING') ? TRACE_TRUST_INCOMING : false);
 
@@ -48,6 +49,8 @@ final class Trace
             $config = Configuration::create(
                 logDirectory: $dir,
                 sensitiveKeys: self::sensitiveKeys(),
+                directoryMode: 02770,
+                fileMode: 0660,
                 retentionDays: self::retentionDays(),
                 trustIncomingTraceId: $trustIncoming,
             );
@@ -191,9 +194,15 @@ final class Trace
     public static function flush(): void
     {
         self::$tracer?->flush();
+        self::shareLockFile();
     }
 
-    private static function logDir(): string
+    /**
+     * Where the traces go: LOGS_PATH/requests.
+     *
+     * @internal Used by ErrorHandler::logsError().
+     */
+    public static function directory(): string
     {
         $base = defined('LOGS_PATH') ? (string) LOGS_PATH : sys_get_temp_dir() . '/weft-logs';
         return rtrim($base, '/\\') . '/requests';
@@ -267,6 +276,27 @@ final class Trace
         return is_array($keys) ? array_values(array_filter($keys, 'is_string')) : [];
     }
 
+    /**
+     * traceloom gives its directory and trace files the modes set in boot() (2770, 0660), but
+     * creates its lock file by the umask. Give it 0660 too, once per request, so PHP and the deploy
+     * user's scripts (one group) can both take the lock. chmod fails harmlessly on another
+     * user's file; on Windows modes do not apply.
+     */
+    private static function shareLockFile(): void
+    {
+        if (self::$lockShared || self::$tracer === null || PHP_OS_FAMILY === 'Windows') {
+            return;
+        }
+        $lock = self::directory() . '/.traceloom.lock';
+        if (!is_file($lock)) {
+            return; // not created yet
+        }
+        self::$lockShared = true;
+        if ((fileperms($lock) & 0777) !== 0660) {
+            @chmod($lock, 0660);
+        }
+    }
+
     /** Days of trace files to keep; 0 keeps them forever. Invalid values fall back to the default. */
     private static function retentionDays(): int
     {
@@ -282,7 +312,7 @@ final class Trace
     /** Built-in JSONL writer used only when traceloom is absent. */
     private static function writeFallback(string $name, array $data): void
     {
-        $dir = self::logDir();
+        $dir = self::directory();
         if (!is_dir($dir)) {
             @mkdir($dir, 0770, true);
         }

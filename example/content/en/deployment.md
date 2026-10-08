@@ -31,8 +31,9 @@ cp config/config.example.php config/config.php
 # 4. Frontend (here or in CI)
 npm ci && npm run build
 
-# 5. Writable runtime: storage/ gets the group PHP runs as (www-data below; see "Who writes storage/")
-mkdir -p storage/logs storage/cache
+# 5. Writable runtime, shared with the group PHP runs as (www-data below; see "Who writes storage/")
+sudo usermod -aG www-data "$USER"      # you join PHP's group; applies from your next login
+mkdir -p storage/logs/errors storage/logs/requests storage/cache
 sudo chgrp -R www-data storage
 sudo chmod -R g+rwX,o-rwx storage
 sudo find storage -type d -exec chmod 2770 {} +
@@ -56,12 +57,16 @@ user who deploys the code; steps 5 and 7 need `sudo`. Substitute your PHP user a
 
 PHP writes logs, traces, the file cache and rate-limit counters under `storage/` (counters live in
 `storage/cache` even with caching off, unless `app.rate_limit.path` points elsewhere). The deploy
-user writes cache files there too, from `php scripts/sitemap.php` and cron jobs.
+user writes there too, from `php scripts/sitemap.php` and cron jobs, and reads the logs and traces.
 
-Step 5 lets both write: `storage/` stays the deploy user's, its group is the PHP user's group, and the
-setgid bit (the `2` in `2770`) gives every file and directory created in it that group. The engine
-creates cache entries and counters with mode `660` whatever the umask, so PHP can overwrite an entry a
-script of the deploy user created.
+Step 5 lets both do that: `storage/` stays the deploy user's, its group is the PHP user's group, the
+deploy user joins that group, and the setgid bit (the `2` in `2770`) gives every file and directory
+created in it that group. The engine creates the directories and files it writes there with modes
+`2770` and `660` whatever the umask, so each side can write and read what the other created. Log out
+and back in after step 5 for the group to apply to your shell and cron jobs.
+
+A site whose `storage/` belongs to the PHP user (an older version of this guide): run
+`sudo chown -R "$USER" storage` in the site root as the deploy user, then step 5.
 
 Run scripts and cron jobs as the deploy user (its own `crontab -e`). Run `health.php` as the PHP user
 (step 7): from the deploy user's shell it checks the deploy user's permissions and can report
@@ -77,7 +82,7 @@ It prints a JSON report and exits with 1 when `ok` is false. `ok` is false when 
 
 | Field | Bad value | What to do |
 |---|---|---|
-| `logs_writable` | `false` | give the PHP user write access to `LOGS_PATH` (see above) |
+| `logs_writable` | `false` | `logs_error` names what PHP cannot write: `errors/` or `requests/` under `LOGS_PATH`, or today's file in it; run step 5 (see above) |
 | `rate_limit_writable` | `false` | `rate_limit_error` says what PHP cannot write: give the PHP user write access to `rate_limit_path` and the files in it (see above); with Redis, see below |
 | `rate_limit_store` | `file` while `cache_driver` is `redis` | Redis is not used, the cache and counters are per server: see below |
 | `proxy_ips_error` | not `null` | `PROXY_IPS` is not an array, so no proxy is trusted: write `define('PROXY_IPS', [...])` |
@@ -112,8 +117,9 @@ writes a probe counter to Redis (ten-second TTL, deleted at once).
 | `file` | `Class "Redis" not found` | ext-redis is not installed |
 | `file` | a connection error, such as `Connection refused` | Redis is not reachable at `REDIS_HOST`:`REDIS_PORT` |
 | `file` | `NOAUTH` | Redis requires a password and `REDIS_PASSWORD` is empty |
-| `file` | `WRONGPASS`, or `Redis AUTH failed` (Redis 5 and older) | `REDIS_PASSWORD` is wrong |
+| `file` | `WRONGPASS` | `REDIS_PASSWORD` is wrong |
 | `file` | `called without any password configured` | `REDIS_PASSWORD` is set, but Redis has no password: set it to `''` |
+| `file` | `Redis AUTH failed` (Redis 5 and older) | `REDIS_PASSWORD` is wrong, or Redis has no password: then set it to `''` |
 | `file` | `DB index is out of range` | `REDIS_DB` is higher than Redis allows (16 databases by default) |
 | `redis` | `Redis rejected the probe write` | a read-only replica, `maxmemory` reached under the `noeviction` policy, or a Redis user not allowed to run `EVAL` |
 

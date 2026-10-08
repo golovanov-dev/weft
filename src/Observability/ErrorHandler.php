@@ -137,12 +137,18 @@ final class ErrorHandler
         }
     }
 
+    /**
+     * Append a line to today's error log. The directory and the file it creates get modes 2770 and
+     * 0660 whatever the umask, so PHP and the deploy user's scripts (one group) both keep writing.
+     */
     public static function log(string $type, int $code, string $message, string $file, int $line): void
     {
-        $base = defined('LOGS_PATH') ? (string) LOGS_PATH : sys_get_temp_dir() . '/weft-logs';
-        $dir = rtrim($base, '/\\') . '/errors';
-        if (!is_dir($dir) && !@mkdir($dir, 0770, true) && !is_dir($dir)) {
-            return;
+        $dir = self::directory();
+        if (!is_dir($dir)) {
+            if (!@mkdir($dir, 0770, true) && !is_dir($dir)) {
+                return;
+            }
+            @chmod($dir, 02770);
         }
 
         $line = sprintf(
@@ -156,7 +162,59 @@ final class ErrorHandler
             RequestContext::traceId(),
         );
 
-        @file_put_contents($dir . '/' . Clock::date('Y-m-d') . '.log', $line, FILE_APPEND | LOCK_EX);
+        $path = $dir . '/' . Clock::date('Y-m-d') . '.log';
+        $created = !is_file($path);
+        if (@file_put_contents($path, $line, FILE_APPEND | LOCK_EX) !== false && $created) {
+            @chmod($path, 0660);
+        }
+    }
+
+    /**
+     * What PHP cannot write among the logs, for health checks: the error log and trace directories
+     * and today's files in them; null when everything is writable. A missing directory counts as
+     * writable when PHP can create it.
+     */
+    public static function logsError(): ?string
+    {
+        $traces = Trace::directory();
+        $problems = [
+            ...self::unwritable(self::directory(), [Clock::date('Y-m-d') . '.log']),
+            // traceloom names trace files by the UTC date (Y-m-d.jsonl, Y-m-d-2.jsonl, ...) and
+            // takes its lock file on rotation.
+            ...self::unwritable($traces, [
+                ...array_map('basename', glob($traces . '/' . gmdate('Y-m-d') . '*.jsonl') ?: []),
+                '.traceloom.lock',
+            ]),
+        ];
+        return $problems !== [] ? 'not writable by PHP: ' . implode(', ', $problems) : null;
+    }
+
+    /**
+     * The directory, or those of the named files in it that exist, PHP cannot write.
+     *
+     * @param list<string> $files
+     * @return list<string>
+     */
+    private static function unwritable(string $dir, array $files): array
+    {
+        if (!is_dir($dir)) {
+            $parent = dirname($dir);
+            while (!is_dir($parent) && dirname($parent) !== $parent) {
+                $parent = dirname($parent);
+            }
+            return is_writable($parent) ? [] : [$dir];
+        }
+        if (!is_writable($dir)) {
+            return [$dir];
+        }
+        $paths = array_map(fn (string $file) => $dir . '/' . $file, $files);
+        return array_values(array_filter($paths, fn (string $path) => is_file($path) && !is_writable($path)));
+    }
+
+    private static function directory(): string
+    {
+        $base = defined('LOGS_PATH') ? (string) LOGS_PATH : sys_get_temp_dir() . '/weft-logs';
+        return rtrim($base, '/\\') . '/errors';
     }
 
     public static function debug(): bool

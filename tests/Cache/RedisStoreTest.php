@@ -19,7 +19,7 @@ final class RedisStoreTest extends TestCase
             'no password, database 0' => ['', 0, [], ['connect', 'ping'], null],
             'password and database accepted' => ['secret', 3, [], ['connect', 'auth', 'select', 'ping'], null],
             'password rejected, Redis 6+' => ['wrong', 3, ['auth' => 'WRONGPASS invalid username-password pair'], ['connect', 'auth'], 'WRONGPASS invalid username-password pair'],
-            'password rejected, Redis 5' => ['wrong', 3, ['auth' => 'ERR invalid password'], ['connect', 'auth'], 'Redis AUTH failed: ERR invalid password'],
+            'password rejected, Redis 5' => ['wrong', 3, ['auth' => 'ERR invalid password'], ['connect', 'auth'], 'Redis AUTH failed (wrong password, or Redis has no password set): ERR invalid password'],
             'database rejected' => ['', 99, ['select' => 'ERR DB index is out of range'], ['connect', 'select'], 'Redis SELECT 99 failed: ERR DB index is out of range'],
             'password required, none sent' => ['', 0, ['ping' => 'NOAUTH Authentication required.'], ['connect', 'ping'], 'NOAUTH Authentication required.'],
             'first command refused with ERR' => ['', 0, ['ping' => 'ERR max number of clients reached'], ['connect', 'ping'], 'Redis PING failed: ERR max number of clients reached'],

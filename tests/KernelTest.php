@@ -343,4 +343,34 @@ final class KernelTest extends TestCase
         $this->assertSame('Unhandled exception: render failed', $alerts[0]['message']);
         $this->assertSame($alerts[1], $alerts[0]);
     }
+
+    /** Under FPM the 500 is out before the alert; a session left open would still hold the next request. */
+    #[RunInSeparateProcess]
+    public function testSessionIsReleasedBeforeTheAlertWaits(): void
+    {
+        Config::set('app.alertloop', ['enabled' => true, 'base_url' => 'https://alerts.example', 'api_key' => 'k']);
+        $statuses = [];
+        (new \ReflectionProperty(Alert::class, 'transport'))->setValue(
+            null,
+            static function () use (&$statuses): array {
+                $statuses[] = session_status();
+                return ['status' => 202, 'error' => ''];
+            },
+        );
+        $_SERVER['REQUEST_URI'] = '/broken';
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $sessions = $this->makeTempDir();
+        session_save_path($sessions);
+        $this->assertTrue(session_start());
+
+        try {
+            ob_start();
+            Kernel::handle();
+            ob_end_clean();
+        } finally {
+            $this->removeDir($sessions);
+        }
+
+        $this->assertSame([PHP_SESSION_NONE], $statuses);
+    }
 }

@@ -49,7 +49,7 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(View::class, ['shared' => []]);
         self::setStatics(Vite::class, ['manifest' => null]);
         self::setStatics(Alert::class, ['transport' => null, 'reporting' => false, 'misconfiguredLogged' => false]);
-        self::setStatics(Trace::class, ['tracer' => null, 'trace' => null, 'id' => '', 'booted' => false]);
+        self::setStatics(Trace::class, ['tracer' => null, 'trace' => null, 'id' => '', 'booted' => false, 'lockShared' => false]);
         self::setStatics(RequestContext::class, [
             'request' => null,
             'traceId' => '',

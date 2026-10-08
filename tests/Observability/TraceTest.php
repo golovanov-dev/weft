@@ -286,4 +286,28 @@ final class TraceTest extends TestCase
 
         $this->assertSame($expected, $this->configuration()->retentionDays);
     }
+
+    public function testTraceDirectoryAndFilesAreGroupWritableWhateverTheUmask(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('POSIX file modes');
+        }
+        $dir = Trace::directory();
+        @unlink($dir . '/.traceloom.lock');
+        $this->removeDir($dir);
+
+        $previous = umask(0077);
+        try {
+            Trace::boot();
+            Trace::event('mode_check');
+            Trace::flush();
+        } finally {
+            umask($previous);
+        }
+
+        clearstatcache();
+        $this->assertSame('2770', decoct(fileperms($dir) & 07777));
+        $this->assertSame('660', decoct(fileperms($dir . '/' . gmdate('Y-m-d') . '.jsonl') & 0777));
+        $this->assertSame('660', decoct(fileperms($dir . '/.traceloom.lock') & 0777));
+    }
 }

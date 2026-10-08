@@ -57,10 +57,15 @@ final class Kernel
         $response->send();
 
         if ($failure !== null) {
-            // The alert waits for AlertLoop (up to app.alertloop.timeout): under PHP-FPM the 500
-            // is handed to the client first; elsewhere it is sent but the connection stays open.
+            // The alert waits for AlertLoop (up to app.alertloop.timeout). Under PHP-FPM the 500
+            // is handed to the client first. Elsewhere the connection stays open until the alert
+            // is done, and with output_buffering on a short 500 stays in PHP's buffer till then.
             if (function_exists('fastcgi_finish_request')) {
                 fastcgi_finish_request();
+            }
+            // Release the session lock, or the visitor's next request waits for the alert too.
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
             }
             ErrorHandler::alertException($failure);
             Trace::flush();

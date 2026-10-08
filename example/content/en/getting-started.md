@@ -79,6 +79,7 @@ php scripts/health.php
   "debug": false,
   "dev_mode": false,
   "logs_writable": true,
+  "logs_error": null,
   "cache_driver": "file",
   "rate_limit_store": "file",
   "rate_limit_path": "/path/to/site/storage/cache",

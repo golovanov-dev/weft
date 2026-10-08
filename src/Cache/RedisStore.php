@@ -31,7 +31,9 @@ final class RedisStore implements Store
         // phpredis throws RedisException for some rejections (WRONGPASS, NOAUTH) and returns false
         // for plain ERR replies (Redis 5's "ERR invalid password", a database out of range).
         if ($password !== '' && $this->redis->auth($password) !== true) {
-            throw new \RuntimeException('Redis AUTH failed: ' . $this->lastError());
+            throw new \RuntimeException(
+                'Redis AUTH failed (wrong password, or Redis has no password set): ' . $this->lastError(),
+            );
         }
         if ($database !== 0 && $this->redis->select($database) !== true) {
             throw new \RuntimeException('Redis SELECT ' . $database . ' failed: ' . $this->lastError());

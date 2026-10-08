@@ -57,9 +57,11 @@ pre-1.0 the API may change between minor versions.
   than `/8`, an IPv6 one wider than `/16`), or when a captcha or alerts are enabled without their
   keys outside `DEBUG`. New fields: `cache_driver`, `rate_limit_store`, `rate_limit_path`,
   `rate_limit_writable`, `rate_limit_error` (why), `proxy_ips_error`, `proxy_ips_invalid`,
-  `proxy_ips_trust_all`, `captcha_missing_keys`, `alertloop_missing_keys`. If your site copied the script, update the engine to 0.2.0 first, then
+  `proxy_ips_trust_all`, `captcha_missing_keys`, `alertloop_missing_keys`, `logs_error`.
+  `logs_writable` now checks the `errors/` and `requests/` directories under `LOGS_PATH` and today's
+  files in them, not only `LOGS_PATH`. If your site copied the script, update the engine to 0.2.0 first, then
   copy the script again: on an older engine it stops with a fatal error. The engine side:
-  `Captcha::missingKeys()`, `Alert::missingKeys()`, `RateLimiter::storeStatus()`, `Request::invalidProxyIps()`,
+  `Captcha::missingKeys()`, `Alert::missingKeys()`, `ErrorHandler::logsError()`, `RateLimiter::storeStatus()`, `Request::invalidProxyIps()`,
   `Request::trustAllProxyIps()`, `Request::proxyIpsError()`.
 - `PROXY_IPS` accepts CIDR ranges, IPv4 and IPv6 (`'173.245.48.0/20'`, `'2400:cb00::/32'`), next
   to exact addresses, so a CDN such as Cloudflare can be listed by its published ranges. An entry
@@ -114,10 +116,12 @@ pre-1.0 the API may change between minor versions.
   file. If your settings are already in `app.php`, alerts start being sent after the upgrade.
   Alerts enabled without `base_url` or `api_key` still send nothing, and now say so in the error
   log, once per request.
-- The file cache creates its entries and rate-limit counters with mode `660` whatever the umask, so
-  PHP can overwrite a cache file that `scripts/sitemap.php` or a cron job created as the deploy user.
-  The deployment guide now gives `storage/` the PHP user's group with setgid directories instead of
-  making PHP its owner; to switch, run step 5 of the guide once.
+- Error logs, traces, cache entries and rate-limit counters are created with modes `2770`
+  (directories) and `660` (files) whatever the umask, so PHP and `scripts/sitemap.php` or a cron job
+  run as the deploy user can write each other's files. The deployment guide now keeps `storage/`
+  the deploy user's, with the PHP user's group and setgid directories, and adds the deploy user to
+  that group to read logs, traces and cache entries. To switch, in the site root as the deploy user:
+  `sudo chown -R "$USER" storage`, then step 5 of the guide, then log out and back in.
 
 ### Fixed
 
