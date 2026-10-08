@@ -91,4 +91,22 @@ final class Config
     {
         return defined($constant) ? constant($constant) : $default;
     }
+
+    /**
+     * A configured filesystem path: an absolute one as is, a relative one from APP_ROOT (from the
+     * working directory when APP_ROOT is undefined or empty), so the site and CLI scripts agree.
+     *
+     * @internal Used by the engine's file stores.
+     */
+    public static function path(string $path): string
+    {
+        if ($path === '' || preg_match('~^(/|\\\\|[a-z]:|[a-z][a-z0-9+.-]*://)~i', $path)) {
+            return $path;
+        }
+        $root = (string) self::env('APP_ROOT', '');
+        if ($root === '') {
+            $root = getcwd() ?: '.';
+        }
+        return rtrim($root, '/\\') . '/' . $path;
+    }
 }

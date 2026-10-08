@@ -44,7 +44,7 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(Url::class, ['route' => null]);
         self::setStatics(I18n::class, ['dict' => [], 'locale' => 'en']);
         self::setStatics(Cache::class, ['store' => null]);
-        self::setStatics(RateLimiter::class, ['store' => null]);
+        self::setStatics(RateLimiter::class, ['store' => null, 'redisError' => null]);
         self::setStatics(View::class, ['shared' => []]);
         self::setStatics(Vite::class, ['manifest' => null]);
         self::setStatics(Alert::class, ['transport' => null, 'reporting' => false]);

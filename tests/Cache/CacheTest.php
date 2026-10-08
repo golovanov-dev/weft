@@ -89,4 +89,16 @@ final class CacheTest extends TestCase
 
         $this->assertInstanceOf(FileStore::class, Cache::store());
     }
+
+    public function testRelativeCachePathIsResolvedFromAppRoot(): void
+    {
+        $relative = 'storage/cache-' . bin2hex(random_bytes(4));
+        $this->dir = APP_ROOT . '/' . $relative;
+        Config::set('app.cache.enabled', true);
+        Config::set('app.cache.path', $relative);
+
+        Cache::set('k', 'v');
+
+        $this->assertCount(1, glob($this->dir . '/*.cache') ?: []);
+    }
 }

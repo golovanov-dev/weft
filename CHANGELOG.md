@@ -32,8 +32,9 @@ pre-1.0 the API may change between minor versions.
   it still passes. Set both keys wherever `app.captcha.enabled` is true, or set it to false.
 - `RateLimiter` now limits clients that send no session cookie. `allow()` and `throttle()` no longer
   use the PHP session: they count in Redis when `app.cache.driver` is `redis`, otherwise in files
-  under the new `app.rate_limit.path` (default `app.cache.path`), whether caching is enabled or
-  not, and no longer use a store set with `Cache::use()`. Each increment is atomic, and a window
+  under the new `app.rate_limit.path` (absolute or relative to `APP_ROOT`; default
+  `app.cache.path`), whether caching is enabled or not, and no longer use a store set with
+  `Cache::use()`. Each increment is atomic, and a window
   starts at its first hit instead of being extended by every hit. Make that directory writable
   by the web server: if a counter cannot be written, the request is allowed and an error is logged.
   Counters are per client IP, no longer per session: behind a reverse proxy or CDN, list its
@@ -50,17 +51,16 @@ pre-1.0 the API may change between minor versions.
 ### Added
 
 - `scripts/health.php` in the example fails (`ok: false`, exit code 1) when rate-limit counters
-  cannot be written (with Redis, a probe write) or went to files while `app.cache.driver` is
-  `redis`, when `PROXY_IPS` is not an array or has an entry that is not an IP or a CIDR range or
-  trusts every address (`0.0.0.0/0`, `::/0`), or when a captcha is enabled without its keys outside
+  cannot be written (with Redis, a probe write; with files, the directory or a counter file in it)
+  or went to files while `app.cache.driver` is `redis`, when `PROXY_IPS` is not an array or has an
+  entry that is not an IP or a CIDR range or is too wide for a proxy (`/0`, an IPv4 range wider
+  than `/8`, an IPv6 one wider than `/16`), or when a captcha is enabled without its keys outside
   `DEBUG`. New fields: `cache_driver`, `rate_limit_store`, `rate_limit_path`,
-  `rate_limit_writable`, `proxy_ips_error`, `proxy_ips_invalid`, `proxy_ips_trust_all`,
-  `captcha_missing_keys`. If your site copied the script, update the engine to 0.2.0 first, then
+  `rate_limit_writable`, `rate_limit_error` (why), `proxy_ips_error`, `proxy_ips_invalid`,
+  `proxy_ips_trust_all`, `captcha_missing_keys`. If your site copied the script, update the engine to 0.2.0 first, then
   copy the script again: on an older engine it stops with a fatal error. The engine side:
   `Captcha::missingKeys()`, `RateLimiter::storeStatus()`, `Request::invalidProxyIps()`,
   `Request::trustAllProxyIps()`, `Request::proxyIpsError()`.
-- A relative `app.rate_limit.path` is taken from `APP_ROOT`, not from the working directory, so the
-  site and CLI scripts such as `health.php` use the same directory.
 - `PROXY_IPS` accepts CIDR ranges, IPv4 and IPv6 (`'173.245.48.0/20'`, `'2400:cb00::/32'`), next
   to exact addresses, so a CDN such as Cloudflare can be listed by its published ranges. An entry
   that is neither is ignored, host names included (`localhost`, a Docker service name): write the
@@ -98,6 +98,10 @@ pre-1.0 the API may change between minor versions.
 - Trace files are deleted after 30 days. Set `app.trace.retention_days` to keep them longer, or to
   `0` to keep them forever. The first request after the upgrade already deletes older files: if you
   need that history, set the key before upgrading.
+- A relative `app.cache.path` is taken from `APP_ROOT`, no longer from the working directory (under
+  PHP-FPM, `public/`), so the site and CLI scripts share one cache; without `APP_ROOT` the default
+  is `storage/cache` in the working directory, not in the system temp directory. If your path is
+  relative, make its new location writable by the PHP user; the old directory can be deleted.
 - `example/public/index.php` no longer calls `session_start()`; the session starts only when a form
   needs a CSRF token (`Csrf`), so visitors who only read pages get no `PHPSESSID` cookie. Those
   pages also lose the no-cache headers PHP sent with the session; if your site relied on them, send
@@ -110,9 +114,12 @@ pre-1.0 the API may change between minor versions.
   CSS, JS and images; before, every asset request went to the engine and returned 404. Production
   servers (nginx, Apache) are not affected. If your site copied `example/public/index.php` and you
   develop with `php -S`, copy the new `cli-server` block at its top.
-- A Redis cache with a wrong password or database number now falls back to the file store, as an
-  unreachable Redis already did; before, the store was created and every read and write silently
-  failed. Check `REDIS_PASSWORD` and `REDIS_DB` if `health.php` reports the file store.
+- The Redis cache and rate limits fall back to files, as with an unreachable Redis, when Redis
+  rejects the connection: a wrong `REDIS_PASSWORD`, an empty one while Redis requires a password,
+  one set while Redis has none, or `REDIS_DB` out of range. Before, an empty `REDIS_PASSWORD` for
+  a Redis that requires one made cached pages fail with 500, and a `REDIS_DB` out of range was
+  ignored (database 0 was used). If
+  `health.php` reports `rate_limit_store: file`, `rate_limit_error` says why.
 
 ## 0.1.3 - 2026-08-24
 

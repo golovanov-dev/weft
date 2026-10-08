@@ -134,11 +134,14 @@ final class RequestTest extends TestCase
         $this->assertSame([], Request::invalidProxyIps());
     }
 
-    public function testTrustAllProxyIpsListsEntriesWithPrefixZero(): void
+    public function testTrustAllProxyIpsListsTooWideEntries(): void
     {
         $this->assertSame(
-            ['0.0.0.0/0', ' ::/0 ', '10.0.0.0/00'],
-            Request::trustAllProxyIps(['0.0.0.0/0', '10.0.0.0/8', ' ::/0 ', '127.0.0.1', '10.0.0.0/00', 'x/0', 0]),
+            ['0.0.0.0/0', ' ::/0 ', '10.0.0.0/00', '0.0.0.0/7', '2000::/15'],
+            Request::trustAllProxyIps([
+                '0.0.0.0/0', '10.0.0.0/8', ' ::/0 ', '127.0.0.1', '10.0.0.0/00', 'x/0', 0,
+                '0.0.0.0/7', '2000::/15', '2400:cb00::/16', '173.245.48.0/20',
+            ]),
         );
         // PROXY_IPS is not defined in tests.
         $this->assertSame([], Request::trustAllProxyIps());

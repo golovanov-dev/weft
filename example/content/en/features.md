@@ -85,7 +85,8 @@ Also `Cache::get/set/has/forget/flush`, and `php scripts/cache-clear.php`.
 
 Two properties worth knowing: when caching is **off**, a NullStore is used — `remember()` still runs
 the callback, so wrapping code in it is always safe and you can enable the cache later. And if Redis
-fails to connect, the engine falls back to the file store instead of failing the request.
+is unreachable or rejects `REDIS_PASSWORD` or `REDIS_DB`, the engine falls back to the file store
+instead of failing the request; `php scripts/health.php` then fails and says why.
 
 > A useful trick used by this very site: put the file's `mtime` in the cache key. Editing content
 > invalidates the entry automatically.
@@ -138,9 +139,10 @@ $result = Captcha::verify($body['recaptcha_token'] ?? '', 'contact');
 if (!$result['ok']) { /* reject */ }
 ```
 
-Rate-limit counters live in Redis when `app.cache.driver` is `redis` (in files if Redis is
-unreachable), otherwise in files under `app.rate_limit.path` (absolute, or relative to the site
-root `APP_ROOT`), which defaults to `app.cache.path` — whether caching is enabled or not. A window starts at the first hit and later hits never extend it.
+Rate-limit counters live in Redis when `app.cache.driver` is `redis` (in files when Redis cannot
+be used, as for the cache), otherwise in files under `app.rate_limit.path` (absolute, or relative
+to the site root `APP_ROOT`), which defaults to `app.cache.path` — whether caching is enabled or
+not. A window starts at the first hit and later hits never extend it.
 If a counter cannot be written, the limiter **fails open**: the request is allowed and the failure
 goes to the error log, so a broken store never locks users out. `php scripts/health.php` shows
 where counters go (`rate_limit_store`, `rate_limit_path`) and fails when they cannot be written.

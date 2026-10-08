@@ -145,7 +145,7 @@ and without it is valid.
 
 ```php
 'vite'       => ['entry' => 'src/main.js', 'dev_server' => 'http://localhost:5173'],
-'cache'      => ['enabled' => true, 'driver' => 'file', 'path' => '…/storage/cache', 'prefix' => 'weft:'],  // on in this demo, see below; prefix applies to redis only
+'cache'      => ['enabled' => true, 'driver' => 'file', 'path' => '…/storage/cache', 'prefix' => 'weft:'],  // on in this demo, see below; path: absolute or relative to APP_ROOT, defaults to storage/cache; prefix applies to redis only
 'rate_limit' => ['max' => 20, 'window' => 60, 'path' => '…'],  // per client IP per bucket; path: absolute or relative to APP_ROOT, defaults to cache.path
 'captcha'    => ['enabled' => …, 'site_key' => …, 'secret_key' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],
 'alertloop'  => ['enabled' => …, 'base_url' => …, 'api_key' => …, 'source' => 'my-site', 'timeout' => 4],

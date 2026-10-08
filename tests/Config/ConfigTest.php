@@ -57,4 +57,24 @@ final class ConfigTest extends TestCase
         $this->assertSame(APP_ROOT, Config::env('APP_ROOT'));
         $this->assertSame('d', Config::env('WEFT_TEST_UNDEFINED_CONSTANT', 'd'));
     }
+
+    public function testPathResolvesARelativePathFromAppRoot(): void
+    {
+        $this->assertSame(APP_ROOT . '/storage/cache', Config::path('storage/cache'));
+        $this->assertSame('/var/cache/site', Config::path('/var/cache/site'));
+        $this->assertSame('C:\site\cache', Config::path('C:\site\cache'));
+    }
+
+    /**
+     * An empty APP_ROOT must not turn a relative path into one under the filesystem root. The
+     * bootstrap defines APP_ROOT for every test, so this runs in a subprocess.
+     */
+    public function testPathFallsBackToTheWorkingDirectoryWhenAppRootIsEmpty(): void
+    {
+        $script = dirname(__DIR__) . '/fixtures/cli/path.php';
+        $output = [];
+        exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($script) . ' ' . escapeshellarg(__DIR__) . ' 2>&1', $output);
+
+        $this->assertSame([__DIR__ . '/storage/cache'], $output);
+    }
 }

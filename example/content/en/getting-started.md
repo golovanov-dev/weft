@@ -83,6 +83,7 @@ php scripts/health.php
   "rate_limit_store": "file",
   "rate_limit_path": "/path/to/site/storage/cache",
   "rate_limit_writable": true,
+  "rate_limit_error": null,
   "proxy_ips_error": null,
   "proxy_ips_invalid": [],
   "proxy_ips_trust_all": [],

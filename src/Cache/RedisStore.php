@@ -13,14 +13,20 @@ final class RedisStore implements Store
 {
     private Redis $redis;
 
+    /**
+     * Connects, authenticates, selects the database and pings; throws when Redis rejects any of it.
+     *
+     * @param Redis|null $client a client to connect instead of a new one (tests)
+     */
     public function __construct(
         string $host = '127.0.0.1',
         int $port = 6379,
         string $password = '',
         int $database = 0,
         private string $prefix = 'weft:',
+        ?Redis $client = null,
     ) {
-        $this->redis = new Redis();
+        $this->redis = $client ?? new Redis();
         $this->redis->connect($host, $port, 2.0);
         // phpredis returns false (no exception) on a rejected password or database number.
         if ($password !== '' && $this->redis->auth($password) !== true) {
@@ -28,6 +34,10 @@ final class RedisStore implements Store
         }
         if ($database !== 0 && $this->redis->select($database) !== true) {
             throw new \RuntimeException('Redis SELECT ' . $database . ' failed: ' . ($this->redis->getLastError() ?? 'rejected'));
+        }
+        // A Redis that requires a password nobody sent answers NOAUTH only to the first command.
+        if ($this->redis->ping() === false) {
+            throw new \RuntimeException('Redis PING failed: ' . ($this->redis->getLastError() ?? 'no reply'));
         }
     }
 

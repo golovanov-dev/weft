@@ -45,7 +45,7 @@ Arr::get($arr, 'a.b.c', $def);  Str::slug($s);  Str::limit($s, 160);  Json::deco
 $request->method;  $request->path;  $request->clientIp;  $request->post;  $request->rawBody;
 $request->isPost();  $request->wantsJson();  $request->header('authorization');  $request->body();
 Request::invalidProxyIps();   // PROXY_IPS entries that are neither an IP nor a CIDR range
-Request::trustAllProxyIps();  // PROXY_IPS entries with prefix /0 (trust every address)
+Request::trustAllProxyIps();  // PROXY_IPS entries too wide for a proxy (IPv4 wider than /8, IPv6 than /16)
 Request::proxyIpsError();     // why PROXY_IPS is unusable (not an array), or null
 
 Response::html($html, 200);  Response::json($data, 200);  Response::text($t);  Response::redirect($url, 302);

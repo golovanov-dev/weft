@@ -11,8 +11,9 @@ use Golovanov\Weft\Observability\ErrorHandler;
  * Cache facade. Caching is OPTIONAL — when config('app.cache.enabled') is false, a NullStore is
  * used and every read is a miss, so wrapping code in remember() is always safe.
  *
- * Driver (config 'app.cache.driver'): 'file' (default, no deps) or 'redis'. If Redis fails to
- * connect, the facade degrades to the file store rather than throwing.
+ * Driver (config 'app.cache.driver'): 'file' (default, no deps; app.cache.path, a relative one
+ * from APP_ROOT, default storage/cache) or 'redis'. If Redis is unreachable or rejects the
+ * password or database, the facade degrades to the file store rather than throwing.
  *
  *   $tariffs = Cache::remember('tariffs', 600, fn() => $api->tariffs());
  */
@@ -98,11 +99,7 @@ final class Cache
     private static function makeFile(): FileStore
     {
         $dir = (string) Config::get('app.cache.path', '');
-        if ($dir === '') {
-            $root = (string) Config::env('APP_ROOT', sys_get_temp_dir());
-            $dir = $root . '/storage/cache';
-        }
-        return new FileStore($dir);
+        return new FileStore(Config::path($dir !== '' ? $dir : 'storage/cache'));
     }
 
     private static function makeRedis(): RedisStore

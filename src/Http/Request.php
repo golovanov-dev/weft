@@ -158,9 +158,10 @@ final class Request
     }
 
     /**
-     * Entries of PROXY_IPS (or of $entries) with prefix /0, such as "0.0.0.0/0" or "::/0": they
-     * trust every address, so a forged X-Forwarded-For sets the client IP and bypasses rate
-     * limits. Health checks report them.
+     * Entries of PROXY_IPS (or of $entries) that trust every address or a large part of the
+     * internet: an IPv4 prefix shorter than /8, an IPv6 one shorter than /16 ("0.0.0.0/0", "::/0").
+     * Visitors from those addresses share the proxy's rate limit or, with a forged X-Forwarded-For,
+     * pick their own IP. Health checks report them.
      *
      * @param array<mixed>|null $entries null reads the PROXY_IPS constant
      * @return list<string>
@@ -169,7 +170,8 @@ final class Request
     {
         $found = [];
         foreach ($entries ?? self::proxyIps() as $entry) {
-            if (is_string($entry) && (self::parseProxy($entry)[1] ?? null) === 0) {
+            $proxy = self::parseProxy($entry);
+            if ($proxy !== null && $proxy[1] < (strlen($proxy[0]) === 4 ? 8 : 16)) {
                 $found[] = $entry;
             }
         }

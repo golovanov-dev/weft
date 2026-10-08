@@ -6,9 +6,9 @@ declare(strict_types=1);
  * CLI health check:  php scripts/health.php
  * Reports PHP version, writable storage, and whether optional integrations are wired.
  * Exits with 1 when something leaves the site broken or unprotected: logs or rate-limit counters
- * not writable, counters in files while app.cache.driver is redis, PROXY_IPS not an array or with
- * an entry that is invalid or trusts every address, or (outside DEBUG) a captcha enabled without
- * its keys.
+ * not writable, counters in files while app.cache.driver is redis (rate_limit_error says why),
+ * PROXY_IPS not an array or with an entry that is invalid or too wide, or (outside DEBUG) a
+ * captcha enabled without its keys.
  */
 
 require dirname(__DIR__) . '/bootstrap.php';
@@ -32,6 +32,7 @@ $report = [
     'rate_limit_store' => $rateLimit['store'],
     'rate_limit_path' => $rateLimit['path'],
     'rate_limit_writable' => $rateLimit['writable'],
+    'rate_limit_error' => $rateLimit['error'],
     'proxy_ips_error' => Request::proxyIpsError(),
     'proxy_ips_invalid' => Request::invalidProxyIps(),
     'proxy_ips_trust_all' => Request::trustAllProxyIps(),
@@ -51,5 +52,5 @@ $report['ok'] = $report['logs_writable']
     && $report['proxy_ips_trust_all'] === []
     && ($report['captcha_missing_keys'] === [] || $report['debug']);
 
-echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
 exit($report['ok'] ? 0 : 1);

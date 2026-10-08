@@ -73,11 +73,11 @@ It prints a JSON report and exits with 1 when `ok` is false. `ok` is false when 
 | Field | Bad value | What to do |
 |---|---|---|
 | `logs_writable` | `false` | give the PHP user write access to `LOGS_PATH` (see above) |
-| `rate_limit_writable` | `false` | rate limits are off: give the PHP user write access to `rate_limit_path`; with Redis, see below |
-| `rate_limit_store` | `file` while `cache_driver` is `redis` | Redis is not used, counters are per server: see below |
+| `rate_limit_writable` | `false` | rate limits are off; `rate_limit_error` says why: give the PHP user write access to `rate_limit_path` and the files in it; with Redis, see below |
+| `rate_limit_store` | `file` while `cache_driver` is `redis` | Redis is not used, the cache and counters are per server: see below |
 | `proxy_ips_error` | not `null` | `PROXY_IPS` is not an array, so no proxy is trusted: write `define('PROXY_IPS', [...])` |
 | `proxy_ips_invalid` | not empty | these `PROXY_IPS` entries are ignored: replace them with IP addresses or CIDR ranges; for `localhost` write `'127.0.0.1'` and/or `'::1'` |
-| `proxy_ips_trust_all` | not empty | these entries (`0.0.0.0/0`, `::/0`) trust every address, so a forged `X-Forwarded-For` gets around rate limits: list only your proxies |
+| `proxy_ips_trust_all` | not empty | these entries are too wide for a proxy (`0.0.0.0/0`, `::/0`, an IPv4 range wider than `/8`, an IPv6 one wider than `/16`): list only your proxies (below) |
 | `captcha_missing_keys` | not empty, with `DEBUG` off | every form submission is rejected: set the keys or disable the captcha (below) |
 
 With `DEBUG` on, `captcha_missing_keys` is still listed but does not fail the check: forms pass then.
@@ -87,16 +87,27 @@ come from `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` in `config/config.php`, 
 on whenever `RECAPTCHA_SECRETKEY` is not empty. To disable it, set `RECAPTCHA_SECRETKEY` to `''`; on
 a site with its own config, set `app.captcha.enabled` to `false`.
 
-`rate_limit_path` is `app.rate_limit.path`; a relative one is taken from the site root (`APP_ROOT`),
-so `health.php` and the site use the same directory whatever their working directory.
+`rate_limit_path` is `app.rate_limit.path`, else `app.cache.path`; a relative one is taken from the
+site root (`APP_ROOT`), so `health.php` and the site use the same directory whatever their working
+directory. A counter file in it that the PHP user cannot write (left by another user) also makes
+`rate_limit_writable` false; `rate_limit_error` names one of them.
 
-With `app.cache.driver` set to `redis`, `health.php` writes a probe counter to Redis (ten-second
-TTL, deleted at once). `rate_limit_store: "file"` means the limiter could not use Redis and fell
-back to files: ext-redis is not installed, Redis is unreachable at `REDIS_HOST`:`REDIS_PORT`, or it
-rejected `REDIS_PASSWORD` or `REDIS_DB`. The reason is in `storage/logs/errors/`, in a line starting
-with "Redis unavailable". `rate_limit_store: "redis"` with `rate_limit_writable: false` means Redis
-took the connection but not the write: a read-only replica, `maxmemory` reached under the
-`noeviction` policy, or a Redis user not allowed to run `EVAL`.
+With `app.cache.driver` set to `redis`, the engine sends `PING` after connecting, and `health.php`
+writes a probe counter to Redis (ten-second TTL, deleted at once).
+
+| `rate_limit_store` | `rate_limit_error` contains | Cause |
+|---|---|---|
+| `file` | `Class "Redis" not found` | ext-redis is not installed |
+| `file` | a connection error, such as `Connection refused` | Redis is not reachable at `REDIS_HOST`:`REDIS_PORT` |
+| `file` | `NOAUTH` | Redis requires a password and `REDIS_PASSWORD` is empty |
+| `file` | `WRONGPASS` or `AUTH failed` | `REDIS_PASSWORD` is wrong |
+| `file` | `called without any password configured` | `REDIS_PASSWORD` is set, but Redis has no password: set it to `''` |
+| `file` | `DB index is out of range` | `REDIS_DB` is higher than Redis allows (16 databases by default) |
+| `redis` | `Redis rejected the probe write` | a read-only replica, `maxmemory` reached under the `noeviction` policy, or a Redis user not allowed to run `EVAL` |
+
+When Redis is not used, the cache falls back to files as well. The site logs the reason to
+`errors/<date>.log` under `LOGS_PATH`, in a line like
+`[2026-10-08 12:00:00] RATE_LIMIT ERRNO:500 | Redis unavailable, rate limits fall back to files: <reason> | …`.
 
 ## Document root is `public/`
 
@@ -150,7 +161,10 @@ define('PROXY_IPS', ['203.0.113.10', '173.245.48.0/20', '2400:cb00::/32']);
 Each entry is an IP address or a CIDR range. A host name is ignored: write the address — for
 `localhost`, `'127.0.0.1'` and/or `'::1'`; for a Docker service name such as `nginx`, its address
 (below). `health.php` lists such entries under `proxy_ips_invalid`. It also fails on `0.0.0.0/0` and
-`::/0` (`proxy_ips_trust_all`): they trust every address, and any visitor can then pick their own IP.
+`::/0` (`proxy_ips_trust_all`): every address then counts as a proxy, the client IP is always the
+proxy's, and the whole site shares one rate limit. Ranges wider than `/8` (IPv4) or `/16` (IPv6)
+fail too: visitors from them share that limit or, with a forged `X-Forwarded-For`, pick their own
+IP. Cloudflare's ranges and a Docker network (`/16`) pass.
 
 - **Cloudflare** — every range from [cloudflare.com/ips](https://www.cloudflare.com/ips/), IPv4 and
   IPv6. The list changes now and then; compare it when you update the site.

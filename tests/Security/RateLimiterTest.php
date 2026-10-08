@@ -82,7 +82,7 @@ final class RateLimiterTest extends TestCase
     public function testStoreStatusReportsTheCounterDirectory(): void
     {
         $this->assertSame(
-            ['store' => 'file', 'path' => $this->dir, 'writable' => true],
+            ['store' => 'file', 'path' => $this->dir, 'writable' => true, 'error' => null],
             RateLimiter::storeStatus(),
         );
     }
@@ -94,9 +94,34 @@ final class RateLimiterTest extends TestCase
         Config::set('app.rate_limit.path', $notADir);
 
         $this->assertSame(
-            ['store' => 'file', 'path' => $notADir, 'writable' => false],
+            ['store' => 'file', 'path' => $notADir, 'writable' => false, 'error' => 'the directory is not writable'],
             RateLimiter::storeStatus(),
         );
+    }
+
+    public function testStoreStatusReportsUnwritableCounterFiles(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('root can write a read-only file');
+        }
+        $this->assertTrue(RateLimiter::allow('form', 5, 60));
+        $files = glob($this->dir . '/*.cache') ?: [];
+        $this->assertCount(1, $files);
+        chmod($files[0], 0444);
+
+        try {
+            $this->assertSame(
+                [
+                    'store' => 'file',
+                    'path' => $this->dir,
+                    'writable' => false,
+                    'error' => '1 file(s) in the directory are not writable, e.g. ' . basename($files[0]),
+                ],
+                RateLimiter::storeStatus(),
+            );
+        } finally {
+            chmod($files[0], 0644);
+        }
     }
 
     public function testRelativeCounterPathIsResolvedFromAppRoot(): void
@@ -106,7 +131,7 @@ final class RateLimiterTest extends TestCase
 
         try {
             $this->assertSame(
-                ['store' => 'file', 'path' => APP_ROOT . '/' . $relative, 'writable' => true],
+                ['store' => 'file', 'path' => APP_ROOT . '/' . $relative, 'writable' => true, 'error' => null],
                 RateLimiter::storeStatus(),
             );
             $this->assertTrue(RateLimiter::allow('rel', 1, 60));
@@ -123,10 +148,9 @@ final class RateLimiterTest extends TestCase
         define('REDIS_PORT', 1);
         Config::set('app.cache.driver', 'redis');
 
-        $this->assertSame(
-            ['store' => 'file', 'path' => $this->dir, 'writable' => true],
-            RateLimiter::storeStatus(),
-        );
+        $status = RateLimiter::storeStatus();
+        $this->assertSame(['store' => 'file', 'path' => $this->dir, 'writable' => true], array_slice($status, 0, 3));
+        $this->assertStringStartsWith('Redis not used: ', (string) $status['error']);
     }
 
     /**
@@ -177,7 +201,13 @@ final class RateLimiterTest extends TestCase
         (new \ReflectionProperty(RedisStore::class, 'prefix'))->setValue($store, 'site:');
         (new \ReflectionProperty(RateLimiter::class, 'store'))->setValue(null, $store);
 
-        $this->assertSame(['store' => 'redis', 'path' => null, 'writable' => $writable], RateLimiter::storeStatus());
+        $status = RateLimiter::storeStatus();
+        $this->assertSame(['store' => 'redis', 'path' => null, 'writable' => $writable], array_slice($status, 0, 3));
+        if ($writable) {
+            $this->assertNull($status['error']);
+        } else {
+            $this->assertStringStartsWith('Redis rejected the probe write: ', (string) $status['error']);
+        }
         $this->assertSame(['site:health:probe ttl 10'], $redis->written);
         $this->assertSame($evalResult instanceof \Throwable ? [] : ['site:health:probe'], $redis->deleted);
     }
