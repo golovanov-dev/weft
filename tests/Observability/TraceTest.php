@@ -240,8 +240,11 @@ final class TraceTest extends TestCase
         $this->assertSame($request->path, $data['path']);
         $this->assertSame('text/html', $data['headers']['accept']);
         $fields = $field === 'query' ? $data['query'] : $data['body']['data'];
-        // A renamed field goes after the others; JSON_INVALID_UTF8_SUBSTITUTE turns E8 EC into one U+FFFD.
-        $this->assertSame(['token' => Configuration::REDACTED, "\u{FFFD}\u{FFFD}" => '1'], $fields);
+        $this->assertSame(Configuration::REDACTED, $fields['token']);
+        unset($fields['token']);
+        // traceloom turns each invalid byte into U+FFFD and appends a digest of the original name.
+        $this->assertSame(['1'], array_values($fields));
+        $this->assertMatchesRegularExpression('/^\x{FFFD}{3}~[0-9a-f]{16}$/u', (string) array_key_first($fields));
         $this->assertStringNotContainsString('t0ken-value', $line);
     }
 
@@ -252,10 +255,19 @@ final class TraceTest extends TestCase
 
         [$data, $line] = $this->requestStart($this->post('application/x-www-form-urlencoded', $raw));
 
-        $this->assertSame(
-            ["a\u{FFFD}" => '3', 'user' => ["pass\u{FFFD}word" => Configuration::REDACTED], "a\u{FFFD}~" => '1', "a\u{FFFD}~~" => '2'],
-            $data['body']['data'],
-        );
+        $fields = $data['body']['data'];
+        $this->assertSame('3', $fields["a\u{FFFD}"]);
+        $this->assertSame([Configuration::REDACTED], array_values($fields['user']));
+        $this->assertMatchesRegularExpression('/^pass\x{FFFD}word~[0-9a-f]{16}$/u', (string) array_key_first($fields['user']));
+        unset($fields["a\u{FFFD}"], $fields['user']);
+        // Both renamed names stay, each with its own value: the digest is of the original name.
+        $this->assertCount(2, $fields);
+        foreach (array_keys($fields) as $key) {
+            $this->assertMatchesRegularExpression('/^a\x{FFFD}~[0-9a-f]{16}$/u', (string) $key);
+        }
+        $values = array_values($fields);
+        sort($values);
+        $this->assertSame(['1', '2'], $values);
         $this->assertStringNotContainsString('s3cret-pass', $line);
     }
 

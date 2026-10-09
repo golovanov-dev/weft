@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace Golovanov\Weft\Observability;
 
 use Golovanov\Traceloom\Configuration;
+use Golovanov\Traceloom\Trace as Timeline;
 use Golovanov\Traceloom\Tracer;
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\Request;
 use Golovanov\Weft\Http\RequestContext;
-use Golovanov\Weft\Support\Clock;
 
 /**
  * Request tracer — a thin static facade over golovanov/traceloom.
@@ -21,16 +21,13 @@ use Golovanov\Weft\Support\Clock;
  * app.trace.sensitive_keys). Weft masks nothing itself: it hands traceloom request and outgoing
  * bodies and query strings parsed into arrays, so the redaction reaches their fields — see body()
  * and splitQuery(). app.trace.log_body (default on) controls whether body contents are recorded.
- *
- * If the traceloom package is not installed, Trace degrades to a compatible built-in JSONL
- * writer so the engine keeps working (and produces the same shape of logs).
  */
 final class Trace
 {
     private const DEFAULT_RETENTION_DAYS = 30;
 
     private static ?Tracer $tracer = null;
-    private static mixed $trace = null;
+    private static ?Timeline $trace = null;
     private static string $id = '';
     private static bool $booted = false;
 
@@ -41,23 +38,11 @@ final class Trace
         }
         self::$booted = true;
 
-        $dir = self::directory();
+        $config = self::configuration();
         $incoming = $request?->header('x-trace-id') ?? $request?->header('x-request-id');
-        $trustIncoming = (bool) (defined('TRACE_TRUST_INCOMING') ? TRACE_TRUST_INCOMING : false);
-
-        if (class_exists(Tracer::class)) {
-            $config = Configuration::create(
-                logDirectory: $dir,
-                sensitiveKeys: self::sensitiveKeys(),
-                retentionDays: self::retentionDays(),
-                trustIncomingTraceId: $trustIncoming,
-            );
-            self::$tracer = Tracer::fromConfiguration($config);
-            self::$trace = self::$tracer->start($trustIncoming ? $incoming : null);
-            self::$id = self::$trace->id();
-        } else {
-            self::$id = ($trustIncoming && self::isValidId($incoming)) ? (string) $incoming : bin2hex(random_bytes(16));
-        }
+        self::$tracer = Tracer::fromConfiguration($config);
+        self::$trace = self::$tracer->start($config->trustIncomingTraceId ? $incoming : null);
+        self::$id = self::$trace->id();
 
         RequestContext::setTraceId(self::$id);
         return self::$id;
@@ -93,12 +78,7 @@ final class Trace
             self::boot(RequestContext::request());
         }
 
-        if (self::$trace !== null) {
-            self::$trace->event($name, $data);
-            return;
-        }
-
-        self::writeFallback($name, $data);
+        self::$trace?->event($name, $data);
     }
 
     public static function httpStart(Request $request): void
@@ -145,8 +125,7 @@ final class Trace
     ): array {
         $summary = ['size' => $size ?? strlen($raw), 'content_type' => $contentType];
 
-        // The built-in fallback writer cannot mask by key, so it never receives body contents.
-        if (!class_exists(Tracer::class) || !self::logBody()) {
+        if (!self::logBody()) {
             return $summary;
         }
 
@@ -158,7 +137,7 @@ final class Trace
                 default => null,
             };
         }
-        $summary['data'] = is_array($data) ? self::utf8Keys($data) : $raw;
+        $summary['data'] = is_array($data) ? $data : $raw;
 
         return $summary;
     }
@@ -178,7 +157,7 @@ final class Trace
             return [$url, []];
         }
         parse_str(substr($url, $pos + 1), $query);
-        return [substr($url, 0, $pos), self::utf8Keys($query)];
+        return [substr($url, 0, $pos), $query];
     }
 
     public static function httpEnd(int $status, float $elapsedSeconds): void
@@ -199,13 +178,30 @@ final class Trace
      * (`cli`, `phpdbg`), LOGS_PATH/requests for the web, PHP's built-in server included. A web
      * request and a script never share a trace file, and each directory has one writer.
      *
-     * @internal $sapi is for ErrorHandler::logsError(), which checks the web's directory from a
-     *   console script, and for tests.
+     * @internal $sapi is for configuration(), through which ErrorHandler::logsError() checks the
+     *   web's directory from a console script, and for tests.
      */
     public static function directory(string $sapi = PHP_SAPI): string
     {
         $base = defined('LOGS_PATH') ? (string) LOGS_PATH : sys_get_temp_dir() . '/weft-logs';
         return rtrim($base, '/\\') . (in_array($sapi, ['cli', 'phpdbg'], true) ? '/cli' : '/requests');
+    }
+
+    /**
+     * The traceloom configuration of a process of the given SAPI: its directory() and the
+     * app.trace settings. boot() writes with it; ErrorHandler::logsError() checks with it whether
+     * the web can write its traces.
+     *
+     * @internal $sapi is for ErrorHandler::logsError() and tests.
+     */
+    public static function configuration(string $sapi = PHP_SAPI): Configuration
+    {
+        return Configuration::create(
+            logDirectory: self::directory($sapi),
+            sensitiveKeys: self::sensitiveKeys(),
+            retentionDays: self::retentionDays(),
+            trustIncomingTraceId: (bool) (defined('TRACE_TRUST_INCOMING') ? TRACE_TRUST_INCOMING : false),
+        );
     }
 
     /**
@@ -219,41 +215,6 @@ final class Trace
     {
         parse_str($raw, $fields);
         return $fields;
-    }
-
-    /**
-     * The array with every key made valid UTF-8, at any depth. traceloom cannot encode a key that
-     * is not (`?%E8%EC%FF=1`, a cp1251 form field) and then drops the whole event's data — method,
-     * path, headers and all. Invalid bytes become U+FFFD; traceloom compares keys on [a-z0-9] only,
-     * so the masking decision for the key does not change. A renamed key that lands on an existing
-     * one gets `~` appended until it is free, so no value is lost. Values stay as they are:
-     * traceloom records a string that is not UTF-8 as `_binary`.
-     *
-     * @param array<mixed> $data
-     * @return array<mixed>
-     */
-    private static function utf8Keys(array $data): array
-    {
-        $out = [];
-        $renamed = [];
-        foreach ($data as $key => $value) {
-            if (is_array($value)) {
-                $value = self::utf8Keys($value);
-            }
-            if (is_string($key) && preg_match('//u', $key) !== 1) {
-                $renamed[] = [$key, $value];
-                continue;
-            }
-            $out[$key] = $value;
-        }
-        foreach ($renamed as [$key, $value]) {
-            $key = (string) json_decode((string) json_encode($key, JSON_INVALID_UTF8_SUBSTITUTE));
-            while (array_key_exists($key, $out)) {
-                $key .= '~';
-            }
-            $out[$key] = $value;
-        }
-        return $out;
     }
 
     /**
@@ -281,30 +242,5 @@ final class Trace
     {
         $days = Config::get('app.trace.retention_days', self::DEFAULT_RETENTION_DAYS);
         return is_numeric($days) && (int) $days >= 0 ? (int) $days : self::DEFAULT_RETENTION_DAYS;
-    }
-
-    private static function isValidId(?string $id): bool
-    {
-        return is_string($id) && preg_match('/^[a-f0-9]{16,64}$/i', $id) === 1;
-    }
-
-    /** Built-in JSONL writer used only when traceloom is absent. */
-    private static function writeFallback(string $name, array $data): void
-    {
-        $dir = self::directory();
-        if (!is_dir($dir)) {
-            @mkdir($dir, 0777, true);
-        }
-        $record = [
-            'time' => Clock::timestamp(),
-            'timezone' => Clock::offset(),
-            'id' => self::$id,
-            'type' => $name,
-            'data' => $data,
-        ];
-        $line = json_encode($record, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        if ($line !== false) {
-            @error_log($line . "\n", 3, $dir . '/' . Clock::date('Y-m-d') . '.jsonl');
-        }
     }
 }

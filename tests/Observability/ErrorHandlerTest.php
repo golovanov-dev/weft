@@ -61,7 +61,7 @@ final class ErrorHandlerTest extends TestCase
                 unlink($file);
             }
         }
-        $this->assertSame('PHP cannot write ' . $file, $error);
+        $this->assertStringContainsString($dir . DIRECTORY_SEPARATOR . basename($file), (string) $error);
     }
 
     /** A lock file in requests/ PHP cannot open stops every web trace. */
@@ -81,7 +81,7 @@ final class ErrorHandlerTest extends TestCase
                 unlink($lock);
             }
         }
-        $this->assertSame('PHP cannot write ' . $lock, $error);
+        $this->assertStringContainsString($dir . DIRECTORY_SEPARATOR . '.traceloom.lock', (string) $error);
     }
 
     public function testLogsErrorNamesAFileInPlaceOfTheLogDirectory(): void

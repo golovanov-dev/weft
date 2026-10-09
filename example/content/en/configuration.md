@@ -213,8 +213,8 @@ as a boolean: `'true'`, `'1'`, `'yes'`, `'on'` keep it on, `'false'` and anythin
 The query string is logged apart from the URL, parsed into fields and masked the same way,
 whatever `log_body` says: `request_start` has `uri` without the query and `query` with its
 parameters; outgoing calls have `url` and `query`. A parameter or field name that is not valid
-UTF-8 (`?%E8%EC%FF=1`) is logged with the bad bytes replaced by `�`, and `~` added if that name is
-already taken. The `referer` header is logged as sent, query string included: a browser moving
+UTF-8 (`?%E8%EC%FF=1`) is logged with each bad byte replaced by `�` and a `~<16 hex>` suffix, so
+it never overwrites another field: `���~<16 hex>`. The `referer` header is logged as sent, query string included: a browser moving
 within your site sends the full URL of the previous page, so a `?token=` on one page shows up
 unmasked in the next request's `referer`.
 

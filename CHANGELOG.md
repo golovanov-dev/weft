@@ -7,154 +7,127 @@ pre-1.0 the API may change between minor versions.
 
 ### Security
 
-- Request and outgoing `HttpClient` bodies in the trace are now parsed into fields, so traceloom
-  masks them by key; before, a body was one raw string that masking could not reach. A body that
-  decodes as a JSON object or array is parsed whatever its content type (`+json` types, no type,
-  JSON sent by `curl -d`); so is any urlencoded form (for `HttpClient`, a body passed as an array),
-  and multipart fields (never uploaded files);
-  any other body is still logged as the raw string. Weft masks nothing itself: an email or a phone number
-  stays in the trace unless you list its key in `app.trace.sensitive_keys`. To keep bodies out of
-  the trace, set `app.trace.log_body` to `false` (default `true`): a body is then logged as its size
-  and content type only. This does not touch fields your code writes with `Trace::event()`; mask
-  those with `sensitive_keys`.
-- The query string is parsed into a `query` field and masked by key the same way, whatever
-  `log_body` says. The `referer` header is still logged as sent, query string included.
+- Request and outgoing `HttpClient` bodies and query strings go into the trace parsed into fields,
+  so traceloom masks them by key; before, a body was one raw string masking could not reach.
+  Parsed: a body that decodes as JSON (whatever its content type), an urlencoded form, multipart
+  fields (never uploaded files), and always the query string, into `query`. Any other body stays a
+  raw string; the `referer` header is logged as sent. Weft masks nothing itself: list keys such as
+  `email` or `phone` in the new `app.trace.sensitive_keys` (a whole key name: `phone` does not mask
+  `customer_phone`), or set the new `app.trace.log_body` to `false` (default `true`) to log a body
+  as its size and content type only. Fields you write with `Trace::event()` are masked only by
+  `sensitive_keys`.
 - `Model` rejects a column name that is not a plain identifier (`[A-Za-z_][A-Za-z0-9_]*`) with
-  `InvalidArgumentException` before any query runs, in `create()`, `update()`, `findBy()`, `where()`
-  and `exists()`. Array keys went into the SQL as-is, so `create($request->body())` was an SQL
-  injection. The check is not an allow-list: any valid column name in the array is still written,
-  so keep passing `create()` and `update()` only the fields you expect. If you pass quoted or
-  qualified names (`` `order` ``, `posts.id`), write that query with `Database` instead.
-- An enabled captcha with the site key or the secret key missing no longer passes every
-  submission. `Captcha::verify()` records a `captcha.misconfigured` trace event and a line in the
-  error log; outside `DEBUG` it also returns `ok => false` with the error code `misconfigured` and
-  sends a critical alert (category `security`, dedupe key `captcha:misconfigured`), with `DEBUG` on
-  it still passes. Set both keys wherever `app.captcha.enabled` is true, or set it to false.
-- `RateLimiter` now limits clients that send no session cookie. `allow()` and `throttle()` no longer
-  use the PHP session: they count in Redis when `app.cache.driver` is `redis`, otherwise in files
-  under the new `app.rate_limit.path` (absolute or relative to `APP_ROOT`; default
-  `app.cache.path`), whether caching is enabled or not, and no longer use a store set with
-  `Cache::use()`. Each increment is atomic, and a window
-  starts at its first hit instead of being extended by every hit. Make that directory writable
-  by the web server: if a counter cannot be written, the request is allowed and an error is logged.
-  Counters are per client IP, no longer per session: behind a reverse proxy or CDN, list its
-  addresses or ranges in `PROXY_IPS`, or all visitors share one counter.
-- `X-Client-Ip` is no longer read. For a request from a proxy in `PROXY_IPS`, the client IP is now
-  the rightmost `X-Forwarded-For` entry that is not in `PROXY_IPS`; before, it was `X-Client-Ip` or
-  the leftmost `X-Forwarded-For` entry, both set by the client, so a forged header got around rate
-  limits. If your proxy passes the client address only in `X-Client-Ip` or `X-Real-IP`, make it
-  append `X-Forwarded-For`; until then every visitor is counted as the proxy and shares one limit.
-  On shared hosting and with nginx + php-fpm on one machine `REMOTE_ADDR` is usually the visitor
-  and `PROXY_IPS` stays empty. To check, compare `client_ip` in the newest `request_start` trace
-  with your own address.
+  `InvalidArgumentException` in `create()`, `update()`, `findBy()`, `where()` and `exists()`: array
+  keys went into the SQL as-is, so `create($request->body())` was an SQL injection. It is not an
+  allow-list: keep passing `create()` and `update()` only the fields you expect, and write queries
+  with quoted or qualified names (`` `order` ``, `posts.id`) with `Database`.
+- An enabled captcha without its site key or secret key no longer passes every submission: outside
+  `DEBUG`, `Captcha::verify()` returns `ok => false` with the error code `misconfigured` and sends a
+  critical alert (dedupe key `captcha:misconfigured`); with `DEBUG` on it passes and logs the
+  problem. Set both keys wherever `app.captcha.enabled` is true, or set it to false.
+- `RateLimiter` limits clients that send no session cookie. `allow()` and `throttle()` count per
+  client IP, atomically, in Redis when `app.cache.driver` is `redis`, otherwise in files under the
+  new `app.rate_limit.path` (default `app.cache.path`; relative to `APP_ROOT`), whether caching is
+  on or not; no longer in the session or a `Cache::use()` store. A window starts at its first hit.
+  Make that directory writable by PHP (a counter that cannot be written allows the request and
+  logs an error), and behind a reverse proxy or CDN list it in `PROXY_IPS`, or all visitors share
+  one counter.
+- Behind a proxy in `PROXY_IPS`, the client IP is the rightmost `X-Forwarded-For` entry not in
+  `PROXY_IPS`; `X-Client-Ip` is no longer read. Both it and the leftmost entry, used before, are set
+  by the client, so a forged header got around rate limits. If your proxy passes the address only
+  in `X-Client-Ip` or `X-Real-IP`, make it append `X-Forwarded-For`, or every visitor shares the
+  proxy's limit. On shared hosting and with nginx + php-fpm on one machine `PROXY_IPS` usually
+  stays empty. To check, compare `client_ip` in the newest `request_start` trace with your address.
 
 ### Added
 
-- `scripts/health.php` in the example fails (`ok: false`, exit code 1) when rate-limit counters
-  cannot be written (with Redis, a probe write; with files, the directory or a counter file in it)
-  or went to files while `app.cache.driver` is `redis`, when `PROXY_IPS` is not an array or has an
-  entry that is not an IP or a CIDR range or is too wide for a proxy (`/0`, an IPv4 range wider
-  than `/8`, an IPv6 one wider than `/16`), or when a captcha or alerts are enabled without their
-  keys outside `DEBUG`. New fields: `cache_driver`, `rate_limit_store`, `rate_limit_path`,
-  `rate_limit_writable`, `rate_limit_error` (why), `proxy_ips_error`, `proxy_ips_invalid`,
-  `proxy_ips_trust_all`, `captcha_missing_keys`, `alertloop_missing_keys`, `logs_error`.
-  `logs_writable` now checks the `errors/` and `requests/` directories under `LOGS_PATH`, today's
-  files in them and traceloom's lock file in `requests/`, not only `LOGS_PATH`; `requests/` is the site's, even though the script runs from
-  the console. If your site copied the script, update the engine to 0.2.0 first, then
-  copy the script again: on an older engine it stops with a fatal error. The engine side:
-  `Captcha::missingKeys()`, `Alert::missingKeys()`, `ErrorHandler::logsError()`, `RateLimiter::storeStatus()`, `Request::invalidProxyIps()`,
-  `Request::trustAllProxyIps()`, `Request::proxyIpsError()`.
-- `PROXY_IPS` accepts CIDR ranges, IPv4 and IPv6 (`'173.245.48.0/20'`, `'2400:cb00::/32'`), next
-  to exact addresses, so a CDN such as Cloudflare can be listed by its published ranges. An entry
-  that is neither is ignored, host names included (`localhost`, a Docker service name): write the
-  address.
-
-- `app.trace.log_body` (default `true`) and `app.trace.sensitive_keys` — extra keys to mask in
-  traces, on top of traceloom's defaults (`password`, `token`, `api_key`, …). Each must match a
-  whole key name: `phone` does not mask `customer_phone`.
+- `scripts/health.php` in the example exits with 1 (`ok: false`) when logs or rate-limit counters
+  cannot be written (`errors/` and the site's `requests/` under `LOGS_PATH`, though the script runs
+  from the console, with today's files and traceloom's lock file; the counter directory or a file
+  in it; with Redis, a probe write), when counters went to files while `app.cache.driver` is
+  `redis`, when `PROXY_IPS` is not an array or has an entry that is invalid or too wide for a proxy
+  (`/0`, IPv4 wider than `/8`, IPv6 wider than `/16`), and outside `DEBUG` when a captcha or alerts
+  are enabled without their keys. New fields: `cache_driver`, `rate_limit_store`,
+  `rate_limit_path`, `rate_limit_writable`, `rate_limit_error`, `proxy_ips_error`,
+  `proxy_ips_invalid`, `proxy_ips_trust_all`, `captcha_missing_keys`, `alertloop_missing_keys`,
+  `logs_error`. If your site copied the script, update the engine to 0.2.0 first, then copy the
+  script again: on an older engine it stops with a fatal error. Engine side:
+  `Captcha::missingKeys()`, `Alert::missingKeys()`, `ErrorHandler::logsError()`,
+  `RateLimiter::storeStatus()`, `Request::invalidProxyIps()`, `Request::trustAllProxyIps()`,
+  `Request::proxyIpsError()`.
+- `PROXY_IPS` accepts IPv4 and IPv6 CIDR ranges (`'173.245.48.0/20'`, `'2400:cb00::/32'`) next to
+  addresses, so a CDN such as Cloudflare can be listed by its published ranges. Host names
+  (`localhost`, a Docker service name) are ignored: write the address.
 
 ### Changed
 
-- Each page has one address. A GET or HEAD request for `/about/` now gets a 301 to `/about`, `/home`
-  (the `app.default_route` page) to `/`, `/ru/home` and `/ru/` to `/ru`; the query string is kept.
-  Other methods are served as before, so forms posting to a path with a trailing slash keep working.
-  Old links keep working through the redirect; point your own links at the final address.
-  `Url::link('/', 'ru')` (and hreflang and sitemap entries for a locale root) is now `/ru`, not `/ru/`;
-  if you write a static `public/sitemap.xml` with `php scripts/sitemap.php`, run it again.
-  `/404` and `/<dir>/index` (a directory's `index.php` by its file name) are a 404, not a second
-  address of the 404 page or of `/<dir>`.
-- A path that Weft used to clean up silently is now a 404 (JSON under `/api`) instead of the page
-  its clean form names with 200: `/about!!`, non-ASCII or percent-encoded characters, empty, `.` or
-  `..` segments, leading `//` (`//about` used to serve the home page). Pages are reachable only by paths of `A-Z a-z 0-9 / _ - .`; fix links that use
+- Weft requires `golovanov/traceloom` `^0.5`. If your site's `composer.json` requires traceloom
+  itself, raise that constraint to `^0.5` too, or Composer cannot install Weft 0.2.0.
+- Each page has one address: a GET or HEAD request for `/about/` gets a 301 to `/about`, `/home`
+  (the `app.default_route` page) to `/`, `/ru/home` and `/ru/` to `/ru`, the query string kept;
+  other methods are served as before. Point your own links at the final address.
+  `Url::link('/', 'ru')`, hreflang and sitemap entries for a locale root are `/ru`, not `/ru/`: if
+  you write a static `public/sitemap.xml` with `php scripts/sitemap.php`, run it again. `/404` and
+  `/<dir>/index` are a 404, not a second address of the 404 page or of `/<dir>`.
+- A path Weft used to clean up silently is a 404 (JSON under `/api`), not the page its clean form
+  names with 200: `/about!!`, non-ASCII or percent-encoded characters, empty, `.` or `..` segments,
+  a leading `//`. Pages are reachable only by paths of `A-Z a-z 0-9 / _ - .`; fix links that use
   anything else.
-- Canonical, `og:url` and hreflang are built from the route the engine matched, never from the
-  request URI, so `/about!!` can no longer declare itself canonical; a 404 gets none of the
-  three, including a page that answers `http_response_code(404)` itself. `Seo::set(['canonical' => …])` still wins. The matched path is available as
-  `Url::routePath()` (`null` on a 404); on a 404 `Url::currentPath()` is `/` and `Url::isActive()`
-  is false.
+- Canonical, `og:url` and hreflang are built from the matched route, never from the request URI; a
+  404 gets none of them, including a page that answers `http_response_code(404)` itself.
+  `Seo::set(['canonical' => …])` still wins. The matched path is `Url::routePath()` (`null` on a
+  404); on a 404 `Url::currentPath()` is `/` and `Url::isActive()` is false.
 - Trace format, for anything that parses traces: `body` in `request_start` and `http_out_request`
-  is now an object `{size, content_type, data}` instead of a string, or `null` when the request has
-  no body (`data` is an array, or the raw string for a body that is not JSON or a form, and is
-  absent with `log_body` off); `uri` in
-  `request_start` and `url` in `http_out_request` / `http_out_response` no longer include the query
-  string, which moved to the `query` field (absent when there is none).
-- Trace files are deleted after 30 days. Set `app.trace.retention_days` to keep them longer, or to
-  `0` to keep them forever. The first request after the upgrade already deletes older files: if you
-  need that history, set the key before upgrading.
-- A relative `app.cache.path` is taken from `APP_ROOT`, no longer from the working directory (under
+  is an object `{size, content_type, data}` (`data` an array, or the raw string for a body that is
+  not JSON or a form, absent with `log_body` off), or `null` without a body, instead of a string;
+  `uri` in `request_start` and `url` in `http_out_request` / `http_out_response` no longer include
+  the query string, which moved to `query` (absent when there is none).
+- Trace files are deleted after 30 days, starting with the first request after the upgrade. To keep
+  that history, set `app.trace.retention_days` before upgrading (`0` keeps files forever).
+- A relative `app.cache.path` is taken from `APP_ROOT`, not from the working directory (under
   PHP-FPM, `public/`), so the site and CLI scripts share one cache; without `APP_ROOT` the default
   is `storage/cache` in the working directory, not in the system temp directory. If your path is
-  relative, make its new location writable by the PHP user; the old directory can be deleted.
-- `example/public/index.php` no longer calls `session_start()`; the session starts only when a form
-  needs a CSRF token (`Csrf`), so visitors who only read pages get no `PHPSESSID` cookie. Those
-  pages also lose the no-cache headers PHP sent with the session; if your site relied on them, send
-  `Cache-Control` yourself. If your site copied this file, remove the `session_start()` line too,
-  with the same effect on headers.
+  relative, make its new location writable by PHP; the old directory can be deleted.
+- `example/public/index.php` no longer calls `session_start()`: the session starts only when a form
+  needs a CSRF token (`Csrf`), so readers get no `PHPSESSID` cookie and no no-cache headers PHP
+  sent with the session. If your site copied this file, remove the line too; if you relied on those
+  headers, send `Cache-Control` yourself.
 - `Alert` reads its settings only from `app.alertloop.*`, the `'alertloop'` block of
-  `app/Configs/app.php`, as documented. It used to read a top-level `alertloop.*`, so alerts
-  configured as documented were silently off, and only a separate `app/Configs/alertloop.php`
-  worked. If you have that file, move its array into `app.php` under `'alertloop'` and delete the
-  file. If your settings are already in `app.php`, alerts start being sent after the upgrade.
-  Alerts enabled without `base_url` or `api_key` still send nothing, and now say so in the error
-  log, once per request.
-- Console scripts (`scripts/*.php`, cron jobs, anything run with the `cli` or `phpdbg` SAPI) write
-  their traces to `LOGS_PATH/cli/` instead of `LOGS_PATH/requests/`, which is now the site's alone
-  (PHP's built-in server counts as the site). A script and a web request no longer share a trace
-  directory, so each has one writer. `app.trace.retention_days` applies to both. To read a script's
-  trace, use `vendor/bin/eventtrace show <trace_id> --dir=storage/logs/cli`.
+  `app/Configs/app.php`, as documented; it read a top-level `alertloop.*`, so alerts configured as
+  documented were silently off. If you have `app/Configs/alertloop.php`, move its array into
+  `app.php` under `'alertloop'` and delete the file; if your settings are already in `app.php`,
+  alerts start being sent after the upgrade. Alerts enabled without `base_url` or `api_key` still
+  send nothing, and now say so in the error log, once per request.
+- Console scripts (`cli` and `phpdbg` SAPIs: `scripts/*.php`, cron jobs) write traces to
+  `LOGS_PATH/cli/`, not `LOGS_PATH/requests/`, which is now the site's alone (PHP's built-in server
+  counts as the site); `app.trace.retention_days` applies to both. To read a script's trace, use
+  `vendor/bin/eventtrace show <trace_id> --dir=storage/logs/cli`.
 - Weft sets no permissions on the error log, cache entries, rate-limit counters and their
-  directories: they get the mode the umask of the process gives. Before, these directories were
-  created at most `0770`; with the common umask `022` error logs are now readable by other users on
-  the server unless `storage/` is closed to them (`o-rwx`, step 5 of the guide). Traces keep
-  traceloom's modes (`0640`, directory `0750`), as before. PHP and scripts share the error log,
-  the cache and the counters: the deployment guide gives `storage/` one group for PHP and every
-  other writer (cron jobs, `scripts/sitemap.php`), setgid directories and `umask 002` for each of
-  them. When upgrading, apply steps 5 and 6 of the guide (step 5 also hands files your scripts
-  left in `storage/logs/requests/` to PHP's group), add `umask 002;` to your cron lines and to
-  commands you run over ssh or from CI, move cron jobs that run Weft scripts from the crontab of
-  `www-data` or `root` to the deploy user's, exclude `storage/` and `config/config.php` if you
-  deploy with rsync, and run `health.php` as the PHP user.
+  directories (it created the directories at most `0770`): they get the mode the process umask
+  gives, so with umask `022` error logs are readable by other users unless `storage/` is closed to
+  them. Traces keep traceloom's modes (`0640`, directory `0750`). When upgrading, apply steps 5 and
+  6 of the deployment guide (one group for PHP and every other writer, setgid directories,
+  `umask 002`; step 5 also hands files your scripts left in `storage/logs/requests/` to PHP's
+  group), add `umask 002;` to your cron lines and to commands you run over ssh or from CI, move cron
+  jobs that run Weft scripts from the crontab of `www-data` or `root` to the deploy user's, exclude
+  `storage/` and `config/config.php` if you deploy with rsync, and run `health.php` as the PHP user.
 
 ### Fixed
 
-- The example under PHP's built-in server (`php -S … -t public public/index.php`) now serves its
-  CSS, JS and images; before, every asset request went to the engine and returned 404. Production
-  servers (nginx, Apache) are not affected. If your site copied `example/public/index.php` and you
-  develop with `php -S`, copy the new `cli-server` block at its top.
-- The Redis cache and rate limits fall back to files, as with an unreachable Redis, when Redis
-  rejects the connection: a wrong `REDIS_PASSWORD`, an empty one while Redis requires a password,
-  one set while Redis has none, or `REDIS_DB` out of range. Before, an empty `REDIS_PASSWORD` for
-  a Redis that requires one made cached pages fail with 500, and a `REDIS_DB` out of range was
-  ignored (database 0 was used). If
-  `health.php` reports `rate_limit_store: file`, `rate_limit_error` says why.
-- A Redis that accepts the connection but rejects commands (a read-only replica, `maxmemory` reached
-  under `noeviction`) no longer makes every cached page fail with 500. A cache read it rejects is
-  a miss, a write is skipped, and the error log gets one `Cache store failed` line per request.
-- An exception thrown by a page or an API endpoint now raises the same critical alert as any other
+- An exception thrown by a page or an API endpoint raises the same critical alert as any other
   unhandled exception (same message and dedupe key); before, it was only logged. The alert is sent
-  after the 500 response, so under PHP-FPM the visitor does not wait for AlertLoop (up to
-  `app.alertloop.timeout` seconds). Its half-rendered output is discarded instead of being sent
-  ahead of the 500 response.
+  after the 500 response, and the half-rendered output is discarded.
+- A Redis that rejects the connection (a wrong, missing or unexpected `REDIS_PASSWORD`, `REDIS_DB`
+  out of range, which used to select database 0) or rejects commands (a read-only replica,
+  `maxmemory` under `noeviction`) no longer makes cached pages fail with 500. On a rejected
+  connection the cache and rate limits fall back to files, as with an unreachable Redis; a rejected
+  read is a miss, a write is skipped, and the error log gets one `Cache store failed` line per
+  request. If `health.php` reports `rate_limit_store: file`, `rate_limit_error` says why.
+- The example under PHP's built-in server (`php -S … -t public public/index.php`) serves its CSS, JS
+  and images; before, every asset request returned 404. If your site copied
+  `example/public/index.php` and you develop with `php -S`, copy the new `cli-server` block at its
+  top.
+- 10 smaller fixes: 1 reliability, 9 docs.
 
 ## 0.1.3 - 2026-08-24
 

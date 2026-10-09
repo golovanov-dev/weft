@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Golovanov\Weft\Observability;
 
+use Golovanov\Traceloom\Writer\JsonlFileWriter;
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\RequestContext;
 use Golovanov\Weft\Support\Clock;
@@ -160,25 +161,23 @@ final class ErrorHandler
     }
 
     /**
-     * What PHP cannot write among the logs, for health checks: the error log directory and the web's
-     * trace directory (LOGS_PATH/requests, whatever SAPI calls this), today's files in them and
-     * traceloom's lock file in requests/; null when everything is writable. A missing directory
-     * counts as writable when PHP can create it. Only checks: creates nothing and changes nothing.
+     * What PHP cannot write among the logs, for health checks: the error log directory and today's
+     * file in it, and the web's traces (LOGS_PATH/requests, whatever SAPI calls this), as traceloom
+     * itself checks them; null when everything is writable. A missing directory counts as writable
+     * when PHP can create it. Only checks: creates nothing and changes nothing.
      */
     public static function logsError(): ?string
     {
-        $traces = Trace::directory('fpm-fcgi');
-        $problems = [
-            ...self::unwritable(self::directory(), [Clock::date('Y-m-d') . '.log']),
-            // traceloom names trace files by the UTC date: Y-m-d.jsonl, Y-m-d-2.jsonl, ... Without
-            // its lock file it writes nothing. The lock may be left by a version where scripts wrote
-            // to requests/ too, owned by their user.
-            ...self::unwritable($traces, [
-                ...array_map('basename', glob($traces . '/' . gmdate('Y-m-d') . '*.jsonl') ?: []),
-                '.traceloom.lock',
-            ]),
-        ];
-        return $problems !== [] ? 'PHP cannot write ' . implode(', ', $problems) : null;
+        $problems = [];
+        $errors = self::unwritable(self::directory(), [Clock::date('Y-m-d') . '.log']);
+        if ($errors !== []) {
+            $problems[] = 'PHP cannot write ' . implode(', ', $errors);
+        }
+        $traces = JsonlFileWriter::writeProblem(Trace::configuration('fpm-fcgi'));
+        if ($traces !== null) {
+            $problems[] = $traces;
+        }
+        return $problems !== [] ? implode('; ', $problems) : null;
     }
 
     /**

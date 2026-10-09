@@ -96,7 +96,12 @@ final class HttpClientTest extends TestCase
         foreach (['http_out_request', 'http_out_response'] as $event) {
             [$data, $line] = $this->outgoing($event);
             $this->assertSame(self::URL, $data['url'], $event);
-            $this->assertSame(['api_key' => '[REDACTED]', "\u{FFFD}\u{FFFD}" => '1'], $data['query'], $event);
+            $query = $data['query'];
+            $this->assertSame('[REDACTED]', $query['api_key'], $event);
+            unset($query['api_key']);
+            // traceloom: each invalid byte becomes U+FFFD, plus a digest of the original name.
+            $this->assertSame(['1'], array_values($query), $event);
+            $this->assertMatchesRegularExpression('/^\x{FFFD}{3}~[0-9a-f]{16}$/u', (string) array_key_first($query), $event);
             $this->assertStringNotContainsString('k3y-value', $line, $event);
         }
     }
