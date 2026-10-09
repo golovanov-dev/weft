@@ -239,9 +239,9 @@ fails, the alert is sent. Alerts without a dedupe key, such as `business_event`,
 
 Unhandled exceptions and fatals alert automatically. For an exception thrown by a page or an API
 endpoint the 500 response goes out first and the alert after it, so under PHP-FPM the visitor does
-not wait for AlertLoop. Database errors alert once the site registers a notifier, as this example's
-`app/Bootstrap.php` does with `Database::setErrorNotifier(Alert::notifier())`; the same database
-error message is one dedupe key.
+not wait for AlertLoop. A database error your code does not catch takes the same path: the alert
+reads `Unhandled exception: Database query failed` (or `Database connection error`), and the MySQL
+message is only in `errors/`.
 
 ## Database
 
@@ -249,16 +249,41 @@ error message is one dedupe key.
 use Golovanov\Weft\Database\Database;
 
 $db = Database::connect();
-$user  = $db->row('SELECT * FROM users WHERE id = ?', [$id]);
-$rows  = $db->all('SELECT * FROM posts WHERE published = ?', [1]);
-$count = $db->value('SELECT COUNT(*) FROM posts');
-$db->execute('UPDATE posts SET views = views + 1 WHERE id = ?', [$id]);
+$user    = $db->row('SELECT * FROM users WHERE id = ?', [$id]);
+$rows    = $db->all('SELECT * FROM posts WHERE published = ?', [1]);
+$count   = $db->value('SELECT COUNT(*) FROM posts');
+$changed = $db->execute('UPDATE posts SET views = views + 1 WHERE id = ?', [$id]);
 $db->transaction(fn($db) => /* … */);
 ```
 
-A thin PDO wrapper, one connection per process, with the DB session set to the application timezone
-so `NOW()` matches `Clock`. `Golovanov\Weft\Database\Model` adds simple CRUD (`find`, `findBy`,
-`where`, `create`, `update`, `delete`). It is not an ORM, and that is the point.
+A thin PDO wrapper over MySQL, one connection per process, configured by the `DB_*` constants
+([Configuration](/docs/configuration)). `execute()` returns the number of rows the statement
+changed: MySQL does not count a row an `UPDATE` leaves with the same values. The DB session gets
+the application timezone, so `NOW()` matches `Clock`: by name (`Europe/Moscow`) when the MySQL
+server has its time zone tables loaded, otherwise as the offset at connection time (`+03:00`).
+
+Errors are thrown as `RuntimeException` with the `PDOException` as its previous, and the MySQL
+message goes to `errors/`. `Database` sends no alert itself: an error nobody catches alerts as an
+unhandled exception ("Alerts for sensitive spots", above).
+
+If MySQL drops the connection (error 2006 or 2013), the call throws and the next call opens a new
+connection; nothing is repeated, since a statement cut off mid-way may already have run on the
+server. A CLI script idle for longer than the server's `wait_timeout` gets the exception on its
+first call, and the next call runs on a new connection. Inside `transaction()` a lost connection
+throws `RuntimeException('Database connection lost in a transaction')`, and so does every later
+call until `transaction()` returns, even if your callback catches the first one: the server has
+already rolled the transaction back. `transaction()` rolls back and rethrows whatever the callback
+throws; if the rollback fails too, you still get the callback's exception, and the rollback failure
+goes to `errors/`.
+
+Connecting waits at most `DB_TIMEOUT` seconds (default 5). pdo_mysql has no read timeout of its
+own: a query to a server that stopped answering waits `mysqlnd.net_read_timeout` seconds (PHP's
+default is 86400). Set it in `php.ini`, or with `ini_set('mysqlnd.net_read_timeout', '30')` before
+the first `Database::connect()`; a longer query is cut off and throws, as a lost connection does.
+
+`Golovanov\Weft\Database\Model` adds simple CRUD (`find`, `findBy`, `where`, `exists`, `create`,
+`update`, `delete`); `update()` and `delete()` return the changed rows, as `execute()` does. It is
+not an ORM, and that is the point.
 
 Array keys become column names, so each must be a plain identifier (`[A-Za-z_][A-Za-z0-9_]*`);
 anything else throws `InvalidArgumentException` before a query runs. Values are always bound.
@@ -272,8 +297,12 @@ use Golovanov\Weft\Security\Jwt;
 
 $claims = Jwt::decode($token);                                   // null on any failure
 $token  = Jwt::fromBearer($request->header('authorization'));
-$jwt    = Jwt::encode(['uid' => 42], ttl: 3600);
+$jwt    = Jwt::encode(['uid' => 42], ttl: 900);                  // expires in 15 minutes
 ```
+
+Keys come from `AUTH_JWT_KEY` unless passed. Every token expires: `encode()` sets `exp` an hour
+ahead unless you pass `ttl` or an `exp` claim, and `decode()` rejects a token without `exp`. With
+`AUTH_JWT_ISSUER` set, `encode()` adds it as `iss` and `decode()` rejects any other issuer.
 
 ## HTTP client
 

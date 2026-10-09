@@ -141,22 +141,6 @@ final class Alert
     }
 
     /**
-     * Convenience: register this as the Database error notifier in bootstrap. The same message
-     * is one incident: its dedupe key is derived from it.
-     */
-    public static function notifier(): callable
-    {
-        return static fn(string $message): bool => self::send(
-            $message,
-            self::CRITICAL,
-            'incident',
-            'database:' . md5($message),
-            [],
-            'database',
-        );
-    }
-
-    /**
      * @param array<string, mixed> $payload
      */
     private static function post(string $url, string $apiKey, array $payload): bool

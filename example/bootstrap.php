@@ -39,7 +39,7 @@ Clock::applyDefaultTimezone();
 Config::load(APP_ROOT . '/app/Configs');
 ErrorHandler::run();
 
-// 6) Site wiring (DB error notifier, custom services, ...).
+// 6) Site wiring (custom services, ...).
 if (class_exists(Bootstrap::class)) {
     Bootstrap::init();
 }

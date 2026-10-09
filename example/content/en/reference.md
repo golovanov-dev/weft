@@ -85,12 +85,11 @@ Cache::has($key);  Cache::forget($key);  Cache::flush();
 ```php
 $db = Database::connect();
 $db->row($sql, $params);  $db->all($sql, $params);  $db->value($sql, $params);  $db->execute($sql, $params);
-$db->lastInsertId();  $db->transaction($fn);
-Database::setErrorNotifier($callable);
+$db->lastInsertId();  $db->transaction($fn);         // execute(): rows changed
 
 // Model
 $m->find($id);  $m->findBy($cond);  $m->where($cond);  $m->exists($cond);
-$m->create($data);  $m->update($id, $data);  $m->delete($id);
+$m->create($data);  $m->update($id, $data);  $m->delete($id);   // update/delete: rows changed
 ```
 
 ### Security
@@ -100,7 +99,7 @@ Captcha::enabled();  Captcha::siteKey();  Captcha::verify($token, $action);  Cap
 RateLimiter::allow($bucket, $max, $window);  RateLimiter::throttle($bucket, $sec);  RateLimiter::storeStatus();
 RateLimiter::honeypot($body, $field);
 Csrf::field();  Csrf::token();  Csrf::check($token);  Csrf::fieldName();
-Jwt::decode($token);  Jwt::encode($claims, ttl: 3600);  Jwt::fromBearer($header);
+Jwt::decode($token);  Jwt::encode($claims, ttl: 3600);   // ttl defaults to 3600  Jwt::fromBearer($header);
 Headers::send();
 ```
 
@@ -108,7 +107,7 @@ Headers::send();
 
 ```php
 Trace::event($name, $data);  Trace::id();  Trace::isActive();   // LOGS_PATH/requests on the web, LOGS_PATH/cli in scripts
-Alert::send($msg, $severity, $type, $dedupeKey, $context, $category);  Alert::critical($msg, $ctx);  Alert::notifier();  Alert::missingKeys();
+Alert::send($msg, $severity, $type, $dedupeKey, $context, $category);  Alert::critical($msg, $ctx);  Alert::missingKeys();
 ErrorHandler::log($type, $code, $msg, $file, $line);  ErrorHandler::debug();
 ```
 

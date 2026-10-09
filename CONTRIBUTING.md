@@ -75,6 +75,16 @@ cd example && php -S localhost:8000 -t public public/index.php
 New engine behaviour should come with a test in `tests/` — see `tests/TestCase.php` for the
 static-state reset the suite relies on.
 
+Tests in the `integration` group run `Database` against a real MySQL server and are skipped unless
+`WEFT_TEST_DB_HOST` is set. They create and drop the table `weft_items` and kill their own
+connections, so give them a database of their own; the server must listen on port 3306.
+
+```bash
+# MySQL host; WEFT_TEST_DB_NAME (default weft_test), WEFT_TEST_DB_USER (default root),
+# WEFT_TEST_DB_PASSWORD (default empty) are optional
+WEFT_TEST_DB_HOST=127.0.0.1 vendor/bin/phpunit --group integration
+```
+
 Please describe *which real site problem* the change solves. "It would be nice to have" is not
 enough for the engine — but it may be a great example or a documentation page.
 

@@ -9,8 +9,9 @@ use Golovanov\Weft\Tests\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
- * Column names come from array keys and go into SQL as-is, so Model rejects anything that is not
- * a plain identifier. The check runs before Database::connect(): these tests need no database.
+ * The SQL Model builds, on a PDO that records statements instead of running them. Column names
+ * come from array keys and go into SQL as-is, so Model rejects anything that is not a plain
+ * identifier; that check runs before Database::connect().
  */
 final class ModelTest extends TestCase
 {
@@ -24,6 +25,57 @@ final class ModelTest extends TestCase
         yield 'findBy' => [static fn(Model $m): mixed => $m->findBy([self::INJECTION => 'x'])];
         yield 'where' => [static fn(Model $m): mixed => $m->where([self::INJECTION => 'x'])];
         yield 'exists' => [static fn(Model $m): mixed => $m->exists([self::INJECTION => 'x'])];
+    }
+
+    /** @return iterable<string, array{\Closure(Model): mixed, string, list<mixed>}> */
+    public static function statements(): iterable
+    {
+        yield 'find' => [static fn(Model $m): mixed => $m->find(5), 'SELECT * FROM users WHERE id = ? LIMIT 1', [5]];
+        yield 'findBy' => [
+            static fn(Model $m): mixed => $m->findBy(['email' => 'a@example.com', 'active' => 1]),
+            'SELECT * FROM users WHERE email = ? AND active = ? LIMIT 1',
+            ['a@example.com', 1],
+        ];
+        yield 'where without conditions' => [static fn(Model $m): mixed => $m->where([]), 'SELECT * FROM users ', []];
+        yield 'exists' => [static fn(Model $m): mixed => $m->exists(['email' => 'a@example.com']), 'SELECT 1 FROM users WHERE email = ? LIMIT 1', ['a@example.com']];
+        yield 'create' => [
+            static fn(Model $m): mixed => $m->create(['name' => 'Ann', 'email' => 'a@example.com']),
+            'INSERT INTO users (name, email) VALUES (?, ?)',
+            ['Ann', 'a@example.com'],
+        ];
+        yield 'update' => [
+            static fn(Model $m): mixed => $m->update(5, ['name' => 'Ann', 'active' => 0]),
+            'UPDATE users SET name = ?, active = ? WHERE id = ?',
+            ['Ann', 0, 5],
+        ];
+        yield 'delete' => [static fn(Model $m): mixed => $m->delete(5), 'DELETE FROM users WHERE id = ?', [5]];
+    }
+
+    /**
+     * @param \Closure(Model): mixed $call
+     * @param list<mixed> $params
+     */
+    #[DataProvider('statements')]
+    public function testBuildsTheStatement(\Closure $call, string $sql, array $params): void
+    {
+        $pdo = new FakePdo();
+        $pdo->install();
+
+        $call($this->model());
+
+        $this->assertSame([[$sql, $params]], $pdo->statements);
+    }
+
+    public function testCreateReturnsTheInsertIdAndUpdateAndDeleteTheChangedRows(): void
+    {
+        $pdo = new FakePdo();
+        $pdo->install();
+        $pdo->rowCount = 2;
+
+        $this->assertSame('7', $this->model()->create(['name' => 'Ann']));
+        $this->assertSame(2, $this->model()->update(5, ['name' => 'Ann']));
+        $pdo->rowCount = 0;
+        $this->assertSame(0, $this->model()->delete(5));
     }
 
     /** @param \Closure(Model): mixed $call */

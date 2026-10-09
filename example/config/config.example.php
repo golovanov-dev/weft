@@ -31,6 +31,8 @@ define('DB_NAME', '');
 define('DB_USER', '');
 define('DB_PASSWORD', '');
 define('DB_CHARSET', 'utf8mb4');
+// Optional: seconds to wait for the connection (default 5).
+// define('DB_TIMEOUT', 5);
 
 // --- Redis (optional — cache/rate-limit driver 'redis') ----------------------------------
 define('REDIS_HOST', '127.0.0.1');

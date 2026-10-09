@@ -135,9 +135,8 @@ pre-1.0 the API may change between minor versions.
   error response's body, branch on `status`, not on `ok`.
 - An alert with a dedupe key is sent at most once per five minutes: a repeat within that window is
   not sent and `Alert::send()` returns `false`; a failed delivery does not open the window. The
-  window is kept with the rate-limit counters, and if that store fails the alert is sent.
-  `Alert::notifier()` gives database errors a dedupe key made from the message. Where every
-  occurrence must arrive, send the alert without a dedupe key.
+  window is kept with the rate-limit counters, and if that store fails the alert is sent. Where
+  every occurrence must arrive, send the alert without a dedupe key.
 - The example's contact form answers success only when the request was delivered: AlertLoop
   accepted the alert or `mail()` sent the email to `MAIL_TO`. Otherwise it answers 503 with a
   message for the visitor and writes `Contact request not delivered` to `errors/`; a failed
@@ -147,6 +146,27 @@ pre-1.0 the API may change between minor versions.
   `app/Services/ContactService.php`, `pages/contact.php`, `frontend/src/contact.js` and the
   `status` strings of `lang/en/contact.php`, and set `MAIL_TO` or AlertLoop, or every submission
   answers 503.
+- `Database` sends no alert, and `Database::setErrorNotifier()` and `Alert::notifier()` are removed:
+  a database error nobody catches alerts as any unhandled exception does, once per five minutes, with
+  the MySQL message only in `errors/`. Remove
+  `Database::setErrorNotifier(Alert::notifier())` from your `app/Bootstrap.php`, or every request
+  stops with a fatal error.
+- `Database::execute()`, `Model::update()` and `Model::delete()` return the number of rows changed
+  (MySQL does not count a row an `UPDATE` leaves as it was), not always `true`. Where you compare
+  their result with `=== true`, compare the count instead.
+- `Database` no longer runs `SELECT 1` before every call. A call on a lost connection (MySQL 2006
+  or 2013) throws, and the next call opens a new connection; the statement is not repeated. Inside
+  `transaction()` a lost connection throws
+  `RuntimeException('Database connection lost in a transaction')` on every call until
+  `transaction()` returns; before, Weft reconnected and the rest of the transaction was written
+  without it. If a rollback fails, the original exception is still the one thrown. Retry the whole
+  transaction where that is safe.
+- Connecting to MySQL gives up after 5 seconds, not pdo_mysql's 30; the new optional `DB_TIMEOUT`
+  constant sets it. A query still has no read timeout but `mysqlnd.net_read_timeout` (the
+  database section of the features guide).
+- `Jwt::decode()` rejects a token without `exp`, and `Jwt::encode()` without `ttl` issues a token
+  that expires in an hour instead of one that never does. Tokens issued by `encode()` without `ttl`
+  stop working after the upgrade: issue new ones, and pass `ttl` where an hour is too short.
 
 ### Fixed
 
@@ -163,7 +183,7 @@ pre-1.0 the API may change between minor versions.
   and images; before, every asset request returned 404. If your site copied
   `example/public/index.php` and you develop with `php -S`, copy the new `cli-server` block at its
   top.
-- 14 smaller fixes: 1 security, 4 reliability, 9 docs.
+- 15 smaller fixes: 1 security, 5 reliability, 9 docs.
 
 ## 0.1.3 - 2026-08-24
 

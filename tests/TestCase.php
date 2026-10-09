@@ -8,6 +8,7 @@ use Golovanov\Weft\Assets\Vite;
 use Golovanov\Weft\Cache\Cache;
 use Golovanov\Weft\Cache\RedisStore;
 use Golovanov\Weft\Config\Config;
+use Golovanov\Weft\Database\Database;
 use Golovanov\Weft\Http\HttpClient;
 use Golovanov\Weft\Http\RequestContext;
 use Golovanov\Weft\I18n\I18n;
@@ -56,6 +57,7 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(RateLimiter::class, ['store' => null, 'redisError' => null]);
         self::setStatics(RedisStore::class, ['shared' => null, 'sharedFailure' => null]);
         self::setStatics(View::class, ['shared' => []]);
+        self::setStatics(Database::class, ['instance' => null]);
         self::setStatics(Vite::class, ['manifest' => null]);
         self::setStatics(Alert::class, ['reporting' => false, 'misconfiguredLogged' => false]);
         self::setStatics(HttpClient::class, ['transport' => null]);

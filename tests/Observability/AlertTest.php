@@ -170,23 +170,6 @@ final class AlertTest extends TestCase
         $this->assertSame($traceId, $captured['trace_id']);
     }
 
-    public function testNotifierSendsACriticalDatabaseAlertWithTheTraceId(): void
-    {
-        $traceId = Trace::boot();
-        $this->fakeTransport(['status' => 200, 'error' => ''], $captured, calls: $calls);
-
-        $notifier = Alert::notifier();
-        $this->assertTrue($notifier('Query failed'));
-        $this->assertSame('critical', $captured['severity']);
-        $this->assertSame('database', $captured['category']);
-        $this->assertSame($traceId, $captured['trace_id']);
-        $this->assertArrayNotHasKey('payload', (array) $captured);
-
-        // The same database error on the next request is the same incident.
-        $this->assertFalse($notifier('Query failed'));
-        $this->assertSame(1, $calls);
-    }
-
     public function testRepeatOfADedupeKeyWithinTheWindowIsNotSent(): void
     {
         $this->fakeTransport(['status' => 202, 'error' => ''], calls: $calls);

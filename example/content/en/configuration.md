@@ -35,7 +35,11 @@ define('DB_NAME', '');
 define('DB_USER', '');
 define('DB_PASSWORD', '');
 define('DB_CHARSET', 'utf8mb4');
+define('DB_TIMEOUT', 5);     // optional: seconds to wait for the connection, default 5
 ```
+
+The MySQL server is reached on its default port. There is no read timeout setting: queries wait
+`mysqlnd.net_read_timeout` ([Features](/docs/features), "Database").
 
 Redis (only for the `redis` cache driver):
 

@@ -12,7 +12,7 @@ order: 2
 my-site/
 ├── app/
 │   ├── Configs/app.php     business config, read with config('app.*')
-│   ├── Bootstrap.php       site wiring (alert notifier, resolvers, …)
+│   ├── Bootstrap.php       site wiring (resolvers, services, …)
 │   └── Services/           your business logic
 ├── config/
 │   ├── config.example.php  documented template + fallback (DEV_MODE=false)

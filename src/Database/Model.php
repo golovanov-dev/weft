@@ -67,8 +67,11 @@ abstract class Model
         return $this->db()->lastInsertId();
     }
 
-    /** @param array<string, mixed> $data */
-    public function update(int|string $id, array $data): bool
+    /**
+     * @param array<string, mixed> $data
+     * @return int rows changed: 0 when no row has this key or the row already holds these values
+     */
+    public function update(int|string $id, array $data): int
     {
         $set = implode(', ', array_map(static fn(string $c): string => "$c = ?", self::columns($data)));
         $params = array_values($data);
@@ -79,7 +82,8 @@ abstract class Model
         );
     }
 
-    public function delete(int|string $id): bool
+    /** @return int rows deleted: 0 or 1 */
+    public function delete(int|string $id): int
     {
         return $this->db()->execute(
             "DELETE FROM {$this->table} WHERE {$this->primaryKey} = ?",

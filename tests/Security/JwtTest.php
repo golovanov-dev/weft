@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Golovanov\Weft\Tests\Security;
 
+use Firebase\JWT\JWT as FirebaseJwt;
 use Golovanov\Weft\Security\Jwt;
 use Golovanov\Weft\Tests\TestCase;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
 final class JwtTest extends TestCase
 {
@@ -23,13 +25,49 @@ final class JwtTest extends TestCase
         $this->assertArrayHasKey('iat', $claims);
     }
 
-    public function testEncodeWithTtlSetsExpiry(): void
+    public function testEncodeWithoutTtlIssuesATokenForAnHour(): void
     {
-        $token = Jwt::encode(['sub' => 'u'], self::KEY, 'HS256', 3600);
-        $claims = Jwt::decode($token, self::KEY);
+        $claims = Jwt::decode(Jwt::encode(['sub' => 'u'], self::KEY), self::KEY);
 
         $this->assertIsArray($claims);
-        $this->assertGreaterThan(time(), $claims['exp']);
+        $this->assertSame($claims['iat'] + 3600, $claims['exp']);
+    }
+
+    public function testEncodeGivesAnExpOfNullTheTtl(): void
+    {
+        $claims = Jwt::decode(Jwt::encode(['sub' => 'u', 'exp' => null], self::KEY, ttl: 60), self::KEY);
+
+        $this->assertIsArray($claims);
+        $this->assertSame($claims['iat'] + 60, $claims['exp']);
+    }
+
+    public function testEncodeKeepsTheExpOfTheClaimsOverTheTtl(): void
+    {
+        $exp = time() + 120;
+        $claims = Jwt::decode(Jwt::encode(['sub' => 'u', 'exp' => $exp], self::KEY, ttl: 60), self::KEY);
+
+        $this->assertIsArray($claims);
+        $this->assertSame($exp, $claims['exp']);
+    }
+
+    public function testDecodeRejectsATokenWithoutExpiry(): void
+    {
+        $token = FirebaseJwt::encode(['sub' => 'u', 'iat' => time()], self::KEY, 'HS256');
+
+        $this->assertNull(Jwt::decode($token, self::KEY));
+    }
+
+    #[RunInSeparateProcess]
+    public function testDecodeAcceptsOnlyTheConfiguredIssuer(): void
+    {
+        define('AUTH_JWT_ISSUER', 'https://auth.example.com');
+
+        $claims = Jwt::decode(Jwt::encode(['sub' => 'u'], self::KEY), self::KEY);
+        $this->assertIsArray($claims);
+        $this->assertSame('https://auth.example.com', $claims['iss']);
+
+        $this->assertNull(Jwt::decode(Jwt::encode(['iss' => 'https://other.example.com'], self::KEY), self::KEY));
+        $this->assertNull(Jwt::decode(FirebaseJwt::encode(['exp' => time() + 60], self::KEY, 'HS256'), self::KEY));
     }
 
     public function testDecodeReturnsNullForExpiredToken(): void
