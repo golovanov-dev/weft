@@ -49,6 +49,9 @@ Request::trustAllProxyIps();  // PROXY_IPS entries too wide for a proxy (IPv4 wi
 Request::proxyIpsError();     // why PROXY_IPS is unusable (not an array), or null
 Request::isHttps();           // came over HTTPS: X-Forwarded-Proto from PROXY_IPS, else $_SERVER['HTTPS']
 
+Pagination::fromRequest($request, $total, $perPage);  // ->page ->pages ->offset ->limit ->prev ->next ->url($n)
+throw Abort::notFound();  throw Abort::redirect($url, 301);   // from a page template or an api/ endpoint
+
 Response::html($html, 200);  Response::json($data, 200);  Response::text($t);  Response::redirect($url, 302);
 $response->withHeader($n, $v);  $response->send();
 
@@ -71,6 +74,8 @@ Url::inLocale('ru', $path);  Url::currentPath();  Url::routePath();  Url::isActi
 ```php
 Seo::set(['title' => …, 'description' => …, 'image' => …, 'type' => …, 'canonical' => …]);
 Seo::title($t);  Seo::description($d);  Seo::noindex();  Seo::jsonLd($schema);  Seo::render();
+Schema::organization($f);  Schema::localBusiness($f);  Schema::webSite($f);  Schema::article($f);
+Schema::product($f);  Schema::faq($questions);  Schema::breadcrumbs($crumbs);   // false if a field is missing
 Sitemap::xml($routes);  Robots::text();
 ```
 
@@ -131,7 +136,7 @@ View::render($file, $data);  View::page($pageFile, $layoutFile, $data);  View::s
 ## Template variables
 
 Pages receive `$request`, `$route`, `$locale`, and on dynamic routes the params (both as `$slug` and
-`$params['slug']`). The layout additionally receives `$content`.
+`$params['slug']`; for a catch-all `[...path].php`, `$path` with the rest of the path, `a/b/c`). The layout additionally receives `$content`.
 
 ## CLI
 

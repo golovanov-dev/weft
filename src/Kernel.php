@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Golovanov\Weft;
 
 use Golovanov\Weft\Config\Config;
+use Golovanov\Weft\Http\Abort;
 use Golovanov\Weft\Http\Request;
 use Golovanov\Weft\Http\RequestContext;
 use Golovanov\Weft\Http\Response;
@@ -15,6 +16,7 @@ use Golovanov\Weft\Observability\ErrorHandler;
 use Golovanov\Weft\Observability\Trace;
 use Golovanov\Weft\Security\Headers;
 use Golovanov\Weft\Seo\Robots;
+use Golovanov\Weft\Seo\Seo;
 use Golovanov\Weft\Seo\Sitemap;
 use Golovanov\Weft\Support\Sanitize;
 use Golovanov\Weft\View\View;
@@ -26,13 +28,16 @@ use Golovanov\Weft\View\View;
  * Convention over configuration, matching the reference site:
  *   /pages/<route>.php        a view (wrapped in the layout)
  *   /pages/<route>/index.php  a view in a sub-directory
+ *   /pages/<dir>/[param].php  the last segment under <dir>, as $param
+ *   /pages/<dir>/[...param].php  any deeper path under <dir> ("a/b/c"), as $param
  *   /api/<route>.php          a JSON endpoint (manages its own output)
  *   /components/layout.php     the page layout (receives $content)
  *
  * The default locale is served without a URL prefix; other locales use /<locale>/...
  * Every page has one address: GET/HEAD of /about/, /home, /en/about or /RU/about is redirected
  * (301) to /about, /, /about or /ru/about; a path with characters Sanitize::path() would drop or
- * fold is a 404.
+ * fold is a 404. A page or an API endpoint may end itself with throw Abort::notFound() or
+ * Abort::redirect(): a page gets the 404 page, an endpoint the JSON 404, both the redirect.
  */
 final class Kernel
 {
@@ -150,68 +155,48 @@ final class Kernel
     {
         $path = $route === null ? null : '/' . $route;
         $route = $route === '' ? (string) Config::get('app.default_route', 'home') : $route;
-        $pagesDir = self::root() . '/pages';
-
-        /** @var array<string, string> $params */
-        $params = [];
-        $i18nRoute = $route;
-        $file = null;
-
-        if ($route !== null) {
-            // 1) Exact file: /about -> pages/about.php
-            $file = $pagesDir . '/' . $route . '.php';
-
-            // 2) Directory index: /blog -> pages/blog/index.php
-            if (!is_file($file)) {
-                $indexFile = $pagesDir . '/' . $route . '/index.php';
-                $file = is_file($indexFile) ? $indexFile : null;
-            }
-
-            // 3) Dynamic segment: /docs/installation -> pages/docs/[slug].php with $params['slug'].
-            if ($file === null) {
-                $dynamic = self::matchDynamicPage($pagesDir, $route);
-                if ($dynamic !== null) {
-                    [$file, $params, $i18nRoute] = $dynamic;
-                }
-            }
+        $match = $route === null ? null : self::matchPage(self::root() . '/pages', $route);
+        if ($match === null) {
+            return self::notFoundPage($request);
         }
+        [$file, $params, $i18nRoute] = $match;
 
-        $status = 200;
-        if ($file === null) {
-            $status = 404;
-            $path = null;
-            $i18nRoute = $route = '404';
-            $file = is_file($pagesDir . '/404.php') ? $pagesDir . '/404.php' : null;
-        }
         // Canonical, og:url and hreflang are built from the matched route (Seo::render()).
         Url::setRoute($path);
-
         // Translations for this route (no-op when the lang files don't exist).
         I18n::boot(Locale::current(), $i18nRoute);
 
-        if ($file === null) {
-            return Response::html('<!doctype html><meta charset="utf-8"><title>404</title><h1>404 Not Found</h1>', 404);
+        try {
+            return self::renderPage($request, $file, $route, $params, 200);
+        } catch (Abort $abort) {
+            if ($abort->location !== null) {
+                return Response::redirect($abort->location, $abort->status);
+            }
+            // Abort::notFound(): the same answer as an unknown URL, without what the page had
+            // already set (title, canonical, JSON-LD).
+            Seo::reset();
+            return self::notFoundPage($request);
         }
+    }
 
-        $layoutFile = self::layoutFile();
-        // Route params are exposed both individually ($slug) and as $params; engine-provided
-        // variables always win over a param of the same name.
-        $data = array_merge($params, [
-            'request' => $request,
-            'route' => $route,
-            'locale' => Locale::current(),
-            'params' => $params,
-        ]);
-        $html = View::page($file, $layoutFile, $data);
-
-        // A page may set its own status while rendering — typically a dynamic page whose content
-        // does not exist (http_response_code(404)). Honour it instead of overwriting with 200.
-        $pageStatus = http_response_code();
-        if (is_int($pageStatus) && $pageStatus !== 200) {
-            $status = $pageStatus;
+    /**
+     * The page template for a route, in order: the exact file, the directory index, a [param]
+     * template next to the last segment, then the nearest catch-all [...param] above it.
+     *
+     * @return array{0: string, 1: array<string, string>, 2: string}|null [file, params, i18nRoute]
+     */
+    private static function matchPage(string $pagesDir, string $route): ?array
+    {
+        // 1) Exact file: /about -> pages/about.php
+        if (is_file($pagesDir . '/' . $route . '.php')) {
+            return [$pagesDir . '/' . $route . '.php', [], $route];
         }
-
-        return Response::html($html, $status);
+        // 2) Directory index: /blog -> pages/blog/index.php
+        if (is_file($pagesDir . '/' . $route . '/index.php')) {
+            return [$pagesDir . '/' . $route . '/index.php', [], $route];
+        }
+        // 3) Dynamic segment, 4) catch-all.
+        return self::matchDynamicPage($pagesDir, $route) ?? self::matchCatchAll($pagesDir, $route);
     }
 
     /**
@@ -219,9 +204,8 @@ final class Kernel
      *   /docs/installation  ->  pages/docs/[slug].php   with params ['slug' => 'installation']
      *   /hello              ->  pages/[slug].php        with params ['slug' => 'hello']
      *
-     * Only the final segment is dynamic — enough for /notes/{slug}-style content routes without
-     * introducing a route table. Translations for such pages use the parent directory as the
-     * route name (pages/docs/[slug].php -> lang/<locale>/docs.php).
+     * Translations for such pages use the parent directory as the route name
+     * (pages/docs/[slug].php -> lang/<locale>/docs.php), or the param name at the top level.
      *
      * @return array{0: string, 1: array<string, string>, 2: string}|null [file, params, i18nRoute]
      */
@@ -231,24 +215,91 @@ final class Kernel
         $dir = $pos === false ? '' : substr($route, 0, $pos);
         $last = $pos === false ? $route : substr($route, $pos + 1);
 
-        if ($last === '') {
-            return null;
-        }
+        $found = self::findTemplate($pagesDir, $dir, '/^\[([A-Za-z_][A-Za-z0-9_]*)\]\.php$/');
+        return $found === null ? null : [$found[0], [$found[1] => $last], $dir !== '' ? $dir : $found[1]];
+    }
 
+    /**
+     * Look for a catch-all template, from the deepest directory of the path up to pages/ itself:
+     *   /docs/guide/install  ->  pages/docs/[...path].php   with params ['path' => 'guide/install']
+     *
+     * A catch-all takes one or more segments below its directory, never the directory itself
+     * (/docs is pages/docs/index.php or a 404). Translations as for [param].
+     *
+     * @return array{0: string, 1: array<string, string>, 2: string}|null [file, params, i18nRoute]
+     */
+    private static function matchCatchAll(string $pagesDir, string $route): ?array
+    {
+        $segments = explode('/', $route);
+        for ($depth = count($segments) - 1; $depth >= 0; $depth--) {
+            $dir = implode('/', array_slice($segments, 0, $depth));
+            $found = self::findTemplate($pagesDir, $dir, '/^\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]\.php$/');
+            if ($found !== null) {
+                $rest = implode('/', array_slice($segments, $depth));
+                return [$found[0], [$found[1] => $rest], $dir !== '' ? $dir : $found[1]];
+            }
+        }
+        return null;
+    }
+
+    /** @return array{0: string, 1: string}|null [file, param name] of the first template in pages/$dir matching $pattern */
+    private static function findTemplate(string $pagesDir, string $dir, string $pattern): ?array
+    {
         $searchDir = $dir === '' ? $pagesDir : $pagesDir . '/' . $dir;
         if (!is_dir($searchDir)) {
             return null;
         }
-
         foreach (scandir($searchDir) ?: [] as $entry) {
-            if (preg_match('/^\[([A-Za-z_][A-Za-z0-9_]*)\]\.php$/', $entry, $m) !== 1) {
-                continue;
+            if (preg_match($pattern, $entry, $m) === 1) {
+                return [$searchDir . '/' . $entry, $m[1]];
             }
-            $i18nRoute = $dir !== '' ? $dir : $m[1];
-            return [$searchDir . '/' . $entry, [$m[1] => $last], $i18nRoute];
+        }
+        return null;
+    }
+
+    /**
+     * The site's pages/404.php (or a built-in page) with status 404, and no canonical or hreflang.
+     * An Abort thrown while the 404 page or its layout renders is not followed: the answer is the
+     * built-in 404, not an error.
+     */
+    private static function notFoundPage(Request $request): Response
+    {
+        Url::setRoute(null);
+        I18n::boot(Locale::current(), '404');
+
+        $builtIn = Response::html('<!doctype html><meta charset="utf-8"><title>404</title><h1>404 Not Found</h1>', 404);
+        $file = self::root() . '/pages/404.php';
+        if (!is_file($file)) {
+            return $builtIn;
+        }
+        try {
+            return self::renderPage($request, $file, '404', [], 404);
+        } catch (Abort) {
+            return $builtIn;
+        }
+    }
+
+    /** @param array<string, string> $params */
+    private static function renderPage(Request $request, string $file, string $route, array $params, int $status): Response
+    {
+        // Route params are exposed both individually ($slug) and as $params; engine-provided
+        // variables always win over a param of the same name.
+        $data = array_merge($params, [
+            'request' => $request,
+            'route' => $route,
+            'locale' => Locale::current(),
+            'params' => $params,
+        ]);
+        $html = View::page($file, self::layoutFile(), $data);
+
+        // A page may set its own status while rendering — typically a dynamic page whose content
+        // does not exist (http_response_code(404)). Honour it instead of overwriting with 200.
+        $pageStatus = http_response_code();
+        if (is_int($pageStatus) && $pageStatus !== 200) {
+            $status = $pageStatus;
         }
 
-        return null;
+        return Response::html($html, $status);
     }
 
     private static function dispatchApi(Request $request, string $route): Response
@@ -276,6 +327,9 @@ final class Kernel
         try {
             $run($file, $request);
             $body = (string) ob_get_clean();
+        } catch (Abort $abort) {
+            // Abort::notFound() is the standard JSON 404, Abort::redirect() the same 3xx as for a page.
+            return $abort->location !== null ? Response::redirect($abort->location, $abort->status) : self::apiNotFound($route);
         } finally {
             // An endpoint that threw leaves its half-written output (and any buffer it opened)
             // behind; drop it so only the error response is sent.

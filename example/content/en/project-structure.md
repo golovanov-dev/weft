@@ -42,6 +42,7 @@ There is no route file. The URL path maps straight onto a file:
 | `/blog` | `pages/blog/index.php` |
 | `/projects/alertloop` | `pages/projects/alertloop.php` |
 | `/docs/getting-started` | `pages/docs/[slug].php` with `$slug = 'getting-started'` |
+| `/wiki/guides/install` | `pages/wiki/[...path].php` with `$path = 'guides/install'` |
 | `/api/contact` | `api/contact.php` |
 | `/ru/about` | `pages/about.php` rendered in the `ru` locale |
 | `/sitemap.xml`, `/robots.txt` | generated from config |
@@ -59,16 +60,42 @@ served at `/blog` only.
 
 ### Dynamic segments
 
-When no exact file matches, the engine looks for a `[name].php` template in the same directory and
-passes the last URL segment into it:
+When no exact file and no `index.php` matches, the engine looks for a `[name].php` template in the
+directory of the last URL segment and passes that segment into it:
 
 ```text
 pages/notes/[slug].php   →   /notes/anything   ($slug === 'anything')
 ```
 
-Inside the template the value is available both as `$slug` and as `$params['slug']`. Only the final
-segment is dynamic — that covers content routes without a route table. Translations for such pages
-come from the parent directory name (`pages/docs/[slug].php` → `lang/<locale>/docs.php`).
+Next comes a catch-all `[...name].php`: it takes every segment below its directory, as one string.
+The nearest one wins, and a top-level `pages/[...path].php` catches every page URL nothing else
+serves (not `/api/...`, `/sitemap.xml` or `/robots.txt`):
+
+```text
+pages/wiki/[...path].php   →   /wiki/a, /wiki/a/b/c   ($path === 'a', 'a/b/c')
+```
+
+A catch-all never serves its own directory: `/wiki` is `pages/wiki/index.php` or a 404.
+
+Inside the template the value is available both as `$slug` (`$path`) and as `$params['slug']`.
+Translations for such pages come from the parent directory name (`pages/docs/[slug].php` →
+`lang/<locale>/docs.php`), or the param name at the top level.
+
+The template decides whether its content exists. To answer with the site's 404 page — no canonical,
+nothing the template had set — or with a redirect, it throws:
+
+```php
+use Golovanov\Weft\Http\Abort;
+
+throw Abort::notFound();
+throw Abort::redirect(url('/new-place'));   // 301; a second argument picks another 3xx
+```
+
+`http_response_code(404)` in the template works too, but then the template renders the not-found
+content itself. In an `api/` endpoint `Abort::notFound()` is the standard JSON 404 and
+`Abort::redirect()` the same redirect. `pages/404.php` (and the layout while it renders the 404
+page) cannot use `Abort`: the visitor gets the engine's built-in 404 page instead, so redirect old
+addresses from a page template (a catch-all, for example), not from the 404 page.
 
 ## Two entry points
 

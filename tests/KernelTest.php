@@ -67,6 +67,177 @@ final class KernelTest extends TestCase
         $this->assertStringContainsString('note:hello-world', $response->body);
     }
 
+    public function testCatchAllTakesTheRestOfThePath(): void
+    {
+        Config::set('app.url.base', 'https://example.com');
+
+        $response = $this->route('/docs/guide/install');
+        $this->assertSame(200, $response->status);
+        $this->assertStringContainsString('docs:guide/install|guide/install', $response->body);
+    }
+
+    public function testCatchAllDoesNotServeItsOwnDirectory(): void
+    {
+        $response = $this->route('/docs');
+        $this->assertSame(404, $response->status);
+        $this->assertStringContainsString('custom-404', $response->body);
+    }
+
+    /**
+     * Order of the templates for one path, on a site of its own: exact file, index, [param] next to
+     * the last segment, then the nearest catch-all.
+     */
+    public function testPageTemplateOrder(): void
+    {
+        $dir = sys_get_temp_dir() . '/weft-pages-' . bin2hex(random_bytes(4));
+        foreach (['[...all].php', 'shop/index.php', 'shop/sale.php', 'shop/[item].php', 'shop/[...path].php', 'shop/deep/[...rest].php'] as $file) {
+            @mkdir(dirname($dir . '/' . $file), 0777, true);
+            file_put_contents($dir . '/' . $file, '');
+        }
+        $match = static fn (string $route): ?array => (new \ReflectionMethod(Kernel::class, 'matchPage'))->invoke(null, $dir, $route);
+
+        try {
+            $this->assertSame([$dir . '/shop/sale.php', [], 'shop/sale'], $match('shop/sale'));
+            $this->assertSame([$dir . '/shop/index.php', [], 'shop'], $match('shop'));
+            $this->assertSame([$dir . '/shop/[item].php', ['item' => 'x'], 'shop'], $match('shop/x'));
+            $this->assertSame([$dir . '/shop/[...path].php', ['path' => 'x/y'], 'shop'], $match('shop/x/y'));
+            $this->assertSame([$dir . '/shop/deep/[...rest].php', ['rest' => 'a/b'], 'shop/deep'], $match('shop/deep/a/b'));
+            $this->assertSame([$dir . '/[...all].php', ['all' => 'other/x'], 'all'], $match('other/x'));
+        } finally {
+            $this->removeDir($dir);
+        }
+    }
+
+    public function testAbortNotFoundAnswersLikeAnUnknownPage(): void
+    {
+        Config::set('app.url.base', 'https://example.com');
+        Config::set('app.locales', ['enabled' => true, 'supported' => ['en', 'ru'], 'default' => 'en']);
+
+        $response = $this->route('/ru/docs/gone');
+        $this->assertSame(404, $response->status);
+        $this->assertStringContainsString('custom-404', $response->body);
+        $this->assertStringNotContainsString('docs:', $response->body);
+        // What the page had set before it gave up is gone with it.
+        $html = Seo::render();
+        $this->assertStringNotContainsString('canonical', $html);
+        $this->assertStringNotContainsString('hreflang', $html);
+        $this->assertStringNotContainsString('Docs page', $html);
+    }
+
+    public function testAbortRedirectIsA301(): void
+    {
+        $response = $this->route('/docs/moved');
+        $this->assertSame(301, $response->status);
+        $this->assertSame('/about', $response->headers['Location']);
+        $this->assertSame('', $response->body);
+    }
+
+    /** The 404 page cannot end itself: an Abort from it gives the built-in 404, not a 500. */
+    #[DataProvider('abortsWhileTheNotFoundPageRenders')]
+    public function testAbortWhileTheNotFoundPageRendersGivesTheBuiltIn404(string $uri): void
+    {
+        $response = $this->route($uri);
+        $this->assertSame(404, $response->status);
+        $this->assertStringContainsString('<h1>404 Not Found</h1>', $response->body);
+        $this->assertStringNotContainsString('custom-404', $response->body);
+        $this->assertArrayNotHasKey('Location', $response->headers);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function abortsWhileTheNotFoundPageRenders(): array
+    {
+        return [
+            'redirect from an unknown URL' => ['/no-such-page?abort-404=redirect'],
+            'not found from an unknown URL' => ['/no-such-page?abort-404=not-found'],
+            'redirect after a page gave up' => ['/docs/gone?abort-404=redirect'],
+        ];
+    }
+
+    /** In an api/ endpoint Abort is the JSON 404 or the redirect, so Pagination works there. */
+    public function testAbortInAnApiEndpointIsTheJson404OrTheRedirect(): void
+    {
+        $_SERVER['REQUEST_URI'] = '/api/list?page=1&x=y';
+        $response = $this->route('/api/list?page=1&x=y');
+        $this->assertSame(301, $response->status);
+        $this->assertSame('/api/list?x=y', $response->headers['Location']);
+
+        foreach (['/api/list?page=abc', '/api/list?page=4'] as $uri) {
+            $_SERVER['REQUEST_URI'] = $uri;
+            $response = $this->route($uri);
+            $this->assertSame(404, $response->status, $uri);
+            $this->assertSame(['success' => false, 'error' => 'Not Found', 'route' => 'list'], json_decode($response->body, true));
+        }
+
+        $_SERVER['REQUEST_URI'] = '/api/list?page=2';
+        $response = $this->route('/api/list?page=2');
+        $this->assertSame(200, $response->status);
+        $this->assertSame(['page' => 2, 'next' => '/api/list?page=3'], json_decode($response->body, true));
+    }
+
+    /** handle() end to end: neither case is an error, so no 500 and no alert. */
+    #[DataProvider('abortsThatAreNotErrors')]
+    public function testAbortOnTheNotFoundPageOrInAnApiEndpointRaisesNoAlert(string $uri, string $expected): void
+    {
+        Config::set('app.alerts.channels', ['alertloop']);
+        Config::set('app.alertloop', ['base_url' => 'https://alerts.example', 'api_key' => 'k']);
+        $alerts = 0;
+        self::fakeHttp(static function () use (&$alerts): array {
+            $alerts++;
+            return ['status' => 202];
+        });
+        $_SERVER['REQUEST_URI'] = $uri;
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+
+        ob_start();
+        Kernel::handle();
+        $output = (string) ob_get_clean();
+
+        $this->assertStringContainsString($expected, $output);
+        $this->assertSame(0, $alerts);
+    }
+
+    /** @return array<string, array{string, string}> */
+    public static function abortsThatAreNotErrors(): array
+    {
+        return [
+            '404 page' => ['/no-such-page?abort-404=redirect', '<h1>404 Not Found</h1>'],
+            'api' => ['/api/list?page=abc', '"error":"Not Found"'],
+        ];
+    }
+
+    public function testFirstPageOfAListRedirectsWithoutPageOnHead(): void
+    {
+        $response = $this->route('/list?page=1&x=y', 'HEAD');
+        $this->assertSame(301, $response->status);
+        $this->assertSame('/list?x=y', $response->headers['Location']);
+    }
+
+    public function testPagePastTheEndIsANotFoundWithoutCanonical(): void
+    {
+        Config::set('app.url.base', 'https://example.com');
+
+        $response = $this->route('/list?page=4');
+        $this->assertSame(404, $response->status);
+        $this->assertStringContainsString('custom-404', $response->body);
+        $this->assertStringNotContainsString('canonical', Seo::render());
+    }
+
+    public function testLaterPageHasItsOwnCanonicalTitleAndHreflang(): void
+    {
+        Config::set('app.url.base', 'https://example.com');
+        Config::set('app.seo.title_template', '%s | Site');
+        Config::set('app.locales', ['enabled' => true, 'supported' => ['en', 'ru'], 'default' => 'en']);
+
+        $response = $this->route('/ru/list?page=3&utm_source=x');
+        $this->assertSame(200, $response->status);
+        $this->assertStringContainsString('list:3/3', $response->body);
+        $html = Seo::render();
+        $this->assertStringContainsString('<title>List — Page 3 | Site</title>', $html);
+        $this->assertStringContainsString('<link rel="canonical" href="https://example.com/ru/list?page=3" />', $html);
+        $this->assertStringContainsString('<meta property="og:url" content="https://example.com/ru/list?page=3" />', $html);
+        $this->assertStringContainsString('<link rel="alternate" hreflang="en" href="https://example.com/list?page=3" />', $html);
+    }
+
     public function testUnknownRouteRendersCustom404Page(): void
     {
         $response = $this->route('/no-such-page');

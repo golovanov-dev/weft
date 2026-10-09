@@ -8,6 +8,7 @@ use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Seo\Robots;
 use Golovanov\Weft\Seo\Seo;
 use Golovanov\Weft\Tests\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
 final class SeoTest extends TestCase
@@ -34,6 +35,21 @@ final class SeoTest extends TestCase
     {
         Config::set('app.seo.default_title', 'Example — Home of Examples');
         $this->assertSame('Example — Home of Examples', Seo::documentTitle());
+    }
+
+    public function testLaterPageWithoutTitleGetsTheConfiguredSuffixOnTheDefault(): void
+    {
+        Config::set('app.seo.default_title', 'Example');
+        Config::set('app.seo.page_suffix', ', стр. %d');
+        Seo::set(['page' => 2]);
+        $this->assertSame('Example, стр. 2', Seo::documentTitle());
+    }
+
+    /** A suffix without %d (a translation that lost it) still numbers the page, after a space. */
+    public function testPageSuffixWithoutPlaceholderGetsTheNumberAfterASpace(): void
+    {
+        Seo::set(['title' => 'Blog', 'page_suffix' => ' (more)', 'page' => 3]);
+        $this->assertSame('Blog (more) 3 — Example', Seo::documentTitle());
     }
 
     public function testDocumentTitleFallsBackToSiteNameWithoutDefaultTitle(): void
@@ -197,6 +213,38 @@ final class SeoTest extends TestCase
         Config::set('app.seo.json_ld', ['@type' => 'Person', 'name' => 'Roman']);
         Seo::set(['title' => 'About']);
         $this->assertStringContainsString('"@type": "Person"', Seo::render());
+    }
+
+    /**
+     * Page 2+ of a list adds ?page=N to the canonical the page set (made absolute) or to the route,
+     * whichever comes first: Seo::set() before or after Pagination (Seo::set(['page' => N])).
+     */
+    #[DataProvider('canonicalsOnALaterPage')]
+    public function testLaterPageAddsItsNumberToTheCanonicalWhateverTheOrder(?string $set, string $expected): void
+    {
+        foreach ([[['canonical' => $set], ['page' => 2]], [['page' => 2], ['canonical' => $set]]] as $order) {
+            self::resetEngineState();
+            Config::set('app.url.base', 'https://example.com');
+            Config::set('app.locales', ['enabled' => true, 'supported' => ['en', 'ru'], 'default' => 'en']);
+            $_SERVER['REQUEST_URI'] = '/blog';
+            Seo::set($order[0]);
+            Seo::set($order[1]);
+            $html = Seo::render();
+
+            $this->assertStringContainsString('<link rel="canonical" href="' . $expected . '" />', $html);
+            $this->assertStringContainsString('<meta property="og:url" content="' . $expected . '" />', $html);
+            $this->assertStringContainsString('<link rel="alternate" hreflang="ru" href="https://example.com/ru/blog?page=2" />', $html);
+        }
+    }
+
+    /** @return array<string, array{?string, string}> */
+    public static function canonicalsOnALaterPage(): array
+    {
+        return [
+            'from the route' => [null, 'https://example.com/blog?page=2'],
+            'set as a site link' => ['/blog', 'https://example.com/blog?page=2'],
+            'set absolute' => ['https://example.com/posts', 'https://example.com/posts?page=2'],
+        ];
     }
 
     public function testCanonicalCanBeOverriddenPerPage(): void

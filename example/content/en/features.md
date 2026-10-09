@@ -66,11 +66,81 @@ Seo::jsonLd(['@type' => 'TechArticle', 'headline' => '…']);
 Rendered for you: title, description, robots, canonical, full Open Graph, Twitter card, hreflang
 alternates and every JSON-LD block. Canonical, `og:url` and hreflang are built from the page the
 engine matched, never from the URL as requested. A 404 gets none of the three — the engine's own and
-a page that answers `http_response_code(404)` itself, like an unknown slug on a dynamic page. JSON-LD
+a page that answers 404 itself (`Abort::notFound()` or `http_response_code(404)`), like an unknown
+slug on a dynamic page. JSON-LD
 is written with `<` and `>` escaped, so no value can end its `<script>` element. `/sitemap.xml` and
 `/robots.txt` are generated too; in `DEBUG` robots blocks indexing automatically, and it lists the
 sitemap only when `app.sitemap` is a non-empty list or a callable. robots.txt does not call the
 callable, so a sitemap generator that fails cannot turn it into an error.
+
+### Pagination
+
+`Pagination` turns `?page=N` into numbers and links; the page draws the navigation itself:
+
+```php
+use Golovanov\Weft\Http\Pagination;
+
+$pages = Pagination::fromRequest($request, count($posts), 10);
+foreach (array_slice($posts, $pages->offset, $pages->limit) as $post) { /* … */ }
+if ($pages->prev !== null) echo '<a href="' . e($pages->prev) . '">Newer</a>';
+if ($pages->next !== null) echo '<a href="' . e($pages->next) . '">Older</a>';
+```
+
+You get `page`, `pages` (at least 1), `total`, `offset`, `limit`, and `prev`, `next` and
+`url($n)` as site-relative links (base URI and locale prefix included, other query parameters kept,
+no `?page` for page 1). The engine keeps one address per page: `?page=1` is a 301 to the address
+without it, and a value other than `2`, `3`, … (`0`, `abc`, `02`) or past the last page shows the
+404 page. An empty list has page 1. Page 2 and later get their own canonical, `og:url` and hreflang
+with `?page=N` and no other parameters. The number goes onto the canonical the page set with
+`Seo::set(['canonical' => …])` (a full URL, or a link from `url()` that gets the scheme and host) or,
+without one, onto the page's own address; it does not matter whether `Seo::set()` comes before or
+after `Pagination`.
+
+Page 2 and later also get a title suffix: `app.seo.page_suffix`, by default ` — Page %d`, so
+"Blog — Page 2 — Weft". `%d` is the page number; a suffix without it gets the number after a space.
+A multilingual site translates it: put the key in `lang/<locale>/common.php` of every locale,
+the default one included (a locale without the key falls back to the default locale's text, and
+without that `t()` returns the key itself), and set it on the page:
+
+```php
+// lang/en/common.php:  'pagination' => ['suffix' => ' — Page %d'],
+// lang/ru/common.php:  'pagination' => ['suffix' => ' — страница %d'],
+Seo::set(['page_suffix' => t('pagination.suffix')]);
+```
+
+`Pagination` works in an `api/` endpoint too: there a page that does not exist is the standard
+JSON 404 and `?page=1` the same 301.
+
+### Structured data
+
+`Schema` builders add a JSON-LD block after checking the fields search engines need. Fields are
+schema.org names; `@type` may name a subtype (`BlogPosting`, `Restaurant`).
+
+```php
+use Golovanov\Weft\Seo\Schema;
+
+Schema::organization(['name' => 'Acme', 'url' => 'https://acme.test', 'logo' => '…']);
+Schema::article(['@type' => 'BlogPosting', 'headline' => $post->title, 'datePublished' => '2026-10-09']);
+Schema::product(['name' => 'Mug', 'offers' => ['price' => '9.50', 'priceCurrency' => 'EUR']]);
+Schema::faq(['Is it free?' => 'Yes, MIT.', 'Does it need a database?' => 'No.']);
+Schema::breadcrumbs(['Home' => url('/'), 'Blog' => url('/blog'), $post->title => null]);
+```
+
+| Builder | Required |
+|---|---|
+| `organization()`, `webSite()` | `name`, `url` |
+| `localBusiness()` | `name`, `address` |
+| `article()` | `headline` |
+| `product()` | `name`; `offers`, `review` or `aggregateRating`; every offer `price` and `priceCurrency` |
+| `faq()` | at least one question with an answer |
+| `breadcrumbs()` | at least one crumb; a name each, and a URL for all but the last |
+
+`faq()` and `breadcrumbs()` also take a list of pairs (`[['Home', url('/')], …]`). A breadcrumb URL
+is a full URL or the link `url()` returned — the same one your HTML trail uses; the builder adds the
+scheme and host from `app.url.base` and nothing else, so the base URI and locale prefix are not
+doubled. The breadcrumb trail on the page is your HTML. A missing required field (`null`, `''`, `[]`) throws in
+`DEBUG`; in production the block is left out, a line goes to `errors/`, and the builder returns
+`false`. Any other schema still goes through `Seo::jsonLd()`.
 
 ## API endpoints
 

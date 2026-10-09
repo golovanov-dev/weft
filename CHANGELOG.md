@@ -92,6 +92,17 @@ pre-1.0 the API may change between minor versions.
 - `PROXY_IPS` accepts IPv4 and IPv6 CIDR ranges (`'173.245.48.0/20'`, `'2400:cb00::/32'`) next to
   addresses, so a CDN such as Cloudflare can be listed by its published ranges. Host names
   (`localhost`, a Docker service name) are ignored: write the address.
+- Catch-all pages: `pages/<dir>/[...path].php` serves every deeper URL under `<dir>` with
+  `$path = 'a/b/c'`, after the exact file, `index.php` and `[param].php`; the nearest one wins, and
+  `pages/[...path].php` catches any page URL. A page template can end with
+  `throw Abort::notFound()` (the site's 404 page, without canonical) or `Abort::redirect($url)` (301).
+- `Pagination::fromRequest($request, $total, $perPage)` gives page numbers, offset and links for
+  `?page=N`: `?page=1` is a 301 to the address without it, a page that does not exist is a 404, and
+  page 2 and later get their own canonical and a title suffix (`app.seo.page_suffix`, default
+  ` — Page %d`).
+- JSON-LD builders `Schema::organization()`, `localBusiness()`, `webSite()`, `article()`,
+  `product()`, `faq()` and `breadcrumbs()` check the fields search engines require; a missing one
+  throws in `DEBUG` and otherwise leaves the block out with a line in `errors/`.
 
 ### Changed
 

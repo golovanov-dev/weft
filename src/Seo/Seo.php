@@ -19,7 +19,7 @@ use Golovanov\Weft\Support\Sanitize;
  * Defaults come from config('app.seo'); pages override only what they need:
  *
  *   Seo::set(['title' => 'About', 'description' => '...']);
- *   Seo::jsonLd([...]);            // optional extra structured data
+ *   Seo::jsonLd([...]);            // optional extra structured data (or a Schema:: builder)
  *   echo Seo::render();            // in the layout <head>
  */
 final class Seo
@@ -49,6 +49,8 @@ final class Seo
             'image_height' => (string) Config::get('app.seo.og_image_height', ''),
             'type' => 'website',
             'alternates' => true,              // emit hreflang links
+            'page' => 1,                       // set by Pagination: ?page=N in canonical, suffix in title
+            'page_suffix' => (string) Config::get('app.seo.page_suffix', ' — Page %d'),
         ];
         // Default site-wide structured data (e.g. WebSite / Person) from config.
         $default = Config::get('app.seo.json_ld', []);
@@ -88,6 +90,16 @@ final class Seo
         self::set(['robots' => 'noindex, nofollow']);
     }
 
+    /**
+     * @internal The Kernel drops what a page had set when the page ends with Abort::notFound().
+     */
+    public static function reset(): void
+    {
+        self::$booted = false;
+        self::$data = [];
+        self::$jsonLd = [];
+    }
+
     /** @param array<string, mixed> $schema */
     public static function jsonLd(array $schema): void
     {
@@ -100,11 +112,20 @@ final class Seo
         self::boot();
         $title = self::$data['title'];
         $default = (string) Config::get('app.seo.default_title', (string) Config::get('app.seo.site_name', ''));
+        // Page 2 and later of a list: "Blog — Page 2", before the title template. A suffix without
+        // %d gets the number after a space, so pages 2, 3, ... never share one title.
+        $page = (int) self::$data['page'];
+        $suffix = '';
+        if ($page >= 2) {
+            $suffix = (string) self::$data['page_suffix'];
+            $suffix = str_contains($suffix, '%d') ? str_replace('%d', (string) $page, $suffix) : $suffix . ' ' . $page;
+        }
         if ($title === null || $title === '') {
-            return $default;
+            return $default . $suffix;
         }
         $template = (string) Config::get('app.seo.title_template', '%s');
-        return str_contains($template, '%s') ? sprintf($template, (string) $title) : (string) $title;
+        $title = $title . $suffix;
+        return str_contains($template, '%s') ? sprintf($template, $title) : $title;
     }
 
     public static function render(): string
@@ -119,6 +140,17 @@ final class Seo
         // A page that answers 404 itself (a dynamic page with an unknown slug) counts as a 404.
         $path = http_response_code() === 404 ? null : Url::routePath();
         $canonical = (string) (self::$data['canonical'] ?: ($path !== null ? Url::absolute($path) : ''));
+        // Page 2 and later of a list is its own canonical page: ?page=N, without other parameters,
+        // added to the canonical the page set (made absolute: a site link gets the scheme and host)
+        // or to the route; hreflang carries the same ?page=N.
+        $page = (int) self::$data['page'];
+        if ($path !== null && $page >= 2) {
+            if (preg_match('~^https?://~i', $canonical) !== 1) {
+                $canonical = Url::origin() . '/' . ltrim($canonical, '/');
+            }
+            $canonical .= (str_contains($canonical, '?') ? '&' : '?') . 'page=' . $page;
+            $path .= '?page=' . $page;
+        }
         $robots = (string) self::$data['robots'];
         $image = (string) self::$data['image'];
         $type = (string) self::$data['type'];
