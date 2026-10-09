@@ -18,7 +18,8 @@ require dirname(__DIR__, 3) . '/vendor/autoload.php';
 define('APP_ROOT', __DIR__);
 define('LOGS_PATH', $argv[1]);
 
-Config::set('app.alertloop', ['enabled' => true, 'base_url' => 'https://alerts.example', 'api_key' => 'k']);
+Config::set('app.alerts.channels', ['alertloop']);
+Config::set('app.alertloop', ['base_url' => 'https://alerts.example', 'api_key' => 'k']);
 Config::set('app.rate_limit.path', $argv[1] . '/counters');
 (new ReflectionProperty(HttpClient::class, 'transport'))->setValue(null, static function (array $request): array {
     echo $request['body'], "\n";

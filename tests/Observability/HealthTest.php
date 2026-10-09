@@ -81,6 +81,22 @@ final class HealthTest extends TestCase
         ], $report['checks']);
     }
 
+    public function testAlertChannelsAndMailWithoutTheirSettingsFailIt(): void
+    {
+        $this->makeSite('config.php', '', [
+            'alerts' => ['channels' => ['telegram', 'log'], 'telegram' => ['bot_token' => 't']],
+            'mail' => ['driver' => 'smtp', 'from' => 'noreply@site.test'],
+        ]);
+
+        [$status, $report] = $this->runHealth();
+
+        $this->assertSame(1, $status);
+        $this->assertSame(['telegram', 'log'], $report['alert_channels']);
+        $this->assertSame(['app.alerts.telegram.chat_id is empty'], $report['alert_errors']);
+        $this->assertSame('smtp', $report['mail_driver']);
+        $this->assertSame(['app.mail.smtp.host is empty'], $report['mail_errors']);
+    }
+
     public function testOutsideASiteRootItSaysWhereItLooked(): void
     {
         [$status, , $stderr] = $this->runHealth();

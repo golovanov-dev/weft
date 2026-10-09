@@ -54,14 +54,25 @@ define('REDIS_PASSWORD', '');
 Integrations:
 
 ```php
-define('RECAPTCHA_SITEKEY', '');    // public key → the frontend
-define('RECAPTCHA_SECRETKEY', '');  // secret key → verification; setting it enables the captcha (needs the site key too)
+define('CAPTCHA_SITE_KEY', '');     // public key → the frontend
+define('CAPTCHA_SECRET_KEY', '');   // secret key → verification; setting it enables the captcha (needs the site key too)
 
-define('ALERTLOOP_BASE_URL', '');   // e.g. https://alerts.example.com
-define('ALERTLOOP_API_KEY', '');    // setting it enables alerts; needs ALERTLOOP_BASE_URL too
+define('MAIL_DRIVER', 'mail');      // 'mail': PHP mail(); 'smtp': the SMTP_* server below
+define('MAIL_FROM', 'noreply@example.com'); // From: of every email; an address of your own domain
+define('SMTP_HOST', '');            // e.g. smtp.yandex.ru; only for 'smtp'
+define('SMTP_PORT', 587);           // 587 with starttls, 465 with ssl: change both together
+define('SMTP_ENCRYPTION', 'starttls'); // starttls (587), ssl (465) or none (plain text, only on a trusted network)
+define('SMTP_USERNAME', '');        // '' connects without AUTH
+define('SMTP_PASSWORD', '');
 
-define('MAIL_TO', 'hello@example.com');     // where the contact form emails requests (PHP mail()); '' sends none: without AlertLoop the form then answers 503
-define('MAIL_FROM', 'noreply@example.com'); // From: of that email; an address of your own domain
+define('MAIL_TO', 'hello@example.com'); // where the contact form emails requests; '' sends none;
+                                    // plain addresses, several separated by commas (not 'Name <a@b>')
+
+define('ALERTLOOP_BASE_URL', '');   // alert channel alertloop: on when ALERTLOOP_API_KEY is set
+define('ALERTLOOP_API_KEY', '');
+define('TELEGRAM_BOT_TOKEN', '');   // alert channel telegram: on when the token is set; needs the chat id
+define('TELEGRAM_CHAT_ID', '');     // a number, below
+define('ALERT_MAIL_TO', '');        // alert channel mail: on when set; sent with the MAIL_* settings
 
 define('AUTH_JWT_KEY', '');         // JWT verification
 define('AUTH_JWT_ISSUER', '');
@@ -71,6 +82,12 @@ define('PROXY_IPS', []);            // IPs or CIDR ranges of a CDN / proxy in fr
                                     // and nginx + php-fpm; behind a proxy, empty means one rate limit for all
 define('TRACE_TRUST_INCOMING', false); // reuse an upstream X-Trace-Id / X-Request-Id
 ```
+
+The bot token comes from [@BotFather](https://t.me/BotFather) (`/newbot`). For the chat id, send
+your bot a message (for a group, add the bot to it), then open
+`https://api.telegram.org/bot<token>/getUpdates` and take `chat.id` from the reply: a number,
+negative for a group. A bot cannot write first: without that message Telegram answers
+`chat not found`.
 
 > Optional: define `G_ANALYTICS` and the layout will add gtag when `DEV_MODE` is false. No constant,
 > no analytics.
@@ -154,7 +171,7 @@ and without it is valid.
 'vite'       => ['entry' => 'src/main.js', 'dev_server' => 'http://localhost:5173'],
 'cache'      => ['enabled' => true, 'driver' => 'file', 'path' => '…/storage/cache'],  // on in this demo, see below; path: absolute or relative to APP_ROOT, defaults to storage/cache
 'rate_limit' => ['max' => 20, 'window' => 60, 'path' => '…'],  // per client IP (IPv6: per /64) per bucket; path: absolute or relative to APP_ROOT, defaults to ratelimit/ in cache.path
-'captcha'    => ['enabled' => …, 'site_key' => …, 'secret_key' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],
+'captcha'    => ['enabled' => …, 'driver' => 'recaptcha', 'site_key' => …, 'secret_key' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],
 'trace'      => ['log_body' => true, 'sensitive_keys' => [], 'retention_days' => 30],    // see below
 'security'   => ['frame_options' => 'SAMEORIGIN', 'referrer_policy' => 'strict-origin-when-cross-origin',
                  'permissions_policy' => 'geolocation=(), microphone=(), camera=()', 'csp' => '',
@@ -193,21 +210,51 @@ Note how feature flags derive from the environment, so there is one source of tr
 
 ```php
 'captcha' => [
-    'enabled'    => defined('RECAPTCHA_SECRETKEY') && RECAPTCHA_SECRETKEY !== '',
-    'site_key'   => defined('RECAPTCHA_SITEKEY') ? RECAPTCHA_SITEKEY : '',
-    'secret_key' => defined('RECAPTCHA_SECRETKEY') ? RECAPTCHA_SECRETKEY : '',
+    'enabled'    => defined('CAPTCHA_SECRET_KEY') && CAPTCHA_SECRET_KEY !== '',
+    'driver'     => 'recaptcha',
+    'site_key'   => defined('CAPTCHA_SITE_KEY') ? CAPTCHA_SITE_KEY : '',
+    'secret_key' => defined('CAPTCHA_SECRET_KEY') ? CAPTCHA_SECRET_KEY : '',
 ],
 ```
 
-So the keys `vendor/bin/weft-health` names under `captcha_missing_keys` (`site_key`, `secret_key`)
-are set as `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` in `config/config.php`. To disable the
-captcha in this example, set `RECAPTCHA_SECRETKEY` to `''`.
+So the keys `vendor/bin/weft-health` names under `captcha_missing_keys` (`site_key`, `secret_key`;
+`driver` when it is not `recaptcha` or `smartcaptcha`) are set as `CAPTCHA_SITE_KEY` and
+`CAPTCHA_SECRET_KEY` in `config/config.php`. To disable the captcha in this example, set
+`CAPTCHA_SECRET_KEY` to `''`. `'driver' => 'smartcaptcha'` verifies Yandex SmartCaptcha tokens with
+the same keys, but the example's pages are written for reCAPTCHA: switching the driver alone makes
+the form reject every request. Change `components/layout.php`, `pages/contact.php` and
+`api/contact.php` with it ([Features](/docs/features), "SmartCaptcha in this example").
 
-### AlertLoop
+### Mail
 
 ```php
-'alertloop' => [
-    'enabled' => defined('ALERTLOOP_API_KEY') && ALERTLOOP_API_KEY !== '',
+'mail' => [
+    'driver'    => 'mail',               // 'mail' (PHP mail()) or 'smtp'
+    'from'      => 'noreply@site.test',  // sender of every email: a plain address
+    'from_name' => 'Weft docs',          // optional display name
+    'smtp' => [
+        'host'       => 'smtp.site.test',
+        'port'       => 587,             // default: 465 with ssl, otherwise 587
+        'encryption' => 'starttls',      // starttls, ssl or none; default: ssl on port 465, otherwise starttls
+        'username'   => '',              // '' sends without AUTH
+        'password'   => '',
+        'timeout'    => 10,              // seconds for the whole exchange
+    ],
+],
+```
+
+The example fills these from `MAIL_DRIVER`, `MAIL_FROM` and `SMTP_*`. `vendor/bin/weft-health` lists
+what is missing under `mail_errors` (`app.mail.from`, `app.mail.smtp.host` with `smtp`).
+
+### Alerts
+
+```php
+'alerts' => [
+    'channels' => ['alertloop', 'telegram', 'mail', 'log'],  // any of these, tried in this order
+    'mail_to'  => 'ops@site.test',                           // channel mail: one address or a list
+    'telegram' => ['bot_token' => '…', 'chat_id' => '…'],    // channel telegram
+],
+'alertloop' => [                       // channel alertloop
     'base_url' => defined('ALERTLOOP_BASE_URL') ? ALERTLOOP_BASE_URL : '',
     'api_key' => defined('ALERTLOOP_API_KEY') ? ALERTLOOP_API_KEY : '',
     'source' => 'weft-docs',   // your site's name in AlertLoop
@@ -215,9 +262,16 @@ captcha in this example, set `RECAPTCHA_SECRETKEY` to `''`.
 ],
 ```
 
-Alerts are on once `ALERTLOOP_API_KEY` is set and need `ALERTLOOP_BASE_URL` too: without it nothing
-is sent, the error log gets a line, and `vendor/bin/weft-health` lists the key under
-`alertloop_missing_keys`. To turn alerts off, set `ALERTLOOP_API_KEY` to `''`.
+`channels` is the only switch: an empty list or no key sends no alerts. `log` writes the alert to
+`errors/` and reaches nobody. The example lists `alertloop`, `telegram` and `mail` when
+`ALERTLOOP_API_KEY`, `TELEGRAM_BOT_TOKEN` and `ALERT_MAIL_TO` are set. A listed channel without its
+settings is skipped, the error log gets a line, and `vendor/bin/weft-health` lists the setting under
+`alert_errors`.
+
+The example's contact form sends every request as an alert too (`business_event`, with the
+visitor's name, email and message), so each request reaches every channel, Telegram included.
+With `ALERT_MAIL_TO` the same as `MAIL_TO`, every request arrives as two emails: give alerts an
+address of their own.
 
 ### Trace
 

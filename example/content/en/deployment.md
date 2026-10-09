@@ -31,6 +31,8 @@ composer install --no-dev --optimize-autoloader
 cp config/config.example.php config/config.php
 #    DEBUG=false, DEV_MODE=false, BASE_URI='', APP_TIMEZONE, plus any keys you use;
 #    MAIL_TO (your inbox) and MAIL_FROM (an address of your domain) for the contact form;
+#    MAIL_DRIVER='smtp' and SMTP_* where PHP mail() does not work (no sendmail, shared hosting);
+#    for alerts, any of ALERTLOOP_*, TELEGRAM_* or ALERT_MAIL_TO;
 #    in app/Configs/app.php set app.url.base to your https domain
 
 # 4. Frontend (here or in CI)
@@ -147,7 +149,7 @@ false when any of these is bad:
 | Field | Bad value | What to do |
 |---|---|---|
 | `production` | not empty | it names settings for a development machine: `DEBUG` or `DEV_MODE` on, `config/config.example.php` loaded (create `config/config.php`), `app.url.base` on example.com, `app.captcha.allowed_hosts` with example.com while the captcha is on, or, with `app.vite.entry` set, a `public/dist/.vite/manifest.json` without that entry (run `npm run build`). Fix each one it names |
-| `checks.<name>.ok` | `false` | a check your site added in `app/Bootstrap.php` failed; its other fields say why. This example's `contact_form` lists in `problems`: `MAIL_TO` or `MAIL_FROM` still on example.com, the template's addresses (requests would go to example.com while the visitor sees "Thanks"): set your inbox and an address of your domain; no channel, `MAIL_TO` empty and AlertLoop off: set either; `mail()` not available while it is the only channel. `mail_available` is `false` when `mail()` is disabled (`disable_functions`) or, outside Windows, the program in `sendmail_path` does not exist: install the server's mail transport (sendmail, postfix, msmtp) or set AlertLoop. With either of the last two, every form submission answers 503 (see "The contact form answers 503" below). `contact_form` sends nothing, so `ok: true` does not mean an email arrives: see "Monitoring" |
+| `checks.<name>.ok` | `false` | a check your site added in `app/Bootstrap.php` failed; its other fields say why. This example's `contact_form` lists in `problems`: `MAIL_TO` or `MAIL_FROM` still on example.com, the template's addresses (requests would go to example.com while the visitor sees "Thanks"): set your inbox and an address of your domain; `no channel: …`, the email cannot go (`MAIL_TO` empty or with an entry that is not a plain address, such as `Name <a@b>`: several addresses are separated by commas; a mail setting missing; or `mail()` not available) and no alert channel reaches a person (`alert_channels` is empty; the channel `mail` is left out of it while `mail()` is not available, since it sends the same way): fix the email or set an alert channel. `mail_available` is `false` when, with `MAIL_DRIVER` `mail`, `mail()` is disabled (`disable_functions`) or, outside Windows, the program in `sendmail_path` does not exist: install the server's mail transport (sendmail, postfix, msmtp) or switch to `smtp`. With `no channel`, every form submission answers 503 (see "The contact form answers 503" below). `contact_form` sends nothing, so `ok: true` does not mean an email arrives: see "Monitoring" |
 | `logs_writable` | `false` | `logs_error` names what PHP cannot write: `errors/` or `requests/` under `LOGS_PATH`, today's file in it, or `requests/.traceloom.lock`. Run the `chgrp`, `chmod` and `find` lines of step 5 again, then find who created it: `ls -l` shows the owner. In `errors/`, a writer without `umask 002`: PHP-FPM (check step 6) or another user's cron lines (`sudo crontab -l -u <user>`), scripts, commands over ssh. In `requests/`, anyone but PHP, such as `php -S` started as another user |
 | `rate_limit_writable` | `false` | `rate_limit_error` names `rate_limit_path`, or how many files in it PHP cannot write and one of them: the same as for `logs_writable`; with Redis, see below |
 | `rate_limit_store` | `file` while `cache_driver` is `redis` | Redis is not used, the cache and counters are per server: see below |
@@ -155,21 +157,28 @@ false when any of these is bad:
 | `proxy_ips_invalid` | not empty | these `PROXY_IPS` entries are ignored: replace them with IP addresses or CIDR ranges; for `localhost` write `'127.0.0.1'` and/or `'::1'` |
 | `proxy_ips_trust_all` | not empty | these entries are too wide for a proxy (`0.0.0.0/0`, `::/0`, an IPv4 range wider than `/8`, an IPv6 one wider than `/16`): list only your proxies (below) |
 | `captcha_missing_keys` | not empty, with `DEBUG` off | every form submission is rejected: set the keys or disable the captcha (below) |
-| `alertloop_missing_keys` | not empty, with `DEBUG` off | alerts are on but nothing is sent: set the keys or turn alerts off (below) |
+| `alert_errors` | not empty, with `DEBUG` off | a channel in `alert_channels` lacks a setting and is skipped: set it or remove the channel (below) |
+| `mail_errors` | not empty, with `DEBUG` off | `app.mail` cannot send: set what it names (below) |
 
-With `DEBUG` on, `captcha_missing_keys` and `alertloop_missing_keys` are still listed but do not fail
+With `DEBUG` on, `captcha_missing_keys`, `alert_errors` and `mail_errors` are still listed but do not fail
 the check. On a development machine, `vendor/bin/weft-health --dev` lists `production` without
 failing on it; every other field counts as on a server.
 
-`captcha_missing_keys` names keys of `app.captcha`: `site_key`, `secret_key`. In this example they
-come from `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` in `config/config.php`, and the captcha is
-on whenever `RECAPTCHA_SECRETKEY` is not empty. To disable it, set `RECAPTCHA_SECRETKEY` to `''`; on
-a site with its own config, set `app.captcha.enabled` to `false`.
+`captcha_missing_keys` names keys of `app.captcha`: `site_key`, `secret_key`, and `driver` when it is
+not `recaptcha` or `smartcaptcha`. In this example the keys come from `CAPTCHA_SITE_KEY` and
+`CAPTCHA_SECRET_KEY` in `config/config.php`, and the captcha is on whenever `CAPTCHA_SECRET_KEY` is
+not empty. To disable it, set `CAPTCHA_SECRET_KEY` to `''`; on a site with its own config, set
+`app.captcha.enabled` to `false`.
 
-`alertloop_missing_keys` names keys of `app.alertloop`: `base_url`, `api_key`. They come from
-`ALERTLOOP_BASE_URL` and `ALERTLOOP_API_KEY` in `config/config.php`, and alerts are on whenever
-`ALERTLOOP_API_KEY` is not empty. To turn them off, set `ALERTLOOP_API_KEY` to `''`.
+`alert_channels` is `app.alerts.channels`; `alert_errors` names what a listed channel lacks:
+`app.alertloop.base_url` or `api_key`, `app.alerts.telegram.bot_token` or `chat_id`,
+`app.alerts.mail_to` and, for `mail`, the `app.mail` settings. In this example a channel is listed
+when `ALERTLOOP_API_KEY`, `TELEGRAM_BOT_TOKEN` or `ALERT_MAIL_TO` is set, and the rest comes from
+`ALERTLOOP_BASE_URL` and `TELEGRAM_CHAT_ID`. To turn a channel off, set its constant to `''`.
 
+`mail_errors` names `app.mail.from` (empty or not a plain address), `app.mail.driver` (not `mail`
+or `smtp`), and, with `smtp`, `app.mail.smtp.host` or `encryption`. In this example they come from
+`MAIL_FROM`, `MAIL_DRIVER` and `SMTP_*`. `mail_driver` shows the driver in use.
 `rate_limit_path` is `app.rate_limit.path`, else `ratelimit/` in `app.cache.path`
 (`storage/cache/ratelimit` by default); a relative one is taken from the site root (`APP_ROOT`), so
 `weft-health` and the site use the same directory whatever their working directory. A counter file in
@@ -355,7 +364,7 @@ MAILTO=you@example.com
 ```
 
 cron mails what a job prints, so the report reaches you only when `weft-health` exits with 1; the
-server needs working mail for that, as `mail()` does. Without it, use a heartbeat check of your
+server needs its own working mail for that (cron does not use `MAIL_DRIVER`). Without it, use a heartbeat check of your
 uptime service instead, which alerts when the pings stop:
 
 ```text
@@ -366,25 +375,40 @@ When it fails, fix what the report names ("What `weft-health` checks" above), th
 until it exits with 0.
 
 Neither of them sees whether the contact form's email arrives. `weft-health` checks the addresses and
-that PHP can hand `mail()` a message; the mail server can still refuse it or the email can bounce
-later (on Windows, `mail()` is only tried when a message is sent). So after each deploy and after any
-change to `MAIL_TO`, `MAIL_FROM` or the server's mail setup, send one request through the form
-yourself and check that it reached your inbox (or AlertLoop). If the form answered 503, or the email
-did not come, look in the error log:
+the mail settings, and with the `mail` driver that PHP can hand `mail()` a message; the mail server
+can still refuse it or the email can bounce later (on Windows, `mail()` is only tried when a message
+is sent; an SMTP server is only reached when a message is sent). So after each deploy and after any
+change to `MAIL_TO`, `MAIL_FROM`, `MAIL_DRIVER`, `SMTP_*` or the server's mail setup, send one request
+through the form yourself and check that it reached your inbox (or your alert channel). If the form
+answered 503, or the email did not come, look in the error log:
 
 ```bash
 grep -h 'not delivered\|not sent' storage/logs/errors/*
 ```
 
 A line there is explained in "The contact form answers 503" below; no line and no email means the
-server's mail transport took the email and did not deliver it: see its own log (for example
-`/var/log/mail.log`).
-
+mail server took the email and did not deliver it: see its own log (for example
+`/var/log/mail.log`, or your mail provider's sent folder).
 ## Updating
 
 - **The site** — `git pull`, `composer install --no-dev`, `npm run build` if the frontend changed.
 - **The engine** — `composer update golovanov/weft`, commit the new `composer.lock`, deploy. External
   versions stay pinned by the lock file.
+
+Before a new minor version (0.1 → 0.2), read its "Changed" section in the
+[CHANGELOG](https://github.com/golovanov-dev/weft/blob/main/CHANGELOG.md) and do what each entry
+says: a setting under its old name is not an error, its feature just turns off. `config/config.php`
+is not in git, so a pull leaves it as it was. On the server, in the site root, compare its constants
+with the template's:
+
+```bash
+diff <(grep -o "define('[A-Z_]*'" config/config.php | sort) <(grep -o "define('[A-Z_]*'" config/config.example.php | sort)
+```
+
+A `>` line is a constant the template has and your config lacks: add it. A `<` line is one the
+template no longer has: a constant of your own (`G_ANALYTICS`) or an old name. From 0.1 to 0.2,
+rename `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` to `CAPTCHA_SITE_KEY` and `CAPTCHA_SECRET_KEY`,
+or the captcha is off without a word from `weft-health`.
 
 > No Node on the server (common on shared hosting)? Build in CI and deploy `public/dist/` as an
 > artefact.
@@ -426,22 +450,32 @@ need them.
 
 ### The contact form answers 503
 
-`503` means neither AlertLoop nor `mail()` took the request. Each one leaves `Contact request not
-delivered` in `storage/logs/errors/`, ending with `trace:<id>`. A line with the same trace id,
-`Contact email to … not sent: mail() failed`, means PHP could not hand the email to the server's
-mail transport (`sendmail_path` in `php.ini`, or your host's mail setup); with `MAIL_TO` empty there
-is no such line. Why AlertLoop did not take it is in the `alert.failed` event of that trace:
-`status` `401` is a key AlertLoop refuses, `0` with `transport_error: true` is AlertLoop not reached.
-`eventtrace show` lists the event without these fields, so read the raw line:
+`503` means the email was not accepted and no alert reached a person. Each such request leaves
+`Contact request not delivered` in `storage/logs/errors/`, ending with `trace:<id>`. A line with the
+same trace id, `Mail not sent (<driver>): <reason>`, says why the email did not go: `mail() failed`
+(PHP could not hand it to the server's mail transport: `sendmail_path` in `php.ini`, or your host's
+mail setup), `SMTP … refused: <the server's reply>` (for example `AUTH` with a wrong
+`SMTP_USERNAME` or `SMTP_PASSWORD`), `SMTP connection to … failed` or `SMTP timed out` (wrong
+`SMTP_HOST` or `SMTP_PORT`, the port is blocked, or `SMTP_ENCRYPTION` does not match the port:
+465 takes `ssl`, 587 `starttls`; `wrong version number` in the reason is that too),
+`certificate verify failed` after `SMTP connection to ssl://…` or `SMTP STARTTLS handshake failed`
+(the certificate is for another name than `SMTP_HOST`, or PHP has no CA bundle to check it: set
+`openssl.cafile` in `php.ini`), or a mail setting that is missing. With
+`MAIL_TO` empty there is no such line. Why an alert channel did not take it is in the `alert.failed`
+events of that trace, one per channel (`channel`): for `alertloop`, `status` `401` is a key AlertLoop
+refuses, `0` with `transport_error: true` is AlertLoop not reached; for `telegram`, `error` is
+Telegram's description (`Unauthorized`: a wrong bot token; `Bad Request: chat not found`: a wrong
+chat id, or the bot was never started in that chat). `eventtrace show` lists the event without these
+fields, so read the raw line:
 
 ```bash
 grep -h '<trace_id>' storage/logs/requests/*.jsonl | grep alert.failed
 ```
 
-No `alert.failed` event means AlertLoop is off or lacks a key: see `alertloop_enabled` and
-`alertloop_missing_keys` in `vendor/bin/weft-health`. To fix it, set `MAIL_TO` on a server where
-`mail()` works, or `ALERTLOOP_BASE_URL` and `ALERTLOOP_API_KEY` (see
-[Configuration](/docs/configuration)). The visitor's message stays in the `request_start` event of
+No `alert.failed` event means no alert channel reaching a person is set up: see `alert_channels` and
+`alert_errors` in `vendor/bin/weft-health`. To fix it, make the email work (`MAIL_TO` and, where
+`mail()` does not work, `MAIL_DRIVER` `smtp` with `SMTP_*`) or set an alert channel (see
+[Configuration](/docs/configuration)).The visitor's message stays in the `request_start` event of
 the same trace, among the form fields, only while the request body is at most 8 KB. A long message
 goes over that within the form's 4,000-character limit, especially one not in Latin script (about
 3,600 Cyrillic characters do): then, as with `app.trace.log_body` set to `false`, it is kept nowhere.
@@ -462,13 +496,14 @@ goes over that within the form's 4,000-character limit, especially one not in La
 - [ ] HTTPS on for every page; HSTS (`app.security.hsts`) only after reading "HTTPS and HSTS" above,
   and `hsts_subdomains` only if every subdomain serves HTTPS
 - [ ] keys set for whichever of captcha / alerts / mail you use; a captcha enabled with a key missing
-  passes forms while `DEBUG` is on and rejects every submission with it off, alerts without the
-  address send nothing — `weft-health` lists the missing keys under `captcha_missing_keys` and
-  `alertloop_missing_keys`
+  passes forms while `DEBUG` is on and rejects every submission with it off, an alert channel without
+  its settings is skipped — `weft-health` lists them under `captcha_missing_keys`, `alert_errors`
+  and `mail_errors`
 - [ ] `app.captcha.allowed_hosts` lists your real domain, if the captcha is on
-- [ ] the contact form has a channel: `MAIL_TO` (your inbox, not example.com) with a working
-  `mail()`, or AlertLoop; otherwise every submission answers 503 and leaves `Contact request not
-  delivered` in `storage/logs/errors/` (see "The contact form answers 503" above)
+- [ ] the contact form has a channel: `MAIL_TO` (your inbox, not example.com) with working mail
+  (`mail()`, or `MAIL_DRIVER` `smtp` with `SMTP_*`), or an alert channel that reaches a person;
+  otherwise every submission answers 503 and leaves `Contact request not delivered` in
+  `storage/logs/errors/` (see "The contact form answers 503" above)
 - [ ] a test request sent through the contact form reached you, after this deploy and after every
   change of the mail settings: `weft-health` does not check delivery (see "Monitoring")
 - [ ] `sudo -u www-data sh -c 'umask 002; vendor/bin/weft-health'` (your PHP user) → `ok: true`,

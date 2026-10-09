@@ -41,10 +41,12 @@ convention-driven core so a new site is mostly content.
   [traceloom](https://github.com/golovanov-dev/traceloom): JSON and form bodies up to 8 KB and query
   strings logged as fields so redaction by key reaches them (other bodies as raw strings it cannot
   look inside), console scripts traced to a separate directory, trace files deleted after 30 days.
-- **Form protection by default** — rate limiting, CSRF, honeypot and Google reCAPTCHA v3.
-- **Alerting for sensitive spots** — push events to
-  [AlertLoop](https://github.com/golovanov-dev/alertloop); best-effort with a timeout, and a failed
-  delivery is recorded on the request trace instead of vanishing.
+- **Form protection by default** — rate limiting, CSRF, honeypot and a captcha: Google reCAPTCHA v3
+  or Yandex SmartCaptcha.
+- **Mail** — plain-text UTF-8 email through PHP `mail()` or SMTP (STARTTLS or TLS), no extra package.
+- **Alerting for sensitive spots** — to [AlertLoop](https://github.com/golovanov-dev/alertloop),
+  Telegram, email or the error log; best-effort with a timeout, and a failed delivery is recorded on
+  the request trace instead of vanishing.
 - **Batteries in the engine** — HTTP client, PDO wrapper, JWT (firebase/php-jwt), security headers.
 - **Vite** — dev server with HMR, hashed production assets from the manifest, with
   preload hints for the entry and its statically imported chunks.
@@ -139,19 +141,14 @@ Everything optional is a flag in `app/Configs/app.php`:
 ```php
 'locales'   => ['enabled' => true, 'supported' => ['en', 'ru']],
 'cache'     => ['enabled' => true, 'driver' => 'redis'],
-'captcha'   => ['enabled' => true, 'site_key' => RECAPTCHA_SITEKEY, 'secret_key' => RECAPTCHA_SECRETKEY],
-'alertloop' => [
-    'enabled' => defined('ALERTLOOP_API_KEY') && ALERTLOOP_API_KEY !== '',
-    'base_url' => defined('ALERTLOOP_BASE_URL') ? ALERTLOOP_BASE_URL : '',
-    'api_key' => defined('ALERTLOOP_API_KEY') ? ALERTLOOP_API_KEY : '',
-    'source' => 'weft-docs',   // your site's name in AlertLoop
-    'timeout' => 4,            // seconds a send waits for AlertLoop
-],
+'captcha'   => ['enabled' => true, 'driver' => 'recaptcha', 'site_key' => CAPTCHA_SITE_KEY, 'secret_key' => CAPTCHA_SECRET_KEY],
+'mail'      => ['driver' => 'smtp', 'from' => MAIL_FROM, 'smtp' => ['host' => SMTP_HOST, 'username' => SMTP_USERNAME, 'password' => SMTP_PASSWORD]],
+'alerts'    => ['channels' => ['telegram'], 'telegram' => ['bot_token' => TELEGRAM_BOT_TOKEN, 'chat_id' => TELEGRAM_CHAT_ID]],
 ```
 
 The captcha needs both keys: enabled without them, it rejects every form submission unless `DEBUG` is on.
-Alerts need both `ALERTLOOP_*` constants in `config/config.php`: without the address nothing is sent.
-`vendor/bin/weft-health` lists the missing keys of either.
+Alerts go only to the channels in `app.alerts.channels` (`alertloop`, `telegram`, `mail`, `log`); a
+listed channel without its settings is skipped. `vendor/bin/weft-health` lists what is missing.
 
 ## Documentation
 

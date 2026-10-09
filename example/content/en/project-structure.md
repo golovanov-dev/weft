@@ -115,7 +115,7 @@ App\Bootstrap::init();                        // 6) site wiring
 6. Response->send()            status, headers, body
 ```
 
-Any uncaught `Throwable` is logged, alerted (if AlertLoop is on) and turned into a 500 — JSON for
+Any uncaught `Throwable` is logged, alerted (to the channels in `app.alerts.channels`) and turned into a 500 — JSON for
 a request routed to `/api/` or one that asked for JSON, HTML otherwise, with a stack trace only
 when `DEBUG` is on. Whatever the page or endpoint printed before it threw is dropped. The API
 contract is in [Features](/docs/features).

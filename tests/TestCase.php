@@ -15,6 +15,8 @@ use Golovanov\Weft\I18n\I18n;
 use Golovanov\Weft\I18n\Locale;
 use Golovanov\Weft\I18n\Url;
 use Golovanov\Weft\Kernel;
+use Golovanov\Weft\Mail\Mail;
+use Golovanov\Weft\Mail\Smtp;
 use Golovanov\Weft\Observability\Alert;
 use Golovanov\Weft\Observability\Health;
 use Golovanov\Weft\Observability\Trace;
@@ -65,6 +67,8 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(Alert::class, ['reporting' => false, 'misconfiguredLogged' => false]);
         self::setStatics(Health::class, ['checks' => []]);
         self::setStatics(HttpClient::class, ['transport' => null]);
+        self::setStatics(Mail::class, ['transport' => null]);
+        self::setStatics(Smtp::class, ['connector' => null]);
         self::setStatics(Trace::class, ['tracer' => null, 'trace' => null, 'id' => '', 'booted' => false]);
         self::setStatics(RequestContext::class, [
             'request' => null,
@@ -126,6 +130,17 @@ abstract class TestCase extends BaseTestCase
             'transport' => static fn(array $request): array => $respond($request)
                 + ['status' => 200, 'headers' => [], 'body' => '', 'error' => ''],
         ]);
+    }
+
+    /**
+     * Take every Mail::send() message with $accept instead of sending it.
+     *
+     * @param \Closure(array<string, mixed>): string $accept gets the message (driver, from, to,
+     *   subject, headers, body); returns '' to accept it or the error
+     */
+    protected static function fakeMail(\Closure $accept): void
+    {
+        self::setStatics(Mail::class, ['transport' => $accept]);
     }
 
     /** Size of today's error log (ErrorHandler::log() without LOGS_PATH), to read what a test adds. */

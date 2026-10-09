@@ -66,7 +66,7 @@ php -S localhost:8000 -t public public/index.php
 ```
 
 Open <http://localhost:8000>. The contact form answers 503 here unless PHP `mail()` works on your
-machine (on Windows or without sendmail it usually does not) or AlertLoop is set up: see
+machine (on Windows or without sendmail it usually does not), SMTP is set up or an alert channel is: see
 [Deployment](/docs/deployment), "The contact form answers 503". Then check the environment:
 
 ```bash
@@ -99,15 +99,18 @@ vendor/bin/weft-health --dev
   "cache_enabled": true,
   "captcha_enabled": false,
   "captcha_missing_keys": [],
-  "alertloop_enabled": false,
-  "alertloop_missing_keys": [],
+  "alert_channels": [],
+  "alert_errors": [],
+  "mail_driver": "mail",
+  "mail_errors": [],
   "checks": {
     "contact_form": {
       "ok": false,
       "mail_to": "hello@example.com",
       "mail_from": "noreply@example.com",
+      "mail_driver": "mail",
       "mail_available": true,
-      "alertloop": false,
+      "alert_channels": [],
       "problems": [
         "MAIL_TO is on example.com",
         "MAIL_FROM is on example.com"

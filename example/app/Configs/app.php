@@ -76,16 +76,46 @@ return [
     ],
 
     'captcha' => [
-        'enabled' => defined('RECAPTCHA_SECRETKEY') && RECAPTCHA_SECRETKEY !== '',
-        'site_key' => defined('RECAPTCHA_SITEKEY') ? RECAPTCHA_SITEKEY : '',
-        'secret_key' => defined('RECAPTCHA_SECRETKEY') ? RECAPTCHA_SECRETKEY : '',
+        'enabled' => defined('CAPTCHA_SECRET_KEY') && CAPTCHA_SECRET_KEY !== '',
+        'driver' => 'recaptcha',     // or 'smartcaptcha': then change the widget in three files, or the form
+                                     // rejects every request (Features → "SmartCaptcha in this example")
+        'site_key' => defined('CAPTCHA_SITE_KEY') ? CAPTCHA_SITE_KEY : '',
+        'secret_key' => defined('CAPTCHA_SECRET_KEY') ? CAPTCHA_SECRET_KEY : '',
         'threshold' => 0.5,
-        // Hostnames reCAPTCHA is accepted from — replace with your own domain(s).
+        // Hostnames a captcha is accepted from — replace with your own domain(s).
         'allowed_hosts' => ['example.com'],
     ],
 
+    'mail' => [
+        'driver' => defined('MAIL_DRIVER') ? MAIL_DRIVER : 'mail',
+        'from' => defined('MAIL_FROM') ? MAIL_FROM : '',
+        'from_name' => 'Weft docs',
+        'smtp' => [
+            'host' => defined('SMTP_HOST') ? SMTP_HOST : '',
+            'port' => defined('SMTP_PORT') ? SMTP_PORT : 587,
+            'encryption' => defined('SMTP_ENCRYPTION') ? SMTP_ENCRYPTION : 'starttls',   // 587: starttls, 465: ssl
+            'username' => defined('SMTP_USERNAME') ? SMTP_USERNAME : '',
+            'password' => defined('SMTP_PASSWORD') ? SMTP_PASSWORD : '',
+            'timeout' => 10,         // seconds for the whole SMTP exchange
+        ],
+    ],
+
+    'alerts' => [
+        // Where alerts go, in this order: alertloop, telegram, mail, log (the error log only).
+        // Here a channel is on when its constants in config.php are set.
+        'channels' => array_keys(array_filter([
+            'alertloop' => defined('ALERTLOOP_API_KEY') && ALERTLOOP_API_KEY !== '',
+            'telegram' => defined('TELEGRAM_BOT_TOKEN') && TELEGRAM_BOT_TOKEN !== '',
+            'mail' => defined('ALERT_MAIL_TO') && ALERT_MAIL_TO !== '',
+        ])),
+        'mail_to' => defined('ALERT_MAIL_TO') ? ALERT_MAIL_TO : '',
+        'telegram' => [
+            'bot_token' => defined('TELEGRAM_BOT_TOKEN') ? TELEGRAM_BOT_TOKEN : '',
+            'chat_id' => defined('TELEGRAM_CHAT_ID') ? TELEGRAM_CHAT_ID : '',
+        ],
+    ],
+
     'alertloop' => [
-        'enabled' => defined('ALERTLOOP_API_KEY') && ALERTLOOP_API_KEY !== '',
         'base_url' => defined('ALERTLOOP_BASE_URL') ? ALERTLOOP_BASE_URL : '',
         'api_key' => defined('ALERTLOOP_API_KEY') ? ALERTLOOP_API_KEY : '',
         'source' => 'weft-docs',   // your site's name in AlertLoop
@@ -113,7 +143,6 @@ return [
 
     'contact' => [
         'mail_to' => defined('MAIL_TO') ? MAIL_TO : '',
-        'mail_from' => defined('MAIL_FROM') ? MAIL_FROM : '',
         'request_types' => ['question', 'bug', 'idea', 'other'],
     ],
 

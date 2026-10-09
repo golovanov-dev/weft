@@ -96,7 +96,7 @@ $m->create($data);  $m->update($id, $data);  $m->delete($id);   // update/delete
 ### Security
 
 ```php
-Captcha::enabled();  Captcha::siteKey();  Captcha::verify($token, $action);  Captcha::missingKeys();
+Captcha::enabled();  Captcha::driver();  Captcha::siteKey();  Captcha::verify($token, $action);  Captcha::missingKeys();
 RateLimiter::allow($bucket, $max, $window);  RateLimiter::throttle($bucket, $sec);  RateLimiter::storeStatus();
 RateLimiter::honeypot($body, $field);
 Csrf::field();  Csrf::token();  Csrf::check($token);  Csrf::fieldName();
@@ -108,9 +108,17 @@ Headers::send();
 
 ```php
 Trace::event($name, $data);  Trace::id();  Trace::isActive();   // LOGS_PATH/requests on the web, LOGS_PATH/cli in scripts
-Alert::send($msg, $severity, $type, $dedupeKey, $context, $category);  Alert::critical($msg, $ctx);  Alert::missingKeys();
+Alert::send($msg, $severity, $type, $dedupeKey, $context, $category);  Alert::critical($msg, $ctx);
+Alert::channels();  Alert::deliveryChannels();  Alert::configErrors();   // app.alerts.channels, the set-up ones reaching a person, what is missing
 ErrorHandler::log($type, $code, $msg, $file, $line);  ErrorHandler::debug();
 Health::check($name, fn() => ['ok' => true, ...]);   // a site check in vendor/bin/weft-health
+```
+
+### Mail
+
+```php
+Mail::send($to, $subject, $body, $replyTo);   // true when the driver accepted it; never throws
+Mail::configErrors();  Mail::isAddress($address);
 ```
 
 ### Assets and views

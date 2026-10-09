@@ -59,7 +59,8 @@ final class ErrorHandlerTest extends TestCase
             $calls++;
             return ['status' => 202];
         });
-        Config::set('app.alertloop', ['enabled' => true, 'base_url' => 'https://alerts.example', 'api_key' => 'k']);
+        Config::set('app.alerts.channels', ['alertloop']);
+        Config::set('app.alertloop', ['base_url' => 'https://alerts.example', 'api_key' => 'k']);
         $logOffset = self::errorLogSize();
 
         error_clear_last();

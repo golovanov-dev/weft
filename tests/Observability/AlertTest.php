@@ -10,9 +10,9 @@ use Golovanov\Weft\Observability\Trace;
 use Golovanov\Weft\Tests\TestCase;
 
 /**
- * Alert delivery: the shape of the event sent to AlertLoop, what happens when delivery fails, and
- * the window that drops repeats of a dedupe key. HttpClient's transport is replaced with a
- * closure, so no network is involved.
+ * Alert delivery: the shape of the event sent to AlertLoop, the other channels, what happens when
+ * delivery fails, and the window that drops repeats of a dedupe key. HttpClient's and Mail's
+ * transports are replaced with closures, so no network is involved.
  */
 final class AlertTest extends TestCase
 {
@@ -33,7 +33,7 @@ final class AlertTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        Config::set('app.alertloop.enabled', true);
+        Config::set('app.alerts.channels', ['alertloop']);
         Config::set('app.alertloop.base_url', 'https://alerts.example/');
         Config::set('app.alertloop.api_key', 'test-key');
         Config::set('app.alertloop.source', 'weft-tests');
@@ -69,40 +69,37 @@ final class AlertTest extends TestCase
         ));
     }
 
-    public function testDisabledAlertingSendsNothing(): void
+    public function testNoChannelsSendNothing(): void
     {
-        Config::set('app.alertloop.enabled', false);
+        Config::set('app.alerts.channels', []);
         $this->fakeTransport(['status' => 200, 'error' => ''], $captured);
 
         $this->assertFalse(Alert::send('nope'));
         $this->assertNull($captured);
     }
 
-    public function testEnabledWithoutAKeySendsNothingAndLogsOncePerRequest(): void
+    public function testAChannelWithoutItsSettingsIsSkippedAndLoggedOncePerRequest(): void
     {
+        Config::set('app.alerts.channels', ['alertloop', 'telegram', 'sms']);
         Config::set('app.alertloop.api_key', '');
         $this->fakeTransport(['status' => 200, 'error' => ''], $captured);
         $logOffset = self::errorLogSize();
 
-        $this->assertSame(['api_key'], Alert::missingKeys());
+        $this->assertSame([
+            'app.alertloop.api_key is empty',
+            'app.alerts.telegram.bot_token is empty',
+            'app.alerts.telegram.chat_id is empty',
+            'app.alerts.channels has an unknown channel "sms"',
+        ], Alert::configErrors());
+        $this->assertSame([], Alert::deliveryChannels());
         $this->assertFalse(Alert::send('nope'));
         $this->assertFalse(Alert::critical('nope again'));
         $this->assertNull($captured);
 
         $log = self::errorLogSince($logOffset);
-        $this->assertStringContainsString('ALERT ERRNO:500 | AlertLoop is enabled without api_key, alerts are not sent', $log);
+        $this->assertStringContainsString('ALERT ERRNO:500 | Alert channels skipped: app.alertloop.api_key is empty;', $log);
         $this->assertSame(1, substr_count($log, "\n"));
     }
-
-    public function testMissingKeysAreReportedOnlyWhileAlertingIsOn(): void
-    {
-        Config::set('app.alertloop.base_url', '');
-        $this->assertSame(['base_url'], Alert::missingKeys());
-
-        Config::set('app.alertloop.enabled', false);
-        $this->assertSame([], Alert::missingKeys());
-    }
-
     public function testPayloadUsesOnlyFieldsFromTheAlertLoopSchema(): void
     {
         Config::set('app.alertloop.timeout', 2);
@@ -309,5 +306,115 @@ final class AlertTest extends TestCase
         $this->assertStringContainsString('alert.failed', (string) @file_get_contents($log));
 
         $this->removeDir($dir);
+    }
+
+    private function telegramOn(): void
+    {
+        Config::set('app.alerts.channels', ['telegram']);
+        Config::set('app.alerts.telegram', ['bot_token' => '123456:SECRET-token', 'chat_id' => '-10042']);
+    }
+
+    public function testTelegramGetsTheAlertAsTextFromTheBot(): void
+    {
+        $this->telegramOn();
+        Config::set('app.url.base', 'https://site.test');
+        $request = null;
+        self::fakeHttp(static function (array $r) use (&$request): array {
+            $request = $r;
+            return ['body' => '{"ok":true,"result":{}}'];
+        });
+
+        $this->assertTrue(Alert::send('Payment failed', Alert::CRITICAL, 'incident', 'pay:42', ['order_id' => 42], 'payments'));
+
+        $this->assertSame('https://api.telegram.org/bot123456:SECRET-token/sendMessage', $request['url']);
+        $body = json_decode((string) $request['body'], true);
+        $this->assertSame('-10042', $body['chat_id']);
+        $this->assertStringStartsWith("CRITICAL: Payment failed\ntype: incident\ncategory: payments\nsite: site.test\n", $body['text']);
+        $this->assertStringContainsString('"order_id": 42', $body['text']);
+    }
+
+    /** The bot token is in the URL: neither the trace nor the error log may get it. */
+    public function testTelegramFailureNeverRecordsTheBotToken(): void
+    {
+        $this->telegramOn();
+        $traceId = Trace::boot();
+        self::fakeHttp(static fn(array $r): array => ['body' => false, 'error' => 'Failed to connect to ' . $r['url']]);
+        $logOffset = self::errorLogSize();
+
+        $this->assertFalse(Alert::send('lost'));
+
+        $events = $this->traceEvents($traceId);
+        $failures = $this->failureEvents($events);
+        $this->assertCount(1, $failures);
+        $this->assertSame('telegram', $failures[0]['data']['channel']);
+        $this->assertStringContainsString('bot***', $failures[0]['data']['error']);
+        $this->assertStringNotContainsString('SECRET-token', (string) json_encode($events));
+        $this->assertStringNotContainsString('SECRET-token', self::errorLogSince($logOffset));
+    }
+
+    public function testTelegramThatRefusesTheMessageIsAFailureWithItsDescription(): void
+    {
+        $this->telegramOn();
+        $traceId = Trace::boot();
+        self::fakeHttp(static fn(): array => ['status' => 400, 'body' => '{"ok":false,"description":"Bad Request: chat not found"}']);
+
+        $this->assertFalse(Alert::send('lost'));
+
+        $failure = $this->failureEvents($this->traceEvents($traceId))[0]['data'];
+        $this->assertSame([400, false, 'Bad Request: chat not found'], [$failure['status'], $failure['transport_error'], $failure['error']]);
+    }
+
+    public function testMailGetsTheAlertThroughMail(): void
+    {
+        Config::set('app.alerts', ['channels' => ['mail'], 'mail_to' => 'ops@site.test']);
+        Config::set('app.mail', ['driver' => 'mail', 'from' => 'noreply@site.test']);
+        $sent = [];
+        self::fakeMail(static function (array $m) use (&$sent): string {
+            $sent[] = $m;
+            return '';
+        });
+
+        $this->assertTrue(Alert::critical('Disk full', ['free' => '0 B']));
+
+        $this->assertCount(1, $sent);
+        $this->assertSame(['ops@site.test'], $sent[0]['to']);
+        $this->assertSame('[critical] Disk full', $sent[0]['subject']);
+        $this->assertStringContainsString('"free": "0 B"', quoted_printable_decode($sent[0]['body']));
+    }
+
+    /** The log channel writes the alert down but reaches nobody: it is never "delivered". */
+    public function testLogAloneIsNotDeliveryButHoldsTheWindow(): void
+    {
+        Config::set('app.alerts.channels', ['log']);
+        $logOffset = self::errorLogSize();
+
+        $this->assertFalse(Alert::send('Card declined', Alert::WARNING, 'incident', 'pay:1', ['card' => '4111111111111111'], 'payments'));
+        $this->assertFalse(Alert::send('Card declined', Alert::WARNING, 'incident', 'pay:1'));
+
+        $log = self::errorLogSince($logOffset);
+        $this->assertStringContainsString('ALERT ERRNO:0 | WARNING incident/payments: Card declined [pay:1]', $log);
+        $this->assertSame(1, substr_count($log, "\n"), 'the repeat within the window is not logged again');
+        $this->assertStringNotContainsString('4111111111111111', $log);
+    }
+
+    /** Channels go in order; one that took the alert is enough, and the others' failures are recorded. */
+    public function testOneDeliveringChannelIsEnoughAndALogNextToAFailedOneDoesNotHoldTheWindow(): void
+    {
+        Config::set('app.alerts.channels', ['alertloop', 'log']);
+        $traceId = Trace::boot();
+        $this->fakeTransport(['status' => 503, 'error' => ''], calls: $calls);
+
+        $this->assertFalse(Alert::critical('boom', [], 'exception:1'));
+        $this->assertFalse(Alert::critical('boom', [], 'exception:1'));
+        $this->assertSame(2, $calls, 'the window was released: alertloop failed and log reaches nobody');
+        $this->assertSame('alertloop', $this->failureEvents($this->traceEvents($traceId))[0]['data']['channel']);
+
+        $this->telegramOn();
+        Config::set('app.alerts.channels', ['alertloop', 'telegram']);
+        self::fakeHttp(static fn(array $r): array => str_contains($r['url'], 'telegram')
+            ? ['body' => '{"ok":true}']
+            : ['status' => 503, 'body' => '']);
+        $this->assertTrue(Alert::critical('boom', [], 'exception:2'));
+        $this->assertSame(['alertloop', 'telegram'], Alert::deliveryChannels());
     }
 }

@@ -380,7 +380,8 @@ final class KernelTest extends TestCase
     /** handle() end to end: a page that throws is a 500 without its half-rendered HTML, then alerts. */
     public function testPageExceptionIsA500WithoutPartialOutputAndRaisesTheAlert(): void
     {
-        Config::set('app.alertloop', ['enabled' => true, 'base_url' => 'https://alerts.example', 'api_key' => 'k']);
+        Config::set('app.alerts.channels', ['alertloop']);
+        Config::set('app.alertloop', ['base_url' => 'https://alerts.example', 'api_key' => 'k']);
         $alerts = [];
         $sentBeforeAlert = [];
         self::fakeHttp(static function (array $request) use (&$alerts, &$sentBeforeAlert): array {
@@ -419,7 +420,8 @@ final class KernelTest extends TestCase
     #[RunInSeparateProcess]
     public function testSessionIsReleasedBeforeTheAlertWaits(): void
     {
-        Config::set('app.alertloop', ['enabled' => true, 'base_url' => 'https://alerts.example', 'api_key' => 'k']);
+        Config::set('app.alerts.channels', ['alertloop']);
+        Config::set('app.alertloop', ['base_url' => 'https://alerts.example', 'api_key' => 'k']);
         $statuses = [];
         self::fakeHttp(static function () use (&$statuses): array {
             $statuses[] = session_status();

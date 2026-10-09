@@ -7,15 +7,17 @@ namespace Golovanov\Weft\Observability;
 use Golovanov\Weft\Assets\Vite;
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\Request;
+use Golovanov\Weft\Mail\Mail;
 use Golovanov\Weft\Security\Captcha;
 use Golovanov\Weft\Security\RateLimiter;
 
 /**
  * The report of `vendor/bin/weft-health`: whether the site can run in production.
  *
- * `ok` is false when logs or rate-limit counters cannot be written, PROXY_IPS is unusable, a
- * captcha or alerts lack their keys (outside DEBUG), `production` lists a setting for development
- * (unless the report is for development), or a check the site registered says so.
+ * `ok` is false when logs or rate-limit counters cannot be written, PROXY_IPS is unusable, the
+ * captcha, a listed alert channel or the app.mail settings lack something (outside DEBUG),
+ * `production` lists a setting for development (unless the report is for development), or a check
+ * the site registered says so.
  */
 final class Health
 {
@@ -65,8 +67,11 @@ final class Health
             'cache_enabled' => (bool) Config::get('app.cache.enabled', false),
             'captcha_enabled' => (bool) Config::get('app.captcha.enabled', false),
             'captcha_missing_keys' => Captcha::missingKeys(),
-            'alertloop_enabled' => (bool) Config::get('app.alertloop.enabled', false),
-            'alertloop_missing_keys' => Alert::missingKeys(),
+            'alert_channels' => Alert::channels(),
+            'alert_errors' => Alert::configErrors(),
+            'mail_driver' => (string) Config::get('app.mail.driver', 'mail'),
+            // Mail is in use when the site configures it; the mail alert channel checks it either way.
+            'mail_errors' => Config::get('app.mail') === null ? [] : Mail::configErrors(),
             'checks' => self::runChecks(),
         ];
 
@@ -77,7 +82,8 @@ final class Health
             && $report['proxy_ips_invalid'] === []
             && $report['proxy_ips_trust_all'] === []
             && ($report['captcha_missing_keys'] === [] || $debug)
-            && ($report['alertloop_missing_keys'] === [] || $debug)
+            && ($report['alert_errors'] === [] || $debug)
+            && ($report['mail_errors'] === [] || $debug)
             && ($report['production'] === [] || $dev)
             && !in_array(false, array_column($report['checks'], 'ok'), true);
 

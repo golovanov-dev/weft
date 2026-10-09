@@ -12,9 +12,9 @@ use Golovanov\Weft\Tests\TestCase;
 
 /**
  * The example's api/contact.php, run the way the Kernel runs an endpoint (required with $request
- * in scope, output captured). AlertLoop and Google answer through HttpClient's fake transport.
- * Not covered: a failing mail() (the transport is the PHP setup), the Location of the redirect
- * (the CLI keeps no headers) and the contact page itself.
+ * in scope, output captured). AlertLoop and Google answer through HttpClient's fake transport, the
+ * email goes to Mail's. Not covered: the Location of the redirect (the CLI keeps no headers) and the
+ * contact page itself.
  */
 final class ContactEndpointTest extends TestCase
 {
@@ -34,7 +34,7 @@ final class ContactEndpointTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        Config::set('app.contact', ['request_types' => ['question'], 'mail_to' => '', 'mail_from' => '']);
+        Config::set('app.contact', ['request_types' => ['question'], 'mail_to' => '']);
         $this->alerts = [];
         $alerts = &$this->alerts;
         $google = &$this->google;
@@ -49,7 +49,8 @@ final class ContactEndpointTest extends TestCase
 
     private function alertsOn(): void
     {
-        Config::set('app.alertloop', ['enabled' => true, 'base_url' => 'https://alerts.example', 'api_key' => 'k']);
+        Config::set('app.alerts.channels', ['alertloop']);
+        Config::set('app.alertloop', ['base_url' => 'https://alerts.example', 'api_key' => 'k']);
     }
 
     /** @return array<string, mixed> a submission that passes validation */
@@ -119,6 +120,48 @@ final class ContactEndpointTest extends TestCase
         $this->assertArrayNotHasKey('dedupe_key', $this->alerts[0]);
     }
 
+    /** Contact emails go to $address through Mail's fake transport, which answers $error; $this->sent collects them. */
+    private function mailTo(string $address, string $error = ''): void
+    {
+        Config::set('app.contact.mail_to', $address);
+        Config::set('app.mail', ['driver' => 'smtp', 'from' => 'noreply@site.test', 'smtp' => ['host' => 'smtp.site.test']]);
+        $this->sent = [];
+        $sent = &$this->sent;
+        self::fakeMail(static function (array $message) use (&$sent, $error): string {
+            $sent[] = $message;
+            return $error;
+        });
+    }
+
+    /** @var list<array<string, mixed>> */
+    private array $sent = [];
+
+    public function testRequestAcceptedByMailIsASuccessWithTheVisitorAsReplyTo(): void
+    {
+        $this->mailTo('owner@site.test, sales@site.test');
+
+        [$status, , $data] = $this->post($this->validForm());
+
+        $this->assertSame(200, $status);
+        $this->assertTrue($data['success']);
+        $this->assertCount(1, $this->sent);
+        $this->assertSame(['owner@site.test', 'sales@site.test'], $this->sent[0]['to']);
+        $this->assertStringContainsString("Reply-To: ann@example.com\r\n", $this->sent[0]['headers']);
+        $this->assertStringContainsString('Message: A question about Weft.', quoted_printable_decode($this->sent[0]['body']));
+    }
+
+    public function testRequestTheMailServerRefusedIsA503AndBothFailuresAreLogged(): void
+    {
+        $this->mailTo('owner@site.test', 'SMTP RCPT TO refused: 550 no such user');
+        $logOffset = self::errorLogSize();
+
+        [$status] = $this->post($this->validForm());
+
+        $this->assertSame(503, $status);
+        $log = self::errorLogSince($logOffset);
+        $this->assertStringContainsString('Mail not sent (smtp): SMTP RCPT TO refused: 550 no such user', $log);
+        $this->assertStringContainsString('Contact request not delivered', $log);
+    }
     /** 422 names the fields; the corrected form sent at once is not throttled by the failed one. */
     public function testInvalidFieldsAreNamedAndTheCorrectedRetryIsNotThrottled(): void
     {

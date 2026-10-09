@@ -192,17 +192,21 @@ HTTPS; the example uses it for the `Secure` flag of the session cookie. What to 
 a chain of proxies or Docker, and how to check it: [Deployment](/docs/deployment).
 
 The captcha is on when `app.captcha.enabled` is true and both keys are set; in this example the
-flag follows `RECAPTCHA_SECRETKEY`. While the flag is off, `verify()` returns a pass
-(`skipped => true`), so forms work in development without keys. With the flag on and a key
-missing, `verify()` records a `captcha.misconfigured` trace event and a line in the error log
-(`storage/logs/errors/`), then: with `DEBUG` on it passes, so the form works locally; with `DEBUG`
-off it fails with the error code `misconfigured` and sends a critical alert (category `security`),
-so in production every submission is rejected until both keys are set. `vendor/bin/weft-health`
-lists the missing keys under `captcha_missing_keys` and, with `DEBUG` off, fails.
-A rejection the visitor did not cause — Google unreachable (`request-failed`), the secret refused
-(`invalid-input-secret`), a token for a host not in `app.captcha.allowed_hosts` or for another
-action — records a `captcha.failed` trace event and a line in the error log with the reason. A low
-score records nothing.
+flag follows `CAPTCHA_SECRET_KEY`. `app.captcha.driver` picks the provider: `recaptcha` (Google
+reCAPTCHA v3, the default) or `smartcaptcha` (Yandex SmartCaptcha). Either way only the secret and
+the token go to the provider. reCAPTCHA is checked for score (`threshold`), action and host;
+SmartCaptcha has no score or action and is checked for host (`score` is 1.0 when it passes). While
+the flag is off, `verify()` returns a pass (`skipped => true`), so forms work in development without
+keys. With the flag on and a key missing (or an unknown driver), `verify()` records a
+`captcha.misconfigured` trace event and a line in the error log (`storage/logs/errors/`), then: with
+`DEBUG` on it passes, so the form works locally; with `DEBUG` off it fails with the error code
+`misconfigured` and sends a critical alert (category `security`), so in production every submission
+is rejected until both keys are set. `vendor/bin/weft-health` lists the missing keys under
+`captcha_missing_keys` and, with `DEBUG` off, fails. A rejection the visitor did not cause — the
+provider unreachable (`request-failed`), the secret refused (`invalid-input-secret`), a token for a
+host not in `app.captcha.allowed_hosts` or for another action — records a `captcha.failed` trace
+event and a line in the error log with the reason. A low score, or a SmartCaptcha token that failed
+(`invalid-input-response`, followed in `errorCodes` by Yandex's message), records nothing.
 
 `Csrf::check()`, `RateLimiter::honeypot()` and `Captcha::verify()` take the field as it came. A
 value that is not a string is a wrong CSRF token (`_csrf[]=…`) and no captcha token
@@ -213,24 +217,65 @@ Validation before the rate limit lets a visitor correct a field and send again a
 `api/contact.php` in this example for the complete flow: it answers the form's script with JSON
 (`422` lists the fields to correct as `errors: [{name, text}]`, `419` asks to refresh the page) and
 redirects a form posted without JavaScript back to the contact page with `?status=`. It answers
-success only when the request was delivered — AlertLoop accepted the alert or `mail()` sent the
-email to `MAIL_TO` — and `503` otherwise: where to see why, and where the message stays, is in
+success only when the request was delivered — the email to `MAIL_TO` was accepted or the alert
+reached a person — and `503` otherwise: where to see why, and where the message stays, is in
 [Deployment](/docs/deployment), "The contact form answers 503".
 
-## Alerts for sensitive spots
+### SmartCaptcha in this example
 
-In `app/Configs/app.php`, with `ALERTLOOP_BASE_URL` and `ALERTLOOP_API_KEY` set in
-`config/config.php` (see [Configuration](/docs/configuration)):
+This example's pages are written for reCAPTCHA. Setting `'driver' => 'smartcaptcha'` alone makes the
+form reject every request: the page still asks Google for a token, none comes, and the server gets
+an empty one. Change three files together:
+
+1. `components/layout.php` — inside `<?php if (Captcha::enabled()): ?>` at the end, replace the
+   `https://www.google.com/recaptcha/api.js` script with Yandex's:
+
+   ```html
+   <script src="https://smartcaptcha.yandexcloud.net/captcha.js" defer></script>
+   ```
+
+2. `pages/contact.php` — inside the `<form>`, replace `<input type="hidden" name="recaptcha_token">`
+   with the widget; it adds a hidden `smart-token` field with the token:
+
+   ```php
+   <?php if (Captcha::enabled()): ?>
+     <div class="smart-captcha" data-sitekey="<?= e(Captcha::siteKey()) ?>"></div>
+   <?php endif; ?>
+   ```
+
+3. `api/contact.php` — step 5 verifies the widget's field instead of `recaptcha_token`:
+
+   ```php
+   $captcha = Captcha::verify($field('smart-token'));
+   ```
+
+`data-recaptcha` on the form can stay: without Google's script the form's script skips the token
+step and posts the form with the widget's field.
+
+## Mail
 
 ```php
-'alertloop' => [
-    'enabled' => defined('ALERTLOOP_API_KEY') && ALERTLOOP_API_KEY !== '',
-    'base_url' => defined('ALERTLOOP_BASE_URL') ? ALERTLOOP_BASE_URL : '',
-    'api_key' => defined('ALERTLOOP_API_KEY') ? ALERTLOOP_API_KEY : '',
-    'source' => 'weft-docs',   // your site's name in AlertLoop
-    'timeout' => 4,            // seconds a send waits for AlertLoop
-],
+use Golovanov\Weft\Mail\Mail;
+
+$sent = Mail::send('owner@site.test', 'New order', "Order 42\nTotal: 100", replyTo: $customerEmail);
 ```
+
+Plain-text email in UTF-8, sent by `app.mail.driver` ([Configuration](/docs/configuration), "Mail"):
+`mail` hands it to PHP `mail()`, `smtp` talks to the server in `app.mail.smtp` (STARTTLS on 587 or
+TLS on 465, certificate verified, AUTH PLAIN or LOGIN). `send()` returns `true` when the driver
+accepted the message — `mail()` returned `true`, or the SMTP server answered `250` — which is not
+yet delivery to the mailbox. It never throws: a message that is not sent leaves a line
+`Mail not sent (<driver>): <reason>` in `errors/` and returns `false`. Addresses are plain
+(`name@site.test`); one with a line break or a display name is refused, and a line break in the
+subject becomes a space, so neither can add a header. The trace gets a `mail_out` event with the
+driver, number of recipients, size and outcome — never the subject, the body or an address.
+
+With `smtp` the whole exchange, connecting included, waits at most `app.mail.smtp.timeout` seconds
+(default 10), except the TLS handshake, which has a limit of its own: with `ssl` or `starttls` up to
+twice the timeout. Looking up `SMTP_HOST` in DNS comes on top and no timeout bounds it. With `mail`
+it waits as long as the local sendmail takes.
+
+## Alerts for sensitive spots
 
 ```php
 use Golovanov\Weft\Observability\Alert;
@@ -240,28 +285,45 @@ Alert::critical('Payment webhook failed', ['order' => $id]);
 Alert::send('Captcha rejected', Alert::WARNING, dedupeKey: 'captcha-rejected', category: 'security');
 ```
 
-Events go to [AlertLoop](https://github.com/golovanov-dev/alertloop) (`POST /v1/events`). `$context`
-is sent as the event's `payload`, the current trace id travels as the top-level `trace_id`, and
-`$type` is an AlertLoop event type (`incident`, `business_event`, `audit`) — use `category` for your
-own labels.
+An alert goes to every channel listed in `app.alerts.channels`, in that order
+([Configuration](/docs/configuration), "Alerts"):
 
-Delivery is synchronous and best-effort: a send waits for AlertLoop up to `app.alertloop.timeout`
-seconds, nothing is retried and no failure reaches your code. An alert with a dedupe key also waits
-for the counter store that keeps its window (below): with Redis, 1 second at most for each of its
-two commands, plus, when this request has not connected to Redis yet, 2 seconds to connect and 1 for
-each of `AUTH`, `SELECT` and `PING`. So a send takes at most `app.alertloop.timeout` + 7 seconds. It is not silent, though — a delivery
-that fails is recorded on the request trace as an `alert.failed` event (status, transport flag, event
-type and category; never the alert body).
+| Channel | Where | Settings |
+|---|---|---|
+| `alertloop` | [AlertLoop](https://github.com/golovanov-dev/alertloop), `POST /v1/events` | `app.alertloop.*` |
+| `telegram` | a message from your bot to a chat | `app.alerts.telegram.bot_token`, `chat_id` |
+| `mail` | an email through `Mail` | `app.alerts.mail_to`, `app.mail.*` |
+| `log` | a line in `errors/`; reaches nobody | — |
+
+No channels, no alerts. `send()` returns `true` when a channel that reaches a person (`alertloop`,
+`telegram`, `mail`) took the alert; `log` alone always gives `false`. For AlertLoop, `$context` is
+the event's `payload`, the current trace id is the top-level `trace_id`, and `$type` is an AlertLoop
+event type (`incident`, `business_event`, `audit`) — use `category` for your own labels. Telegram and
+mail get the message, type, category, site, trace id and `$context` as text. The `log` line has the
+severity, type, category and message, without `$context`.
+
+Delivery is synchronous and best-effort: nothing is retried and no failure reaches your code.
+Channels are tried one after another, so a send waits for each in turn: `alertloop` up to
+`app.alertloop.timeout` seconds, `telegram` up to 4, `mail` up to twice `app.mail.smtp.timeout` with
+the `smtp` driver and TLS, plus the DNS lookup (see "Mail"; with `mail`, as long as the local sendmail
+takes). An alert with a dedupe key also
+waits for the counter store that keeps its window (below): with Redis, 1 second at most for each of
+its two commands, plus, when this request has not connected to Redis yet, 2 seconds to connect and 1
+for each of `AUTH`, `SELECT` and `PING` — 7 seconds more at most. It is not silent, though — a
+channel that fails is recorded on the request trace as an `alert.failed` event (channel, status,
+transport flag, event type and category; never the alert body, never the bot token). A listed
+channel without its settings is skipped and the error log says so once per request.
 
 An alert with a dedupe key is sent once per five minutes: a repeat within that window is dropped
 locally and `send()` returns `false`, so an error hit on every request does not make every request
-wait for AlertLoop. The window opens when a send starts and is dropped when delivery fails, so the
-next repeat tries again. It is kept where rate-limit counters are (Redis or files); if that store
-fails, the alert is sent. Alerts without a dedupe key, such as `business_event`, are always sent.
+wait for the channels. The window opens when a send starts and is dropped unless a channel that
+reaches a person took the alert (or `log` is the only channel), so the next repeat tries again. It
+is kept where rate-limit counters are (Redis or files); if that store fails, the alert is sent.
+Alerts without a dedupe key, such as `business_event`, are always sent.
 
 Unhandled exceptions and fatals alert automatically. For an exception thrown by a page or an API
 endpoint the 500 response goes out first and the alert after it, so under PHP-FPM the visitor does
-not wait for AlertLoop. A database error your code does not catch takes the same path: the alert
+not wait for the channels. A database error your code does not catch takes the same path: the alert
 reads `Unhandled exception: Database query failed` (or `Database connection error`), and the MySQL
 message is only in `errors/`.
 
@@ -360,21 +422,21 @@ are left out on purpose — preloading them would undo the code split.
 
 `vendor/bin/weft-health`, run in the site root, prints a JSON report and exits with 1 when the site
 is not ready to serve: logs or rate-limit counters PHP cannot write, an unusable `PROXY_IPS`, a
-captcha or alerts without their keys, development settings (`DEBUG`, example.com, no built assets),
+captcha, an alert channel or mail without its settings, development settings (`DEBUG`, example.com, no built assets),
 or a failed check of the site. What each field means: [Deployment](/docs/deployment), "What
 `weft-health` checks".
 
 The engine cannot know what your site needs, so the site adds its own checks in `app/Bootstrap.php`.
 A check returns the fields to show and `ok`; anything but `ok => true`, or an exception, fails the
 report. A minimal check that a contact form has a channel (this example's
-`App\Bootstrap::contactForm()` also fails on example.com addresses and on a `mail()` PHP cannot
-call):
+`App\Bootstrap::contactForm()` also fails on example.com addresses, on mail settings that cannot
+send and on a `mail()` PHP cannot call):
 
 ```php
 Health::check('contact_form', static function (): array {
     $mailTo = (string) Config::get('app.contact.mail_to', '');
-    $alertloop = (bool) Config::get('app.alertloop.enabled', false);
-    return ['ok' => $mailTo !== '' || $alertloop, 'mail_to' => $mailTo, 'alertloop' => $alertloop];
+    $alerts = Alert::deliveryChannels();   // listed, set up, and reaching a person
+    return ['ok' => $mailTo !== '' || $alerts !== [], 'mail_to' => $mailTo, 'alert_channels' => $alerts];
 });
 ```
 

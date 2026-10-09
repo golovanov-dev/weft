@@ -13,14 +13,16 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
 /**
- * verify(): the three ways it answers without calling Google (captcha off, a key missing in
- * DEBUG, the same outside DEBUG) and its decision on Google's answer. HttpClient's transport is
- * a closure: alerts are captured, Google answers with $this->google. The error log is the default
+ * verify(): the three ways it answers without calling the provider (captcha off, a key missing in
+ * DEBUG, the same outside DEBUG) and its decision on Google's or Yandex's answer. HttpClient's
+ * transport is a closure: alerts are captured, the provider answers with $this->google. The error log is the default
  * one in the system temp directory (LOGS_PATH is not defined).
  */
 final class CaptchaTest extends TestCase
 {
     private const VERIFY_URL = 'https://www.google.com/recaptcha/api/siteverify';
+
+    private const YANDEX_URL = 'https://smartcaptcha.yandexcloud.net/validate';
 
     /** @var list<array<string, mixed>> */
     private array $alerts = [];
@@ -34,14 +36,15 @@ final class CaptchaTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        Config::set('app.alertloop', ['enabled' => true, 'base_url' => 'https://alerts.example', 'api_key' => 'k']);
+        Config::set('app.alerts.channels', ['alertloop']);
+        Config::set('app.alertloop', ['base_url' => 'https://alerts.example', 'api_key' => 'k']);
         $this->alerts = [];
         $this->verifications = [];
         $alerts = &$this->alerts;
         $verifications = &$this->verifications;
         $google = &$this->google;
         self::fakeHttp(static function (array $request) use (&$alerts, &$verifications, &$google): array {
-            if ($request['url'] === self::VERIFY_URL) {
+            if (in_array($request['url'], [self::VERIFY_URL, self::YANDEX_URL], true)) {
                 $verifications[] = $request;
                 return $google;
             }
@@ -267,5 +270,74 @@ final class CaptchaTest extends TestCase
         $this->assertCount(1, $events);
         $this->assertSame(['errorCodes', 'hostOk', 'actionOk', 'host'], array_keys($events[0]['data']));
         $this->assertStringContainsString('Captcha rejected a submission: ' . $reason, $log);
+    }
+
+    /** @param array<string, mixed> $response what Yandex answers: body (array: JSON), status, error */
+    private function yandexAnswers(array $response): void
+    {
+        Config::set('app.captcha', [
+            'enabled' => true,
+            'driver' => 'smartcaptcha',
+            'site_key' => 'site',
+            'secret_key' => 'secret',
+            'allowed_hosts' => ['example.com'],
+        ]);
+        if (is_array($response['body'] ?? null)) {
+            $response['body'] = (string) json_encode($response['body']);
+        }
+        $this->google = $response;
+    }
+
+    /** Yandex gets the secret and the token, nothing else: no IP, no form fields. */
+    public function testSmartCaptchaPassesAndSendsOnlyTheSecretAndTheToken(): void
+    {
+        $this->yandexAnswers(['body' => ['status' => 'ok', 'message' => '', 'host' => 'example.com']]);
+
+        $result = Captcha::verify('t0ken', 'contact');
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(1.0, $result['score']);
+        $this->assertSame(self::YANDEX_URL, $this->verifications[0]['url']);
+        $this->assertSame('secret=secret&token=t0ken', $this->verifications[0]['body']);
+    }
+
+    /**
+     * @return iterable<string, array{array<string, mixed>, list<string>, string}>
+     */
+    public static function smartCaptchaRejections(): iterable
+    {
+        yield 'token failed' => [['body' => ['status' => 'failed', 'message' => 'Token invalid or expired.', 'host' => '']], ['invalid-input-response', 'Token invalid or expired.'], ''];
+        yield 'foreign host' => [['body' => ['status' => 'ok', 'host' => 'evil.example']], [], 'host "evil.example" is not in app.captcha.allowed_hosts'];
+        // How Yandex answers a wrong secret: HTTP 200, status failed (its validation docs).
+        yield 'secret refused' => [['body' => ['status' => 'failed', 'message' => 'Authentication failed. Secret has not provided.']], ['invalid-input-secret'], 'Yandex refused the secret key'];
+        yield 'secret refused with 403' => [['status' => 403, 'body' => ['status' => 'failed', 'message' => 'Forbidden']], ['invalid-input-secret'], 'Yandex refused the secret key'];
+        yield 'unreachable' => [['body' => false, 'error' => 'Could not resolve host: smartcaptcha.yandexcloud.net'], ['request-failed'], 'Could not resolve host: smartcaptcha.yandexcloud.net'];
+    }
+
+    /**
+     * @param array<string, mixed> $response
+     * @param list<string> $errorCodes
+     */
+    #[DataProvider('smartCaptchaRejections')]
+    public function testSmartCaptchaRejectionIsDiagnosedLikeRecaptcha(array $response, array $errorCodes, string $reason): void
+    {
+        $traceId = Trace::boot();
+        $this->yandexAnswers($response);
+        $logOffset = self::errorLogSize();
+
+        $result = Captcha::verify('token', 'contact');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame($errorCodes, $result['errorCodes']);
+        $this->assertFailureRecorded($traceId, $logOffset, $reason);
+    }
+
+    public function testUnknownDriverIsMisconfigured(): void
+    {
+        Config::set('app.captcha', ['enabled' => true, 'driver' => 'hcaptcha', 'site_key' => 'site', 'secret_key' => 'secret']);
+
+        $this->assertSame(['driver'], Captcha::missingKeys());
+        $this->assertSame(['misconfigured'], Captcha::verify('token')['errorCodes']);
+        $this->assertSame([], $this->verifications);
     }
 }

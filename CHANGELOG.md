@@ -47,21 +47,36 @@ pre-1.0 the API may change between minor versions.
 
 ### Added
 
+- `Mail::send($to, $subject, $body, $replyTo)` sends a plain-text UTF-8 email through PHP `mail()`
+  or an SMTP server (`app.mail.driver` `mail` or `smtp`; `app.mail.from`, `from_name`, and
+  `app.mail.smtp.host`, `port`, `encryption` — `starttls`, `ssl` or `none` — `username`, `password`,
+  `timeout`), with no extra package. It returns `false` and writes `Mail not sent` to `errors/`
+  instead of throwing, refuses an address with a line break, and traces a `mail_out` event without
+  the subject, body or addresses.
+- Alert channels: `app.alerts.channels` lists any of `alertloop`, `telegram` (a bot message,
+  `app.alerts.telegram.bot_token` and `chat_id`), `mail` (an email to `app.alerts.mail_to` through
+  `Mail`) and `log` (a line in `errors/`), tried in order. `alert.failed` trace events name the
+  `channel`. `Alert::channels()`, `Alert::deliveryChannels()` and `Alert::configErrors()` tell what is
+  set up.
+- Yandex SmartCaptcha: `app.captcha.driver` `smartcaptcha` verifies its tokens with the same keys and
+  the same diagnostics as reCAPTCHA (`recaptcha`, the default); only the secret and the token are
+  sent to Yandex, and the host is checked against `allowed_hosts`. The page loads Yandex's widget
+  itself: in the example that means changing three files, listed in the features guide.
 - `vendor/bin/weft-health`, run in the site root, prints the health report of the site it boots
   (through the site's `bootstrap.php`) and exits with 1 (`ok: false`) when logs or rate-limit
   counters cannot be written (`errors/` and the site's `requests/` under `LOGS_PATH`, though the
   command runs from the console, with today's files and traceloom's lock file; the counter directory
   or a file in it; with Redis, a probe write), when counters went to files while `app.cache.driver`
   is `redis`, when `PROXY_IPS` is not an array or has an entry that is invalid or too wide for a
-  proxy (`/0`, IPv4 wider than `/8`, IPv6 wider than `/16`), outside `DEBUG` when a captcha or
-  alerts are enabled without their keys, when `production` names a development setting (`DEBUG`,
+  proxy (`/0`, IPv4 wider than `/8`, IPv6 wider than `/16`), outside `DEBUG` when the captcha, a
+  listed alert channel or `app.mail` lacks a setting, when `production` names a development setting (`DEBUG`,
   `DEV_MODE`, `config/config.example.php` loaded, `app.url.base` or, with the captcha on,
   `app.captcha.allowed_hosts` on example.com, no built `app.vite.entry` in the Vite manifest) unless
   run with `--dev`, and when a check of the site fails. New fields: `config` (the environment config
   loaded), `production`, `checks`, `cache_driver`, `rate_limit_store`, `rate_limit_path`,
   `rate_limit_writable`, `rate_limit_error`, `proxy_ips_error`, `proxy_ips_invalid`,
-  `proxy_ips_trust_all`, `captcha_missing_keys`, `alertloop_missing_keys`, `logs_error`. Engine
-  side: `Captcha::missingKeys()`, `Alert::missingKeys()`, `ErrorHandler::logsError()`,
+  `proxy_ips_trust_all`, `captcha_missing_keys`, `alert_channels`, `alert_errors`, `mail_driver`,
+  `mail_errors`, `logs_error`. Engine side: `Captcha::missingKeys()`, `Alert::configErrors()`, `ErrorHandler::logsError()`,
   `RateLimiter::storeStatus()`, `Request::invalidProxyIps()`, `Request::trustAllProxyIps()`,
   `Request::proxyIpsError()`, `Vite::manifestError()`.
 - `Health::check($name, $check)` adds a check of the site to `weft-health`: register it in
@@ -83,8 +98,8 @@ pre-1.0 the API may change between minor versions.
 - The health check moved from the example's `scripts/health.php` into the engine:
   `vendor/bin/weft-health`, run in the site root. Delete your copy of `scripts/health.php` and call
   `vendor/bin/weft-health` from deploy scripts, CI and cron (`--dev` on a development machine). The
-  report no longer has the `traceloom` field, which was always `true`: if you parse the output, stop
-  reading it. `ok` is now false on a server with development settings: fix what `production` names.
+  report no longer has the `traceloom` field, which was always `true`, nor `alertloop_enabled`: if you
+  parse the output, stop reading them (alerts are in `alert_channels`). `ok` is now false on a server with development settings: fix what `production` names.
 - Weft requires `golovanov/traceloom` `^0.5`. If your site's `composer.json` requires traceloom
   itself, raise that constraint to `^0.5` too, or Composer cannot install Weft 0.2.0.
 - Each page has one address: a GET or HEAD request for `/about/` gets a 301 to `/about`, `/home`
@@ -116,12 +131,15 @@ pre-1.0 the API may change between minor versions.
   needs a CSRF token (`Csrf`), so readers get no `PHPSESSID` cookie and no no-cache headers PHP
   sent with the session. If your site copied this file, remove the line too; if you relied on those
   headers, send `Cache-Control` yourself.
-- `Alert` reads its settings only from `app.alertloop.*`, the `'alertloop'` block of
-  `app/Configs/app.php`, as documented; it read a top-level `alertloop.*`, so alerts configured as
-  documented were silently off. If you have `app/Configs/alertloop.php`, move its array into
-  `app.php` under `'alertloop'` and delete the file; if your settings are already in `app.php`,
-  alerts start being sent after the upgrade. Alerts enabled without `base_url` or `api_key` still
-  send nothing, and now say so in the error log, once per request.
+- Alerts are switched on by the new `app.alerts.channels` list alone; `app.alertloop.enabled` is
+  gone, and without `channels` no alert is sent. To keep AlertLoop alerts, add
+  `'alerts' => ['channels' => ['alertloop']]` to `app/Configs/app.php` and delete `'enabled'` from
+  its `'alertloop'` block. `Alert` reads AlertLoop's settings only from that block (`app.alertloop.*`),
+  as documented; it read a top-level `alertloop.*`, so alerts configured as documented were silently
+  off: if you have `app/Configs/alertloop.php`, move its array into `app.php` under `'alertloop'` and
+  delete the file. A listed channel without its settings sends nothing and says so in the error log,
+  once per request. `Alert::send()` returns `true` only when a channel that reaches a person took the
+  alert.
 - Console scripts (`cli` and `phpdbg` SAPIs: `scripts/*.php`, cron jobs) write traces to
   `LOGS_PATH/cli/`, not `LOGS_PATH/requests/`, which is now the site's alone (PHP's built-in server
   counts as the site); `app.trace.retention_days` applies to both. To read a script's trace, use
@@ -156,15 +174,25 @@ pre-1.0 the API may change between minor versions.
   not sent and `Alert::send()` returns `false`; a failed delivery does not open the window. The
   window is kept with the rate-limit counters, and if that store fails the alert is sent. Where
   every occurrence must arrive, send the alert without a dedupe key.
-- The example's contact form answers success only when the request was delivered: AlertLoop
-  accepted the alert or `mail()` sent the email to `MAIL_TO`. Otherwise it answers 503 with a
+- The example's contact form answers success only when the request was delivered: the email to
+  `MAIL_TO` was accepted or the alert reached a person. Otherwise it answers 503 with a
   message for the visitor and writes `Contact request not delivered` to `errors/`; a failed
   `mail()` writes a line too. A 422 lists the fields as `errors: [{name, text}]` (was `fields`),
   the rate limit counts after validation, and a form posted without JavaScript is redirected (303)
   to the contact page with `?status=`. If your site copied the form, copy `api/contact.php`,
   `app/Services/ContactService.php`, `pages/contact.php`, `frontend/src/contact.js` and the
-  `status` strings of `lang/en/contact.php`, and set `MAIL_TO` or AlertLoop, or every submission
-  answers 503.
+  `status` strings of `lang/en/contact.php`, and set `MAIL_TO` or an alert channel, or every
+  submission answers 503.
+- The example's environment constants: `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` are now
+  `CAPTCHA_SITE_KEY` and `CAPTCHA_SECRET_KEY`; new are `MAIL_DRIVER` and `SMTP_*` (email) and
+  `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ALERT_MAIL_TO` (alert channels); the sender moved from
+  `app.contact.mail_from` to `app.mail.from` (still `MAIL_FROM`). If your `config/config.php` came
+  from the template, rename the two captcha constants and add the new ones from
+  `config/config.example.php`; with the old names and the new `app.php` the captcha is off. If your
+  site copied `app.php`, take its `'captcha'`, `'mail'`, `'alerts'` and `'contact'` blocks.
+  `MAIL_TO` takes plain addresses, several separated by commas; `Name <owner@site>`, which `mail()`
+  accepted, now fails every contact email (and `weft-health`, when no alert channel reaches a
+  person): write the bare address.
 - `Database` sends no alert, and `Database::setErrorNotifier()` and `Alert::notifier()` are removed:
   a database error nobody catches alerts as any unhandled exception does, once per five minutes, with
   the MySQL message only in `errors/`. Remove

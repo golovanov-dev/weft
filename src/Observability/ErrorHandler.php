@@ -13,7 +13,7 @@ use Golovanov\Weft\Support\Clock;
  * Central error/exception handler.
  *
  * Writes human-readable lines to LOGS_PATH/errors/YYYY-mm-dd.log and, for exceptions and
- * fatal errors, raises an AlertLoop notification (sensitive spot). Registered once in bootstrap;
+ * fatal errors, raises an alert (sensitive spot). Registered once in bootstrap;
  * the Kernel reports exceptions thrown by pages and endpoints through report().
  */
 final class ErrorHandler

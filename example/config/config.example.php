@@ -40,18 +40,30 @@ define('REDIS_PORT', 6379);
 define('REDIS_DB', 0);
 define('REDIS_PASSWORD', '');
 
-// --- Google reCAPTCHA v3 (see app.captcha.enabled) ---------------------------------------
-define('RECAPTCHA_SITEKEY', '');
-define('RECAPTCHA_SECRETKEY', '');
+// --- Captcha (see app.captcha): reCAPTCHA v3 keys, or SmartCaptcha keys with driver 'smartcaptcha'
+define('CAPTCHA_SITE_KEY', '');
+define('CAPTCHA_SECRET_KEY', '');
 
-// --- AlertLoop (notifications for sensitive spots) ---------------------------------------
+// --- Email (app.mail): 'mail' hands messages to PHP mail(), 'smtp' sends through SMTP_HOST ------
+define('MAIL_DRIVER', 'mail');
+define('MAIL_FROM', 'noreply@example.com');   // sender of every email; use your own domain
+define('SMTP_HOST', '');                      // e.g. smtp.yandex.ru
+define('SMTP_PORT', 587);                     // 587 with starttls, 465 with ssl: change both together
+define('SMTP_ENCRYPTION', 'starttls');        // starttls (port 587), ssl (port 465) or none
+define('SMTP_USERNAME', '');                  // '' sends without AUTH
+define('SMTP_PASSWORD', '');
+
+// --- Contact form: requests are emailed to MAIL_TO; '' sends no email -------------------------
+// The form answers success only when this email was accepted or an alert reached a person.
+define('MAIL_TO', 'hello@example.com');       // plain addresses, several separated by commas
+
+// --- Alerts (app.alerts): a channel is on when its constants are set -----------------------
 define('ALERTLOOP_BASE_URL', '');   // e.g. https://alerts.example.com
-define('ALERTLOOP_API_KEY', '');    // setting it enables alerts; needs ALERTLOOP_BASE_URL too
-
-// --- Contact form email via PHP mail(): set your own addresses; '' sends no email ------------
-// The form answers success only when this email or the AlertLoop alert went out.
-define('MAIL_TO', 'hello@example.com');
-define('MAIL_FROM', 'noreply@example.com');
+define('ALERTLOOP_API_KEY', '');
+define('TELEGRAM_BOT_TOKEN', '');   // from @BotFather
+define('TELEGRAM_CHAT_ID', '');     // a number: message the bot, then see chat.id in getUpdates (Configuration)
+define('ALERT_MAIL_TO', '');        // alert emails, sent with the email settings above; every contact
+                                    // request comes here too, so not the MAIL_TO address
 
 // --- JWT (optional — verifying access tokens) --------------------------------------------
 define('AUTH_JWT_KEY', '');
