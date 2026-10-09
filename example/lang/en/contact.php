@@ -17,6 +17,12 @@ return [
             'project_url' => 'Related URL',
             'submit' => 'Send',
         ],
+        'status' => [
+            'sent' => 'Thanks — your message has been sent.',
+            'invalid' => 'Please correct these fields and send the form again: {fields}.',
+            'expired' => 'Your session had expired. Please send the form again.',
+            'error' => 'Your message was not sent. Please try again later.',
+        ],
         'types' => [
             'question' => 'Question',
             'bug' => 'Bug report',

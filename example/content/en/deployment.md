@@ -30,6 +30,7 @@ composer install --no-dev --optimize-autoloader
 # 3. Real environment
 cp config/config.example.php config/config.php
 #    DEBUG=false, DEV_MODE=false, BASE_URI='', APP_TIMEZONE, plus any keys you use;
+#    MAIL_TO (your inbox) and MAIL_FROM (an address of your domain) for the contact form;
 #    in app/Configs/app.php set app.url.base to your https domain
 
 # 4. Frontend (here or in CI)
@@ -322,6 +323,26 @@ first request after an engine update already deletes older files: set the key be
 need them.
 `errors/` is not cleaned up: rotate it at the OS level.
 
+### The contact form answers 503
+
+`503` means neither AlertLoop nor `mail()` took the request. Each one leaves `Contact request not
+delivered` in `storage/logs/errors/`, ending with `trace:<id>`. A line with the same trace id,
+`Contact email to … not sent: mail() failed`, means PHP could not hand the email to the server's
+mail transport (`sendmail_path` in `php.ini`, or your host's mail setup); with `MAIL_TO` empty there
+is no such line. Why AlertLoop did not take it is in the `alert.failed` event of that trace:
+`status` `401` is a key AlertLoop refuses, `0` with `transport_error: true` is AlertLoop not reached.
+`eventtrace show` lists the event without these fields, so read the raw line:
+
+```bash
+grep -h '<trace_id>' storage/logs/requests/*.jsonl | grep alert.failed
+```
+
+No `alert.failed` event means AlertLoop is off or lacks a key: see `alertloop_enabled` and
+`alertloop_missing_keys` in `php scripts/health.php`. To fix it, set `MAIL_TO` on a server where
+`mail()` works, or `ALERTLOOP_BASE_URL` and `ALERTLOOP_API_KEY` (see
+[Configuration](/docs/configuration)). The visitor's message stays in the `request_start` event of
+the same trace, among the form fields; with `app.trace.log_body` set to `false` it is kept nowhere.
+
 ## Checklist
 
 - [ ] `DEBUG=false`, `DEV_MODE=false`
@@ -339,6 +360,9 @@ need them.
   address send nothing — `health.php` lists the missing keys under `captcha_missing_keys` and
   `alertloop_missing_keys`
 - [ ] `app.captcha.allowed_hosts` lists your real domain, if the captcha is on
+- [ ] the contact form has a channel: `MAIL_TO` with a working `mail()`, or AlertLoop; otherwise every
+  submission answers 503 and leaves `Contact request not delivered` in `storage/logs/errors/` (see
+  "The contact form answers 503" above)
 - [ ] `sudo -u www-data sh -c 'umask 002; php scripts/health.php'` (your PHP user) → `ok: true`
 
 That is the whole engine. If something is missing from these docs, please

@@ -1,7 +1,7 @@
 /**
- * Progressive-enhancement contact form: posts JSON via fetch, shows inline status, and (when
- * enabled) fetches a fresh reCAPTCHA v3 token right before submit. Falls back to a normal POST
- * if JS is unavailable.
+ * Progressive-enhancement contact form: posts via fetch, asks for JSON, shows inline status, marks
+ * the fields the server rejected, and (when enabled) fetches a fresh reCAPTCHA v3 token right
+ * before submit. Without JS the form is a normal POST and the server redirects back to the page.
  */
 export function initContactForm() {
   const form = document.querySelector('.contact-form');
@@ -15,6 +15,7 @@ export function initContactForm() {
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     setStatus('');
+    markInvalid([]);
 
     if (useRecaptcha && window.grecaptcha) {
       try {
@@ -45,7 +46,10 @@ export function initContactForm() {
         form.reset();
         setStatus(data.message || 'Sent.', 'success');
       } else {
-        setStatus(data.error || 'Something went wrong. Please try again.', 'error');
+        const errors = Array.isArray(data.errors) ? data.errors : [];
+        markInvalid(errors);
+        const text = [data.error, ...errors.map((e) => e.text)].filter(Boolean).join(' ');
+        setStatus(text || 'Something went wrong. Please try again.', 'error');
       }
     } catch {
       setStatus('Network error. Please try again.', 'error');
@@ -53,6 +57,12 @@ export function initContactForm() {
       button.disabled = false;
     }
   });
+
+  function markInvalid(errors) {
+    form.querySelectorAll('[aria-invalid]').forEach((el) => el.removeAttribute('aria-invalid'));
+    errors.forEach(({ name }) => form.elements.namedItem(name)?.setAttribute('aria-invalid', 'true'));
+    if (errors.length) form.elements.namedItem(errors[0].name)?.focus();
+  }
 
   function setStatus(text, kind = '') {
     if (!status) return;

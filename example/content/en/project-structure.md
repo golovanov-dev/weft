@@ -131,8 +131,8 @@ global helpers available: `e()`, `t()`, `url()`, `asset()`, `seo()`, `config()`,
 pages/contact.php                markup only
         │  POST
         ▼
-api/contact.php                  thin: honeypot → CSRF → rate limit → validation → captcha
-        │                              → call the service → return JSON
+api/contact.php                  thin: honeypot → CSRF → validation → rate limit → captcha
+        │                              → call the service → JSON, or a redirect without JS
         ▼
 app/Services/ContactService.php  the actual work: trace, alert, deliver
 ```

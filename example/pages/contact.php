@@ -10,6 +10,18 @@ Seo::set([
 ]);
 
 $types = config('app.contact.request_types', []);
+
+// Without JavaScript the endpoint redirects back here with ?status=… (and ?fields=… to correct).
+$status = is_string($request->query['status'] ?? null) ? $request->query['status'] : '';
+$statusText = '';
+if (in_array($status, ['sent', 'invalid', 'expired', 'error'], true)) {
+    $fields = is_string($request->query['fields'] ?? null) ? explode(',', $request->query['fields']) : [];
+    $labels = [];
+    foreach (array_intersect(['name', 'email', 'type', 'message'], $fields) as $name) {
+        $labels[] = t('contact.form.' . $name);
+    }
+    $statusText = t('contact.status.' . $status, ['fields' => implode(', ', $labels)]);
+}
 ?>
 
 <section class="page-hero">
@@ -52,7 +64,7 @@ $types = config('app.contact.request_types', []);
 
       <div class="field">
         <label for="message"><?= t('contact.form.message') ?> *</label>
-        <textarea id="message" name="message" rows="6" required maxlength="4000"></textarea>
+        <textarea id="message" name="message" rows="6" required minlength="10" maxlength="4000"></textarea>
       </div>
 
       <div class="field">
@@ -62,7 +74,7 @@ $types = config('app.contact.request_types', []);
 
       <input type="hidden" name="recaptcha_token" value="">
       <button class="btn btn-primary" type="submit"><?= t('contact.form.submit') ?></button>
-      <p class="form-status" role="status" aria-live="polite"></p>
+      <p class="form-status<?= $statusText === '' ? '' : ($status === 'sent' ? ' is-success' : ' is-error') ?>" role="status" aria-live="polite"><?= e($statusText) ?></p>
     </form>
   </div>
 </section>

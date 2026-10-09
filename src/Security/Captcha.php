@@ -17,8 +17,10 @@ use Golovanov\Weft\Observability\Trace;
  * working in development without keys. When it is true but the site key or the secret key is
  * empty, verify() records a `captcha.misconfigured` trace event and a line in the error log
  * either way; with DEBUG on it then passes, otherwise it fails with `misconfigured` and sends a
- * security alert (deduplicated by key). The frontend obtains a token with the site key and posts
- * it as `recaptcha_token`; the backend verifies score/action/hostname here.
+ * security alert (deduplicated by key). A rejection a bot does not cause — Google unreachable, the
+ * secret refused, a token for another host or action — records a `captcha.failed` trace event and
+ * a line in the error log. The frontend obtains a token with the site key and posts it as
+ * `recaptcha_token`; the backend verifies score/action/hostname here.
  */
 final class Captcha
 {
@@ -54,9 +56,10 @@ final class Captcha
     }
 
     /**
+     * @param mixed $token the posted field as it came; a value that is not a string (`recaptcha_token[]=…`) is no token
      * @return array{ok: bool, success: bool, score: float, hostOk: bool, actionOk: bool, errorCodes: array<int, string>, skipped: bool}
      */
-    public static function verify(string $token, string $expectedAction = 'submit'): array
+    public static function verify(mixed $token, string $expectedAction = 'submit'): array
     {
         $result = [
             'ok' => false,
@@ -83,7 +86,7 @@ final class Captcha
             return $result;
         }
 
-        if ($token === '') {
+        if (!is_string($token) || $token === '') {
             $result['errorCodes'] = ['missing-input-response'];
             return $result;
         }
@@ -101,6 +104,7 @@ final class Captcha
         $data = is_array($response['body']) ? $response['body'] : [];
         if (!$response['ok'] || $data === []) {
             $result['errorCodes'] = ['request-failed'];
+            self::reportFailed($result, '', $response['error'] !== '' ? (string) $response['error'] : 'Google sent no verification result');
             return $result;
         }
 
@@ -115,7 +119,32 @@ final class Captcha
         $result['errorCodes'] = is_array($data['error-codes'] ?? null) ? $data['error-codes'] : [];
         $result['ok'] = $result['success'] && $result['hostOk'] && $result['actionOk'] && $result['score'] >= $threshold;
 
+        if (in_array('invalid-input-secret', $result['errorCodes'], true)) {
+            self::reportFailed($result, $host, 'Google refused the secret key');
+        } elseif ($result['success'] && !$result['hostOk']) {
+            self::reportFailed($result, $host, 'host "' . $host . '" is not in app.captcha.allowed_hosts');
+        } elseif ($result['success'] && !$result['actionOk']) {
+            self::reportFailed($result, $host, 'action "' . (string) ($data['action'] ?? '') . '" is not "' . $expectedAction . '"');
+        }
+
         return $result;
+    }
+
+    /**
+     * A rejection caused by the setup or by Google rather than by the visitor: every submission
+     * fails the same way until it is fixed, so the reason goes to the trace and the error log.
+     *
+     * @param array{errorCodes: array<int, string>, hostOk: bool, actionOk: bool} $result
+     */
+    private static function reportFailed(array $result, string $host, string $reason): void
+    {
+        Trace::event('captcha.failed', [
+            'errorCodes' => $result['errorCodes'],
+            'hostOk' => $result['hostOk'],
+            'actionOk' => $result['actionOk'],
+            'host' => $host,
+        ]);
+        ErrorHandler::log('captcha', 500, 'Captcha rejected a submission: ' . $reason, __FILE__, __LINE__);
     }
 
     /**

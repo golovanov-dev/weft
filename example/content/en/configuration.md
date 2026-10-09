@@ -55,8 +55,8 @@ define('RECAPTCHA_SECRETKEY', '');  // secret key → verification; setting it e
 define('ALERTLOOP_BASE_URL', '');   // e.g. https://alerts.example.com
 define('ALERTLOOP_API_KEY', '');    // setting it enables alerts; needs ALERTLOOP_BASE_URL too
 
-define('MAIL_TO', 'hello@example.com');
-define('MAIL_FROM', 'noreply@example.com');
+define('MAIL_TO', 'hello@example.com');     // where the contact form emails requests (PHP mail()); '' sends none: without AlertLoop the form then answers 503
+define('MAIL_FROM', 'noreply@example.com'); // From: of that email; an address of your own domain
 
 define('AUTH_JWT_KEY', '');         // JWT verification
 define('AUTH_JWT_ISSUER', '');

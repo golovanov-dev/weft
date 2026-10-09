@@ -78,6 +78,7 @@ a { color: inherit; text-decoration: none; }
   color: var(--fg); padding: 12px 14px; font: inherit;
 }
 .field input:focus, .field select:focus, .field textarea:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+.field [aria-invalid="true"] { border-color: #ff6b6b; }
 .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
 .form-status { min-height: 1.4em; font-family: var(--font-mono); font-size: .9rem; }
 .form-status.is-success { color: #4caf7d; }

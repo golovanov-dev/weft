@@ -16,7 +16,7 @@ declare(strict_types=1);
 define('DEBUG', false);       // verbose errors, curl info, robots blocked
 define('DEV_MODE', false);    // true => Vite dev server + relaxed HTTPS
 
-// Sub-directory the app is mounted under, "" for a domain root (https://golovanov.dev).
+// Sub-directory the app is mounted under, "" for a domain root (https://example.com).
 define('BASE_URI', '');
 
 // Absolute log directory: errors/, traces in requests/ (the site) and cli/ (scripts).
@@ -46,9 +46,10 @@ define('RECAPTCHA_SECRETKEY', '');
 define('ALERTLOOP_BASE_URL', '');   // e.g. https://alerts.example.com
 define('ALERTLOOP_API_KEY', '');    // setting it enables alerts; needs ALERTLOOP_BASE_URL too
 
-// --- Contact form email (optional; uses PHP mail() or an SMTP service you wire up) --------
-define('MAIL_TO', 'hello@golovanov.dev');
-define('MAIL_FROM', 'noreply@golovanov.dev');
+// --- Contact form email via PHP mail(): set your own addresses; '' sends no email ------------
+// The form answers success only when this email or the AlertLoop alert went out.
+define('MAIL_TO', 'hello@example.com');
+define('MAIL_FROM', 'noreply@example.com');
 
 // --- JWT (optional — verifying access tokens) --------------------------------------------
 define('AUTH_JWT_KEY', '');

@@ -29,6 +29,12 @@ final class CsrfTest extends TestCase
         $this->assertFalse(Csrf::check(null));
     }
 
+    /** A form can post the field as an array (_csrf[]=…): that is a wrong token, not a TypeError. */
+    public function testCheckRejectsATokenThatIsNotAString(): void
+    {
+        $this->assertFalse(Csrf::check([Csrf::token()]));
+    }
+
     public function testCheckRejectsWhenNoTokenWasIssued(): void
     {
         $this->assertFalse(Csrf::check('anything'));

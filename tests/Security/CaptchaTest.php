@@ -163,6 +163,21 @@ final class CaptchaTest extends TestCase
         $this->assertSame(0.9, $result['score']);
     }
 
+    /** A token posted as an array (recaptcha_token[]=…) is no token: rejected without asking Google. */
+    public function testTokenThatIsNotAStringIsAMissingToken(): void
+    {
+        $this->googleAnswers([]);
+
+        $result = Captcha::verify(['token'], 'contact');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame(['missing-input-response'], $result['errorCodes']);
+        $this->assertSame([], $this->verifications);
+
+        Config::set('app.captcha', ['enabled' => false]);
+        $this->assertTrue(Captcha::verify(['token'])['ok']);
+    }
+
     /** The secret goes to Google as a form field and nowhere into the trace. */
     public function testTokenAndSecretAreSentAsAFormAndNotTraced(): void
     {
@@ -177,41 +192,80 @@ final class CaptchaTest extends TestCase
         $this->assertStringNotContainsString('t0ken', (string) json_encode($this->traceEvents($traceId)));
     }
 
-    /** @return iterable<string, array{array<string, mixed>, array<string, mixed>}> */
+    /**
+     * A low score is the visitor's; the other rejections fail every submission until the setup is
+     * fixed, so their reason is written down.
+     *
+     * @return iterable<string, array{array<string, mixed>, array<string, mixed>, string}>
+     */
     public static function rejections(): iterable
     {
-        yield 'low score' => [['score' => 0.3], ['success' => true, 'score' => 0.3, 'hostOk' => true, 'actionOk' => true]];
-        yield 'foreign host' => [['hostname' => 'evil.example'], ['success' => true, 'hostOk' => false, 'actionOk' => true]];
-        yield 'foreign action' => [['action' => 'login'], ['success' => true, 'hostOk' => true, 'actionOk' => false]];
+        yield 'low score' => [['score' => 0.3], ['success' => true, 'score' => 0.3, 'hostOk' => true, 'actionOk' => true], ''];
+        yield 'foreign host' => [
+            ['hostname' => 'evil.example'],
+            ['success' => true, 'hostOk' => false, 'actionOk' => true],
+            'host "evil.example" is not in app.captcha.allowed_hosts',
+        ];
+        yield 'foreign action' => [
+            ['action' => 'login'],
+            ['success' => true, 'hostOk' => true, 'actionOk' => false],
+            'action "login" is not "contact"',
+        ];
         yield 'invalid secret' => [
             ['success' => false, 'error-codes' => ['invalid-input-secret']],
             ['success' => false, 'errorCodes' => ['invalid-input-secret']],
+            'Google refused the secret key',
         ];
     }
 
     /**
      * @param array<string, mixed> $answer
      * @param array<string, mixed> $expected
+     * @param string $reason the error-log reason; '' when nothing is recorded
      */
     #[DataProvider('rejections')]
-    public function testAnswerThatFailsOneCheckIsRejected(array $answer, array $expected): void
+    public function testAnswerThatFailsOneCheckIsRejected(array $answer, array $expected, string $reason): void
     {
+        $traceId = Trace::boot();
         $this->googleAnswers($answer);
+        $logOffset = self::errorLogSize();
 
         $result = Captcha::verify('token', 'contact');
 
         $this->assertFalse($result['ok']);
         $this->assertSame($expected, array_intersect_key($result, $expected));
+        $this->assertFailureRecorded($traceId, $logOffset, $reason);
     }
 
     public function testUnreachableGoogleIsRequestFailed(): void
     {
+        $traceId = Trace::boot();
         $this->googleAnswers([]);
         $this->google = ['body' => false, 'error' => 'Could not resolve host: www.google.com'];
+        $logOffset = self::errorLogSize();
 
         $result = Captcha::verify('token', 'contact');
 
         $this->assertFalse($result['ok']);
         $this->assertSame(['request-failed'], $result['errorCodes']);
+        $this->assertFailureRecorded($traceId, $logOffset, 'Could not resolve host: www.google.com');
+    }
+
+    /** One captcha.failed trace event and its error-log line with $reason, or neither when $reason is ''. */
+    private function assertFailureRecorded(string $traceId, int $logOffset, string $reason): void
+    {
+        $events = array_values(array_filter(
+            $this->traceEvents($traceId),
+            static fn(array $e): bool => ($e['event'] ?? $e['type'] ?? null) === 'captcha.failed',
+        ));
+        $log = self::errorLogSince($logOffset);
+        if ($reason === '') {
+            $this->assertSame([], $events);
+            $this->assertStringNotContainsString('Captcha rejected', $log);
+            return;
+        }
+        $this->assertCount(1, $events);
+        $this->assertSame(['errorCodes', 'hostOk', 'actionOk', 'host'], array_keys($events[0]['data']));
+        $this->assertStringContainsString('Captcha rejected a submission: ' . $reason, $log);
     }
 }

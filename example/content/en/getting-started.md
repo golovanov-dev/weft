@@ -65,7 +65,9 @@ is the `public/` directory:
 php -S localhost:8000 -t public public/index.php
 ```
 
-Open <http://localhost:8000>. Then check the environment:
+Open <http://localhost:8000>. The contact form answers 503 here unless PHP `mail()` works on your
+machine (on Windows or without sendmail it usually does not) or AlertLoop is set up: see
+[Deployment](/docs/deployment), "The contact form answers 503". Then check the environment:
 
 ```bash
 php scripts/health.php

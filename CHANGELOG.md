@@ -38,6 +38,10 @@ pre-1.0 the API may change between minor versions.
   in `X-Client-Ip` or `X-Real-IP`, make it append `X-Forwarded-For`, or every visitor shares the
   proxy's limit. On shared hosting and with nginx + php-fpm on one machine `PROXY_IPS` usually
   stays empty. To check, compare `client_ip` in the newest `request_start` trace with your address.
+- The example's config template sent contact requests to the Weft author: `MAIL_TO` and `MAIL_FROM`
+  were `hello@golovanov.dev` and `noreply@golovanov.dev`, now `hello@example.com` and
+  `noreply@example.com`; step 3 of the deployment guide names them. If your `config/config.php`
+  came from the template, set both to addresses of your own.
 
 ### Added
 
@@ -120,6 +124,15 @@ pre-1.0 the API may change between minor versions.
   window is kept with the rate-limit counters, and if that store fails the alert is sent.
   `Alert::notifier()` gives database errors a dedupe key made from the message. Where every
   occurrence must arrive, send the alert without a dedupe key.
+- The example's contact form answers success only when the request was delivered: AlertLoop
+  accepted the alert or `mail()` sent the email to `MAIL_TO`. Otherwise it answers 503 with a
+  message for the visitor and writes `Contact request not delivered` to `errors/`; a failed
+  `mail()` writes a line too. A 422 lists the fields as `errors: [{name, text}]` (was `fields`),
+  the rate limit counts after validation, and a form posted without JavaScript is redirected (303)
+  to the contact page with `?status=`. If your site copied the form, copy `api/contact.php`,
+  `app/Services/ContactService.php`, `pages/contact.php`, `frontend/src/contact.js` and the
+  `status` strings of `lang/en/contact.php`, and set `MAIL_TO` or AlertLoop, or every submission
+  answers 503.
 
 ### Fixed
 
@@ -136,7 +149,7 @@ pre-1.0 the API may change between minor versions.
   and images; before, every asset request returned 404. If your site copied
   `example/public/index.php` and you develop with `php -S`, copy the new `cli-server` block at its
   top.
-- 10 smaller fixes: 1 reliability, 9 docs.
+- 13 smaller fixes: 1 security, 3 reliability, 9 docs.
 
 ## 0.1.3 - 2026-08-24
 

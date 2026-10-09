@@ -61,10 +61,17 @@ final class RateLimiter
         return $count === null || $count <= 1;
     }
 
-    /** True when a honeypot field is filled — treat the sender as a bot. */
+    /**
+     * True when a honeypot field is filled — treat the sender as a bot. The field is taken as it
+     * came: a non-empty array (`website[]=…`) is filled too.
+     */
     public static function honeypot(array $body, string $field = 'website'): bool
     {
-        return isset($body[$field]) && trim((string) $body[$field]) !== '';
+        $value = $body[$field] ?? null;
+        if (is_array($value)) {
+            return $value !== [];
+        }
+        return is_scalar($value) && trim((string) $value) !== '';
     }
 
     /**

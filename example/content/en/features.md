@@ -172,9 +172,23 @@ missing, `verify()` records a `captcha.misconfigured` trace event and a line in 
 off it fails with the error code `misconfigured` and sends a critical alert (category `security`),
 so in production every submission is rejected until both keys are set. `php scripts/health.php`
 lists the missing keys under `captcha_missing_keys` and, with `DEBUG` off, fails.
+A rejection the visitor did not cause — Google unreachable (`request-failed`), the secret refused
+(`invalid-input-secret`), a token for a host not in `app.captcha.allowed_hosts` or for another
+action — records a `captcha.failed` trace event and a line in the error log with the reason. A low
+score records nothing.
 
-The usual order in an endpoint: **honeypot → CSRF → rate limit → validation → captcha → service.**
-See `api/contact.php` in this example for the complete flow.
+`Csrf::check()`, `RateLimiter::honeypot()` and `Captcha::verify()` take the field as it came. A
+value that is not a string is a wrong CSRF token (`_csrf[]=…`) and no captcha token
+(`recaptcha_token[]=…`); a non-empty array in the honeypot is a filled field.
+
+The usual order in an endpoint: **honeypot → CSRF → validation → rate limit → captcha → service.**
+Validation before the rate limit lets a visitor correct a field and send again at once. See
+`api/contact.php` in this example for the complete flow: it answers the form's script with JSON
+(`422` lists the fields to correct as `errors: [{name, text}]`, `419` asks to refresh the page) and
+redirects a form posted without JavaScript back to the contact page with `?status=`. It answers
+success only when the request was delivered — AlertLoop accepted the alert or `mail()` sent the
+email to `MAIL_TO` — and `503` otherwise: where to see why, and where the message stays, is in
+[Deployment](/docs/deployment), "The contact form answers 503".
 
 ## Alerts for sensitive spots
 
@@ -196,7 +210,7 @@ use Golovanov\Weft\Observability\Alert;
 
 Alert::send('New contact request', Alert::INFO, 'business_event', context: $data);
 Alert::critical('Payment webhook failed', ['order' => $id]);
-Alert::send('Captcha rejected', Alert::WARNING, category: 'security');
+Alert::send('Captcha rejected', Alert::WARNING, dedupeKey: 'captcha-rejected', category: 'security');
 ```
 
 Events go to [AlertLoop](https://github.com/golovanov-dev/alertloop) (`POST /v1/events`). `$context`

@@ -36,7 +36,11 @@ final class Csrf
         return self::FIELD;
     }
 
-    public static function check(?string $token): bool
+    /**
+     * True when $token is the session's token. Anything else is false, including a value that is
+     * not a string (a form can post `_csrf[]=…`), so a field can be passed as it came.
+     */
+    public static function check(mixed $token): bool
     {
         self::startSession();
         $expected = $_SESSION[self::KEY] ?? '';

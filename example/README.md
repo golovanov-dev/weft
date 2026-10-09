@@ -45,7 +45,7 @@ Run `npm run build` before committing to refresh `public/dist/`.
 | Sitemap from content | `app/Configs/app.php` → `'sitemap' => fn() => (new DocsService())->sitemapRoutes()` |
 | Caching | `app/Services/DocsService.php` — `Cache::remember()` around Markdown parsing, with `mtime` in the key |
 | Logic vs presentation | `DocsService` does the work; `pages/` only print |
-| Form protection | `pages/contact.php` + `api/contact.php` — honeypot → CSRF → rate limit → validation → captcha → service |
+| Form protection | `pages/contact.php` + `api/contact.php` — honeypot → CSRF → validation → rate limit → captcha → service |
 | Config in two layers | `config/config.example.php` (constants) vs `app/Configs/app.php` (business) |
 | Vite | `frontend/src/` → `public/dist/`, switched by `DEV_MODE` |
 

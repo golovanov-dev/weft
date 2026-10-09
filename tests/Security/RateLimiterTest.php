@@ -282,4 +282,15 @@ final class RateLimiterTest extends TestCase
         $this->assertFalse(RateLimiter::honeypot([]));
         $this->assertTrue(RateLimiter::honeypot(['custom' => 'x'], 'custom'));
     }
+
+    /** A field posted as an array (website[]=…) is filled when it holds anything, with no warning. */
+    public function testHoneypotTakesAnArrayFieldWithoutAWarning(): void
+    {
+        $logOffset = self::errorLogSize();
+
+        $this->assertTrue(RateLimiter::honeypot(['website' => ['x']]));
+        $this->assertTrue(RateLimiter::honeypot(['website' => ['']]));
+        $this->assertFalse(RateLimiter::honeypot(['website' => []]));
+        $this->assertSame('', self::errorLogSince($logOffset));
+    }
 }
