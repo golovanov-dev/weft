@@ -15,7 +15,10 @@ use Golovanov\Weft\Security\RateLimiter;
  *
  * Sends a single event to the AlertLoop ingest API (POST /v1/events, X-API-Key auth).
  * Delivery is synchronous and best-effort: the call waits for AlertLoop up to
- * app.alertloop.timeout seconds, nothing is retried, no exception ever leaves this class, and a
+ * app.alertloop.timeout seconds, and an alert with a dedupe key for its window in the rate-limit
+ * store too: with Redis at most 1 s for each of two commands, plus 2 s to connect and 1 s for each
+ * of AUTH, SELECT and PING when the request has not connected yet (RedisStore), so at most
+ * app.alertloop.timeout + 7 s in all. Nothing is retried, no exception ever leaves this class, and a
  * failure never breaks the main request flow. It is not silent, though — a failed delivery is
  * recorded as an `alert.failed` trace event (metadata only, never the alert payload), and alerts
  * switched on without base_url or api_key leave a line in the error log. Configured by the

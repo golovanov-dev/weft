@@ -6,6 +6,7 @@ namespace Golovanov\Weft\Tests;
 
 use Golovanov\Weft\Assets\Vite;
 use Golovanov\Weft\Cache\Cache;
+use Golovanov\Weft\Cache\RedisStore;
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\HttpClient;
 use Golovanov\Weft\Http\RequestContext;
@@ -53,6 +54,7 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(I18n::class, ['dict' => [], 'locale' => 'en']);
         self::setStatics(Cache::class, ['store' => null, 'failureLogged' => false]);
         self::setStatics(RateLimiter::class, ['store' => null, 'redisError' => null]);
+        self::setStatics(RedisStore::class, ['shared' => null, 'sharedFailure' => null]);
         self::setStatics(View::class, ['shared' => []]);
         self::setStatics(Vite::class, ['manifest' => null]);
         self::setStatics(Alert::class, ['reporting' => false, 'misconfiguredLogged' => false]);

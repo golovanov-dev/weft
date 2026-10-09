@@ -145,8 +145,8 @@ and without it is valid.
 
 ```php
 'vite'       => ['entry' => 'src/main.js', 'dev_server' => 'http://localhost:5173'],
-'cache'      => ['enabled' => true, 'driver' => 'file', 'path' => '…/storage/cache', 'prefix' => 'weft:'],  // on in this demo, see below; path: absolute or relative to APP_ROOT, defaults to storage/cache; prefix applies to redis only
-'rate_limit' => ['max' => 20, 'window' => 60, 'path' => '…'],  // per client IP per bucket; path: absolute or relative to APP_ROOT, defaults to cache.path
+'cache'      => ['enabled' => true, 'driver' => 'file', 'path' => '…/storage/cache'],  // on in this demo, see below; path: absolute or relative to APP_ROOT, defaults to storage/cache
+'rate_limit' => ['max' => 20, 'window' => 60, 'path' => '…'],  // per client IP (IPv6: per /64) per bucket; path: absolute or relative to APP_ROOT, defaults to ratelimit/ in cache.path
 'captcha'    => ['enabled' => …, 'site_key' => …, 'secret_key' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],
 'trace'      => ['log_body' => true, 'sensitive_keys' => [], 'retention_days' => 30],    // see below
 'security'   => ['frame_options' => 'SAMEORIGIN', 'referrer_policy' => 'strict-origin-when-cross-origin',
@@ -156,7 +156,17 @@ and without it is valid.
 Caching is deliberately **on** in this demo (`'cache' => ['enabled' => true]` in
 `app/Configs/app.php`): it makes Markdown rendering cheap and shows the feature working in a real
 setting rather than as a switched-off example. Caching is optional — with `enabled => false`,
-`Cache::remember()` still runs its callback.
+`Cache::remember()` still runs its callback. Cached values come back without their classes: cache
+arrays and scalars, an object is returned as `__PHP_Incomplete_Class`.
+
+Do not set `rate_limit.path` to `cache.path` itself: `cache-clear.php` deletes the `*.cache` files
+there, rate-limit counters included. Any other directory, a subdirectory of the cache one too, is fine.
+
+With `'driver' => 'redis'`, keys start with `app.cache.prefix`, by default the host of
+`app.url.base` and a colon (`example.com:`), so sites sharing a Redis keep apart. Cache entries are
+under `<prefix>cache:`, rate-limit counters and alert windows under the rest of `<prefix>`, and
+`php scripts/cache-clear.php` deletes only the cache entries. Set `'prefix' => 'yoursite:'` in
+`'cache'` when two sites on one Redis share a host.
 
 Note how feature flags derive from the environment, so there is one source of truth:
 
@@ -207,7 +217,7 @@ Uploaded files are never logged. Any other body — XML, plain text, broken JSON
 form, a string you pass to `HttpClient` with `['json' => false]`, even a form string such as
 `a=1&password=x` (pass an array to get it masked) — goes into `data` as the raw string,
 which masking by key cannot look inside; traceloom shortens long strings. With `log_body` off,
-`body` has only `size` and `content_type`. A string `log_body` (from the environment) is read
+and for any body over 8 KB, `body` has only `size` and `content_type`. A string `log_body` (from the environment) is read
 as a boolean: `'true'`, `'1'`, `'yes'`, `'on'` keep it on, `'false'` and anything else turn it off.
 
 The query string is logged apart from the URL, parsed into fields and masked the same way,

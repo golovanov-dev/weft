@@ -84,7 +84,7 @@ php scripts/health.php
   "logs_error": null,
   "cache_driver": "file",
   "rate_limit_store": "file",
-  "rate_limit_path": "/path/to/site/storage/cache",
+  "rate_limit_path": "/path/to/site/storage/cache/ratelimit",
   "rate_limit_writable": true,
   "rate_limit_error": null,
   "proxy_ips_error": null,

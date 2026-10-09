@@ -83,6 +83,18 @@ final class TraceTest extends TestCase
         $this->assertStringNotContainsString('79001234567', $line);
     }
 
+    public function testBodyOverEightKilobytesIsSummarised(): void
+    {
+        $limit = 'message=' . str_repeat('a', 8192 - 8);
+        [$data] = $this->requestStart($this->post('application/x-www-form-urlencoded', $limit));
+        $this->assertArrayHasKey('data', $data['body'], 'a body of exactly 8 KB is still logged');
+
+        self::resetEngineState();
+        [$data, $line] = $this->requestStart($this->post('application/x-www-form-urlencoded', $limit . 'a'));
+        $this->assertSame(['size' => 8193, 'content_type' => 'application/x-www-form-urlencoded'], $data['body']);
+        $this->assertStringNotContainsString('aaaa', $line);
+    }
+
     /** @return iterable<string, array{string, string, array<string, mixed>}> */
     public static function parsedBodies(): iterable
     {

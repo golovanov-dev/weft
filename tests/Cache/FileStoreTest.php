@@ -57,6 +57,26 @@ final class FileStoreTest extends TestCase
         $this->assertFileDoesNotExist($file);
     }
 
+    public function testObjectsComeBackWithoutTheirClass(): void
+    {
+        $this->store->set('obj', new \ArrayObject([1]));
+
+        $this->assertInstanceOf(\__PHP_Incomplete_Class::class, $this->store->get('obj'));
+    }
+
+    public function testPruneDeletesOnlyExpiredEntries(): void
+    {
+        $this->store->set('live', 1, 60);
+        $this->store->set('forever', 1);
+        $expired = $this->dir . '/' . sha1('old') . '.cache';
+        file_put_contents($expired, serialize(['e' => time() - 10, 'v' => 1]));
+
+        $this->store->prune();
+
+        $this->assertFileDoesNotExist($expired);
+        $this->assertCount(2, glob($this->dir . '/*.cache') ?: []);
+    }
+
     public function testCorruptedFileIsAMiss(): void
     {
         $file = $this->dir . '/' . sha1('bad') . '.cache';

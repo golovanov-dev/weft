@@ -57,7 +57,7 @@ final class Kernel
         $response->send();
 
         if ($failure !== null) {
-            // The alert waits for AlertLoop (up to app.alertloop.timeout). Under PHP-FPM the 500
+            // The alert waits for AlertLoop and its window (see Alert). Under PHP-FPM the 500
             // is handed to the client first. Elsewhere the connection stays open until the alert
             // is done, and with output_buffering on a short 500 stays in PHP's buffer till then.
             if (function_exists('fastcgi_finish_request')) {

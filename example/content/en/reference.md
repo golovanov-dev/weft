@@ -129,7 +129,7 @@ Pages receive `$request`, `$route`, `$locale`, and on dynamic routes the params 
 ```bash
 php scripts/health.php       # environment diagnostics (JSON, exit code 0/1)
 php scripts/sitemap.php      # write a static public/sitemap.xml
-php scripts/cache-clear.php  # flush the cache store
+php scripts/cache-clear.php  # delete the cache entries (rate-limit counters stay)
 ```
 
 Your own script: `require dirname(__DIR__) . '/bootstrap.php';` and the whole engine is initialised.

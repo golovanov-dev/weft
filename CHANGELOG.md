@@ -14,8 +14,8 @@ pre-1.0 the API may change between minor versions.
   raw string; the `referer` header is logged as sent. Weft masks nothing itself: list keys such as
   `email` or `phone` in the new `app.trace.sensitive_keys` (a whole key name: `phone` does not mask
   `customer_phone`), or set the new `app.trace.log_body` to `false` (default `true`) to log a body
-  as its size and content type only. Fields you write with `Trace::event()` are masked only by
-  `sensitive_keys`.
+  as its size and content type only. A body over 8 KB is always logged as its size and content
+  type only. Fields you write with `Trace::event()` are masked only by `sensitive_keys`.
 - `Model` rejects a column name that is not a plain identifier (`[A-Za-z_][A-Za-z0-9_]*`) with
   `InvalidArgumentException` in `create()`, `update()`, `findBy()`, `where()` and `exists()`: array
   keys went into the SQL as-is, so `create($request->body())` was an SQL injection. It is not an
@@ -26,9 +26,11 @@ pre-1.0 the API may change between minor versions.
   critical alert (dedupe key `captcha:misconfigured`); with `DEBUG` on it passes and logs the
   problem. Set both keys wherever `app.captcha.enabled` is true, or set it to false.
 - `RateLimiter` limits clients that send no session cookie. `allow()` and `throttle()` count per
-  client IP, atomically, in Redis when `app.cache.driver` is `redis`, otherwise in files under the
-  new `app.rate_limit.path` (default `app.cache.path`; relative to `APP_ROOT`), whether caching is
-  on or not; no longer in the session or a `Cache::use()` store. A window starts at its first hit.
+  client IP (an IPv6 client by its `/64` network), atomically, in Redis when `app.cache.driver` is
+  `redis`, otherwise in files under the new `app.rate_limit.path` (default `ratelimit/` in
+  `app.cache.path`; relative to `APP_ROOT`), whether caching is on or not; no longer in the session
+  or a `Cache::use()` store, and `cache-clear.php` no longer resets them. A window starts at its
+  first hit. Counter files 0.1.x left in the cache directory go with `php scripts/cache-clear.php`.
   Make that directory writable by PHP (a counter that cannot be written allows the request and
   logs an error), and behind a reverse proxy or CDN list it in `PROXY_IPS`, or all visitors share
   one counter.
@@ -115,6 +117,18 @@ pre-1.0 the API may change between minor versions.
   group), add `umask 002;` to your cron lines and to commands you run over ssh or from CI, move cron
   jobs that run Weft scripts from the crontab of `www-data` or `root` to the deploy user's, exclude
   `storage/` and `config/config.php` if you deploy with rsync, and run `health.php` as the PHP user.
+- The Redis key prefix defaults to the host of `app.url.base` and a colon (`example.com:`), not
+  `weft:`, and cache entries are kept under `<prefix>cache:`: `Cache::flush()` and `cache-clear.php`
+  delete only those, not rate-limit counters or another site's keys. After the upgrade the Redis
+  cache starts empty, with your own `app.cache.prefix` too. If your `app/Configs/app.php` came from
+  the example, delete its `'prefix' => 'weft:docs:'` line. Old keys with a TTL expire on their own.
+  To delete the old `weft:` keys at once — only if no other Weft site uses this Redis database,
+  since `weft:` was every site's default — run once after the upgrade
+  `redis-cli -h <REDIS_HOST> -p <REDIS_PORT> -n <REDIS_DB> --scan --pattern 'weft:*' | xargs -r -d '\n' redis-cli -h <REDIS_HOST> -p <REDIS_PORT> -n <REDIS_DB> unlink`
+  (with a password, add `-a '<REDIS_PASSWORD>'` to both).
+- The cache restores values without their classes: an object comes back as
+  `__PHP_Incomplete_Class`. Cache arrays and scalars; convert objects before `Cache::set()` or
+  `remember()`.
 - `HttpClient` returns `ok => false` for a response with status 400 or higher (`error` is
   `HTTP <status>`); `status` and the decoded `body` are still returned. Before, any response that
   arrived was `ok`, so a 503 `{"error":"maintenance"}` counted as success. Where your code reads an
@@ -149,7 +163,7 @@ pre-1.0 the API may change between minor versions.
   and images; before, every asset request returned 404. If your site copied
   `example/public/index.php` and you develop with `php -S`, copy the new `cli-server` block at its
   top.
-- 13 smaller fixes: 1 security, 3 reliability, 9 docs.
+- 14 smaller fixes: 1 security, 4 reliability, 9 docs.
 
 ## 0.1.3 - 2026-08-24
 

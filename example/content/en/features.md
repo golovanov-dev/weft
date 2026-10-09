@@ -81,7 +81,8 @@ use Golovanov\Weft\Cache\Cache;
 $chapters = Cache::remember('docs:index', 600, fn() => $this->readAllMarkdown());
 ```
 
-Also `Cache::get/set/has/forget/flush`, and `php scripts/cache-clear.php`.
+Also `Cache::get/set/has/forget/flush`, and `php scripts/cache-clear.php`, which deletes cache
+entries only. Values come back without their classes, so cache arrays and scalars.
 
 Two properties worth knowing: when caching is **off**, a NullStore is used — `remember()` still runs
 the callback, so wrapping code in it is always safe and you can enable the cache later. And if Redis
@@ -105,7 +106,8 @@ The engine records `request_start` (method, path, query, headers, client IP, bod
 and outbound HTTP calls. JSON bodies (by content, whatever the content type), form bodies and
 query strings are logged as fields, so the redaction reaches them; add your own key names with
 `app.trace.sensitive_keys`. Any other body is logged as a raw string, and the `referer` header as
-sent, query string included. To keep bodies out of the trace, set `app.trace.log_body` to `false`;
+sent, query string included. A body over 8 KB is logged as its size and content type only. To keep
+bodies out of the trace, set `app.trace.log_body` to `false`;
 fields you pass to `Trace::event()` stay — mask them with `sensitive_keys`. All
 three settings are in [Configuration](/docs/configuration).
 
@@ -143,15 +145,18 @@ $result = Captcha::verify($body['recaptcha_token'] ?? '', 'contact');
 if (!$result['ok']) { /* reject */ }
 ```
 
-Rate-limit counters live in Redis when `app.cache.driver` is `redis` (in files when Redis cannot
-be used, as for the cache), otherwise in files under `app.rate_limit.path` (absolute, or relative
-to the site root `APP_ROOT`), which defaults to `app.cache.path` — whether caching is enabled or
-not. A window starts at the first hit and later hits never extend it.
+Rate-limit counters live in Redis when `app.cache.driver` is `redis`, on the cache's connection and
+apart from its keys (in files when Redis cannot be used, as for the cache), otherwise in files under
+`app.rate_limit.path` (absolute, or relative to the site root `APP_ROOT`), which defaults to
+`ratelimit/` in `app.cache.path` — whether caching is enabled or not. `cache-clear.php` does not
+reset them. A window starts at the first hit and later hits never extend it; the limiter deletes
+expired counter files now and then.
 If a counter cannot be written, the limiter **fails open**: the request is allowed and the failure
 goes to the error log, so a broken store never locks users out. `php scripts/health.php` shows
 where counters go (`rate_limit_store`, `rate_limit_path`) and fails when they cannot be written.
 
-Limits count per client IP, taken from `REMOTE_ADDR`. On shared hosting and with nginx + php-fpm on
+Limits count per client IP, taken from `REMOTE_ADDR`; an IPv6 client counts by its `/64` network,
+the block one host usually gets. On shared hosting and with nginx + php-fpm on
 one machine that is usually the visitor, and `PROXY_IPS` stays empty. Behind a CDN, load balancer or
 another server proxying to PHP it is the proxy's address, so every visitor shares one counter: the
 example's contact form then takes one submission per 5 seconds for the whole site. List the proxies
@@ -219,7 +224,10 @@ is sent as the event's `payload`, the current trace id travels as the top-level 
 own labels.
 
 Delivery is synchronous and best-effort: a send waits for AlertLoop up to `app.alertloop.timeout`
-seconds, nothing is retried and no failure reaches your code. It is not silent, though — a delivery
+seconds, nothing is retried and no failure reaches your code. An alert with a dedupe key also waits
+for the counter store that keeps its window (below): with Redis, 1 second at most for each of its
+two commands, plus, when this request has not connected to Redis yet, 2 seconds to connect and 1 for
+each of `AUTH`, `SELECT` and `PING`. So a send takes at most `app.alertloop.timeout` + 7 seconds. It is not silent, though — a delivery
 that fails is recorded on the request trace as an `alert.failed` event (status, transport flag, event
 type and category; never the alert body).
 

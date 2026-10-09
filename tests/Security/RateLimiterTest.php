@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Golovanov\Weft\Tests\Security;
 
+use Golovanov\Weft\Cache\Cache;
 use Golovanov\Weft\Cache\RedisStore;
 use Golovanov\Weft\Config\Config;
+use Golovanov\Weft\Http\Request;
+use Golovanov\Weft\Http\RequestContext;
 use Golovanov\Weft\Security\RateLimiter;
 use Golovanov\Weft\Tests\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -40,19 +43,51 @@ final class RateLimiterTest extends TestCase
         $this->assertTrue(RateLimiter::allow('other', 2, 60));
     }
 
-    public function testCountersDefaultToTheCachePath(): void
+    public function testCountersDefaultToASubdirectoryOfTheCacheThatAFlushLeaves(): void
     {
         $cacheDir = $this->makeTempDir();
         Config::set('app.rate_limit', ['max' => 1, 'window' => 60]);
-        Config::set('app.cache.path', $cacheDir);
+        Config::set('app.cache', ['enabled' => true, 'driver' => 'file', 'path' => $cacheDir]);
 
         try {
             $this->assertTrue(RateLimiter::allow('cfg'));
-            $this->assertFalse(RateLimiter::allow('cfg'));
-            $this->assertCount(1, glob($cacheDir . '/*.cache') ?: []);
+            $this->assertCount(1, glob($cacheDir . '/ratelimit/*.cache') ?: []);
+            Cache::flush();
+            $this->assertFalse(RateLimiter::allow('cfg'), 'cache-clear must not reset the limits');
         } finally {
             $this->removeDir($cacheDir);
         }
+    }
+
+    public function testCountsPerClientIpAndAnIpv6ClientByItsSlash64(): void
+    {
+        $allow = static function (string $ip): bool {
+            RequestContext::setRequest(new Request('POST', '/api/contact', '/api/contact', $ip, [], [], [], null));
+            return RateLimiter::allow('form', 1, 60);
+        };
+
+        $this->assertTrue($allow('2001:db8:1:2::1'));
+        $this->assertFalse($allow('2001:db8:1:2:ffff:ffff:ffff:9'), 'the same /64 is one client');
+        $this->assertTrue($allow('2001:db8:1:3::1'));
+        $this->assertTrue($allow('203.0.113.5'));
+        $this->assertFalse($allow('::ffff:203.0.113.5'), 'an IPv4-mapped address is its IPv4 client');
+        $this->assertTrue($allow('203.0.113.6'));
+    }
+
+    #[RunInSeparateProcess]
+    public function testBehindATrustedProxyCountsTheClientFromXForwardedFor(): void
+    {
+        define('PROXY_IPS', ['10.0.0.1']);
+        $allow = static function (string $forwardedFor): bool {
+            $_SERVER['REMOTE_ADDR'] = '10.0.0.1';
+            $_SERVER['HTTP_X_FORWARDED_FOR'] = $forwardedFor;
+            RequestContext::setRequest(Request::fromGlobals());
+            return RateLimiter::allow('form', 1, 60);
+        };
+
+        $this->assertTrue($allow('198.51.100.7'));
+        $this->assertFalse($allow('198.51.100.7'));
+        $this->assertTrue($allow('198.51.100.8'), 'another visitor through the same proxy has its own counter');
     }
 
     public function testNonPositiveMaxDisablesTheLimit(): void
@@ -115,7 +150,7 @@ final class RateLimiterTest extends TestCase
                     'store' => 'file',
                     'path' => $this->dir,
                     'writable' => false,
-                    'error' => 'PHP cannot write 1 file(s) in ' . $this->dir . ' (cache entries or counters), e.g. ' . basename($files[0]),
+                    'error' => 'PHP cannot write 1 file(s) in ' . $this->dir . ', e.g. ' . basename($files[0]),
                 ],
                 RateLimiter::storeStatus(),
             );

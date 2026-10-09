@@ -7,7 +7,8 @@ namespace Golovanov\Weft\Cache;
 /**
  * Filesystem cache. Each entry is a PHP file storing an expiry timestamp and a serialized value.
  * No external dependency — the default store for simple sites. The directory is created on the
- * first write; Weft sets no permissions on it or on the files in it.
+ * first write; Weft sets no permissions on it or on the files in it. Values come back without
+ * their classes (allowed_classes => false): an object is returned as __PHP_Incomplete_Class.
  */
 final class FileStore implements Store
 {
@@ -26,7 +27,7 @@ final class FileStore implements Store
         if ($raw === false) {
             return null;
         }
-        $payload = @unserialize($raw, ['allowed_classes' => true]);
+        $payload = @unserialize($raw, ['allowed_classes' => false]);
         if (!is_array($payload) || !array_key_exists('e', $payload)) {
             return null;
         }
@@ -79,6 +80,23 @@ final class FileStore implements Store
         } finally {
             flock($handle, LOCK_UN);
             fclose($handle);
+        }
+    }
+
+    /**
+     * Delete the entries whose expiry has passed. Entries without one and files that do not read
+     * as an entry stay.
+     *
+     * @internal Used by RateLimiter for its counters.
+     */
+    public function prune(): void
+    {
+        $now = time();
+        foreach (glob($this->dir . '/*.cache') ?: [] as $file) {
+            $payload = @unserialize((string) @file_get_contents($file), ['allowed_classes' => false]);
+            if (is_array($payload) && is_int($payload['e'] ?? null) && $payload['e'] !== 0 && $payload['e'] < $now) {
+                @unlink($file);
+            }
         }
     }
 

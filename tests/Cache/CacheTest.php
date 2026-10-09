@@ -7,9 +7,12 @@ namespace Golovanov\Weft\Tests\Cache;
 use Golovanov\Weft\Cache\Cache;
 use Golovanov\Weft\Cache\FileStore;
 use Golovanov\Weft\Cache\NullStore;
+use Golovanov\Weft\Cache\RedisStore;
 use Golovanov\Weft\Cache\Store;
 use Golovanov\Weft\Config\Config;
+use Golovanov\Weft\Security\RateLimiter;
 use Golovanov\Weft\Tests\TestCase;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
 final class CacheTest extends TestCase
 {
@@ -101,6 +104,35 @@ final class CacheTest extends TestCase
         Cache::set('k', 'v');
 
         $this->assertCount(1, glob($this->dir . '/*.cache') ?: []);
+    }
+
+    #[RunInSeparateProcess]
+    public function testUnreachableRedisFallsBackToFilesWithOneConnectionAttempt(): void
+    {
+        // Nothing listens on port 1; without ext-redis the store fails even earlier.
+        define('REDIS_PORT', 1);
+        $this->dir = $this->makeTempDir();
+        Config::set('app.cache', ['enabled' => true, 'driver' => 'redis', 'path' => $this->dir]);
+        $logOffset = self::errorLogSize();
+
+        $this->assertInstanceOf(FileStore::class, Cache::store());
+        Cache::set('k', 'v');
+        $this->assertSame('v', Cache::get('k'));
+        $this->assertCount(1, glob($this->dir . '/*.cache') ?: []);
+        $this->assertStringContainsString('CACHE ERRNO:500 | Cache init failed, falling back to file: ', self::errorLogSince($logOffset));
+
+        // The rate limiter gets the same failure instead of waiting for a second connection.
+        $this->assertSame('file', RateLimiter::storeStatus()['store']);
+        $failures = [];
+        foreach ([1, 2] as $attempt) {
+            try {
+                RedisStore::fromConfig();
+            } catch (\Throwable $e) {
+                $failures[] = $e;
+            }
+        }
+        $this->assertCount(2, $failures);
+        $this->assertSame($failures[0], $failures[1]);
     }
 
     /**

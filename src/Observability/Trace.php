@@ -20,11 +20,15 @@ use Golovanov\Weft\Http\RequestContext;
  * (app.trace.retention_days) and redaction of sensitive keys (its defaults plus
  * app.trace.sensitive_keys). Weft masks nothing itself: it hands traceloom request and outgoing
  * bodies and query strings parsed into arrays, so the redaction reaches their fields — see body()
- * and splitQuery(). app.trace.log_body (default on) controls whether body contents are recorded.
+ * and splitQuery(). app.trace.log_body (default on) controls whether body contents are recorded;
+ * a body over 8 KB never is.
  */
 final class Trace
 {
     private const DEFAULT_RETENTION_DAYS = 30;
+
+    /** Bytes above which a body is recorded as its size and content type only. */
+    private const BODY_LIMIT = 8192;
 
     private static ?Tracer $tracer = null;
     private static ?Timeline $trace = null;
@@ -104,7 +108,8 @@ final class Trace
 
     /**
      * What the trace records about a body: its size and content type, plus `data` with
-     * app.trace.log_body on (the default). These go into `data` as an array, so traceloom masks
+     * app.trace.log_body on (the default) for a body of at most BODY_LIMIT bytes (8 KB; by $size,
+     * so a multipart body by its Content-Length). These go into `data` as an array, so traceloom masks
      * them by key: a body that decodes as a JSON object or array, whatever its content type (a
      * `+json` type, none at all, `curl -d` sending JSON as a form); otherwise an urlencoded body,
      * parsed with parse_str(); multipart fields (never file contents). Any other body goes in as
@@ -125,7 +130,7 @@ final class Trace
     ): array {
         $summary = ['size' => $size ?? strlen($raw), 'content_type' => $contentType];
 
-        if (!self::logBody()) {
+        if ($summary['size'] > self::BODY_LIMIT || !self::logBody()) {
             return $summary;
         }
 

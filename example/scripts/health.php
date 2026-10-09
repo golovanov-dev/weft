@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Exits with 1 when something leaves the site broken or unprotected: logs not writable (the
  * error log directory or the site's trace directory, requests/, or today's file in it;
  * logs_error says which), the
- * rate-limit directory or a file in it (a counter or a cache entry) that PHP cannot write,
+ * rate-limit directory or a counter file in it that PHP cannot write,
  * counters in files while app.cache.driver is redis (rate_limit_error says why),
  * PROXY_IPS not an array or with an entry that is invalid or too wide, or (outside DEBUG) a
  * captcha or alerts enabled without their keys.

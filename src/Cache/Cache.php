@@ -12,10 +12,13 @@ use Golovanov\Weft\Observability\ErrorHandler;
  * used and every read is a miss, so wrapping code in remember() is always safe.
  *
  * Driver (config 'app.cache.driver'): 'file' (default, no deps; app.cache.path, a relative one
- * from APP_ROOT, default storage/cache) or 'redis'. If Redis is unreachable or rejects the
- * password or database, the facade degrades to the file store rather than throwing. A store that
- * fails later (a read-only replica, maxmemory under noeviction) never fails the request either:
- * a read is a miss, a write is skipped, and the first failure of the request is logged.
+ * from APP_ROOT, default storage/cache) or 'redis' (keys under the site prefix plus "cache:", see
+ * RedisStore::fromConfig()). flush() deletes cache entries only, never rate-limit counters. Values
+ * come back without their classes, so cache arrays and scalars. If Redis is unreachable or rejects the
+ * password or database, or a Redis command fails on a timeout or a lost connection, the facade
+ * goes on with the file store rather than throwing. A store that fails otherwise (a read-only
+ * replica, maxmemory under noeviction) never fails the request either: a read is a miss, a write
+ * is skipped, and the first failure of the request is logged.
  *
  *   $tariffs = Cache::remember('tariffs', 600, fn() => $api->tariffs());
  */
@@ -28,7 +31,8 @@ final class Cache
 
     public static function store(): Store
     {
-        if (self::$store !== null) {
+        // After a failed Redis command the request goes on with the file store (RedisStore::failed()).
+        if (self::$store !== null && !(self::$store instanceof RedisStore && self::$store->failed())) {
             return self::$store;
         }
 
@@ -125,12 +129,6 @@ final class Cache
 
     private static function makeRedis(): RedisStore
     {
-        return new RedisStore(
-            host: (string) Config::env('REDIS_HOST', '127.0.0.1'),
-            port: (int) Config::env('REDIS_PORT', 6379),
-            password: (string) Config::env('REDIS_PASSWORD', ''),
-            database: (int) Config::env('REDIS_DB', 0),
-            prefix: (string) Config::get('app.cache.prefix', 'weft:'),
-        );
+        return RedisStore::fromConfig('cache:');
     }
 }

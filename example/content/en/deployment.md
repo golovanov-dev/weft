@@ -75,7 +75,9 @@ pool (for example `/etc/php/8.4/fpm/pool.d/www.conf`) or the user Apache runs as
 ### Who writes `storage/`
 
 PHP writes the error log, traces, the file cache and rate-limit counters under `storage/` (counters
-live in `storage/cache` even with caching off, unless `app.rate_limit.path` points elsewhere).
+live in `storage/cache/ratelimit/` even with caching off, unless `app.rate_limit.path` points
+elsewhere; `cache-clear.php` leaves them unless that path is the cache directory itself — check
+`rate_limit_path` in `php scripts/health.php`).
 Scripts write there too (`php scripts/sitemap.php`, your cron jobs), and you read the logs and
 traces.
 
@@ -161,11 +163,11 @@ a site with its own config, set `app.captcha.enabled` to `false`.
 `ALERTLOOP_BASE_URL` and `ALERTLOOP_API_KEY` in `config/config.php`, and alerts are on whenever
 `ALERTLOOP_API_KEY` is not empty. To turn them off, set `ALERTLOOP_API_KEY` to `''`.
 
-`rate_limit_path` is `app.rate_limit.path`, else `app.cache.path`; a relative one is taken from the
-site root (`APP_ROOT`), so `health.php` and the site use the same directory whatever their working
-directory. By default it is also the cache directory, so a file in it that PHP cannot overwrite (a
-cache entry or a counter created by a script without `umask 002`) also makes `rate_limit_writable`
-false; `rate_limit_error` names one of them.
+`rate_limit_path` is `app.rate_limit.path`, else `ratelimit/` in `app.cache.path`
+(`storage/cache/ratelimit` by default); a relative one is taken from the site root (`APP_ROOT`), so
+`health.php` and the site use the same directory whatever their working directory. A counter file in
+it that PHP cannot overwrite (created by a script without `umask 002`) also makes
+`rate_limit_writable` false; `rate_limit_error` names one of them.
 
 With `app.cache.driver` set to `redis`, the engine sends `PING` after connecting, and `health.php`
 writes a probe counter to Redis (ten-second TTL, deleted at once).
@@ -181,9 +183,10 @@ writes a probe counter to Redis (ten-second TTL, deleted at once).
 | `file` | `DB index is out of range` | `REDIS_DB` is higher than Redis allows (16 databases by default) |
 | `redis` | `Redis rejected the probe write` | a read-only replica, `maxmemory` reached under the `noeviction` policy, or a Redis user not allowed to run `EVAL` |
 
-When Redis is not used, the cache falls back to files as well. If Redis does not answer at all, every
-page that uses the cache waits about 2 seconds for the connection timeout, on every request, until
-Redis is back; so does `health.php`. In the `redis` row pages are still served: a cache read or
+When Redis is not used, the cache falls back to files as well. The cache and the counters share one
+connection per request. If Redis does not answer, every request that uses the cache, a rate limit or
+an alert with a dedupe key waits for it once, up to 2 seconds to connect and 1 second for a reply,
+until Redis is back; so does `health.php`. In the `redis` row pages are still served: a cache read or
 write Redis rejects is skipped, and a form submission whose counter it rejects is allowed.
 
 The site logs the reason to `errors/<date>.log` under `LOGS_PATH`, in lines like these (time in
@@ -311,7 +314,7 @@ Request and outgoing bodies and query strings are logged as fields; values under
 names (password, token, api_key, … plus `app.trace.sensitive_keys`) are redacted. Anything else
 your forms collect — an email, a phone number — is logged unless you add its key to
 `sensitive_keys`. Setting `app.trace.log_body` to `false` logs a body as its size and content type
-only, but not the fields your code writes to its own events with `Trace::event()` — the example's
+only (a body over 8 KB is always logged so), but not the fields your code writes to its own events with `Trace::event()` — the example's
 `contact_submit` records the email; only `sensitive_keys` masks those. A body that neither decodes
 as JSON nor is a form is logged as a raw string, and so is a form string your code builds
 itself for `HttpClient`: pass the fields as an array so their sensitive keys are masked. The `referer` header is logged as sent:
@@ -341,7 +344,9 @@ No `alert.failed` event means AlertLoop is off or lacks a key: see `alertloop_en
 `alertloop_missing_keys` in `php scripts/health.php`. To fix it, set `MAIL_TO` on a server where
 `mail()` works, or `ALERTLOOP_BASE_URL` and `ALERTLOOP_API_KEY` (see
 [Configuration](/docs/configuration)). The visitor's message stays in the `request_start` event of
-the same trace, among the form fields; with `app.trace.log_body` set to `false` it is kept nowhere.
+the same trace, among the form fields, only while the request body is at most 8 KB. A long message
+goes over that within the form's 4,000-character limit, especially one not in Latin script (about
+3,600 Cyrillic characters do): then, as with `app.trace.log_body` set to `false`, it is kept nowhere.
 
 ## Checklist
 

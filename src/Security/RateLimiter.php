@@ -13,20 +13,25 @@ use Golovanov\Weft\Observability\ErrorHandler;
 /**
  * Rate limiting — ON by default (a sensible baseline for every form/API endpoint).
  *
- *   - allow(): fixed-window counter keyed by bucket + client IP.
+ *   - allow(): fixed-window counter keyed by bucket + client IP (an IPv6 client by its /64).
  *   - throttle(): at most one request per interval for a bucket + client IP.
  *   - honeypot(): treat a filled hidden field as a bot.
  *
- * Counters live in Redis when app.cache.driver is 'redis', otherwise in files under
- * app.rate_limit.path (relative to APP_ROOT; default: app.cache.path) — whether or not caching
- * is enabled. Each increment is atomic and the window starts at the first hit; later hits never
- * extend it. If the counter cannot be written, the request is allowed (fail-open) and the failure
- * is logged.
+ * Counters live in Redis when app.cache.driver is 'redis' (on the cache's connection, under the
+ * site prefix but outside the cache's keys), otherwise in files under app.rate_limit.path
+ * (relative to APP_ROOT; default: ratelimit/ in the cache directory) — whether or not caching is
+ * enabled. Cache::flush() leaves them. Each increment is atomic and the window starts at the first
+ * hit; later hits never extend it. One file increment in PRUNE_CHANCE deletes the expired counter
+ * files. If the counter cannot be written, the request is allowed (fail-open) and the failure is
+ * logged.
  *
  * Alert keeps its "already reported" window in the same store (claim()).
  */
 final class RateLimiter
 {
+    /** One file increment in this many also deletes the expired counter files. */
+    private const PRUNE_CHANCE = 100;
+
     private static FileStore|RedisStore|null $store = null;
 
     /** Why Redis was not used, when store() fell back to files. */
@@ -101,8 +106,7 @@ final class RateLimiter
         }
 
         $dir = self::directory();
-        // A file PHP cannot overwrite (a counter, or a cache entry in the shared default directory)
-        // makes a counter in it fail open just like an unwritable directory.
+        // A counter file PHP cannot overwrite fails open just like an unwritable directory.
         $unwritable = ErrorHandler::unwritable($dir, array_map('basename', glob($dir . '/*.cache') ?: []));
         $errors = array_filter([
             self::$redisError !== null ? 'Redis not used: ' . self::$redisError : null,
@@ -110,7 +114,7 @@ final class RateLimiter
                 $unwritable === [] => null,
                 $unwritable === [$dir] => 'PHP cannot write ' . $dir,
                 default => 'PHP cannot write ' . count($unwritable) . ' file(s) in ' . $dir
-                    . ' (cache entries or counters), e.g. ' . basename($unwritable[0]),
+                    . ', e.g. ' . basename($unwritable[0]),
             },
         ]);
         return [
@@ -151,15 +155,35 @@ final class RateLimiter
     private static function hit(string $prefix, int $window): ?int
     {
         $ip = RequestContext::request()?->clientIp ?? ($_SERVER['REMOTE_ADDR'] ?? 'cli');
-        return self::increment($prefix . ':' . $ip, $window, 'Rate limit failed open');
+        return self::increment($prefix . ':' . self::client($ip), $window, 'Rate limit failed open');
+    }
+
+    /**
+     * The counted client: an IPv4 address as is, an IPv6 one as its /64 network ("2001:db8:1:2::/64"),
+     * since one host gets a whole /64; an IPv4-mapped IPv6 address as its IPv4 address.
+     */
+    private static function client(string $ip): string
+    {
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            return $ip;
+        }
+        $packed = (string) inet_pton($ip);
+        if (bin2hex(substr($packed, 0, 12)) === '00000000000000000000ffff') {
+            return (string) inet_ntop(substr($packed, 12));
+        }
+        return inet_ntop(substr($packed, 0, 8) . str_repeat(chr(0), 8)) . '/64';
     }
 
     /** Increment a counter; null, with a line in the error log, when it is unavailable. */
     private static function increment(string $key, int $window, string $failure): ?int
     {
         try {
-            $count = self::store()->increment($key, $window);
+            $store = self::store();
+            $count = $store->increment($key, $window);
             $error = 'counter not writable';
+            if ($store instanceof FileStore && random_int(1, self::PRUNE_CHANCE) === 1) {
+                $store->prune();
+            }
         } catch (\Throwable $e) {
             $count = null;
             $error = $e->getMessage();
@@ -172,19 +196,14 @@ final class RateLimiter
 
     private static function store(): FileStore|RedisStore
     {
-        if (self::$store !== null) {
+        // After a failed Redis command the request goes on with files (RedisStore::failed()).
+        if (self::$store !== null && !(self::$store instanceof RedisStore && self::$store->failed())) {
             return self::$store;
         }
 
         if ((string) Config::get('app.cache.driver', 'file') === 'redis') {
             try {
-                return self::$store = new RedisStore(
-                    host: (string) Config::env('REDIS_HOST', '127.0.0.1'),
-                    port: (int) Config::env('REDIS_PORT', 6379),
-                    password: (string) Config::env('REDIS_PASSWORD', ''),
-                    database: (int) Config::env('REDIS_DB', 0),
-                    prefix: (string) Config::get('app.cache.prefix', 'weft:'),
-                );
+                return self::$store = RedisStore::fromConfig();
             } catch (\Throwable $e) {
                 self::$redisError = $e->getMessage();
                 ErrorHandler::log('rate_limit', 500, 'Redis unavailable, rate limits fall back to files: ' . $e->getMessage(), __FILE__, __LINE__);
@@ -194,13 +213,17 @@ final class RateLimiter
         return self::$store = new FileStore(self::directory());
     }
 
-    /** Counter directory: app.rate_limit.path, else app.cache.path, else storage/cache (see Config::path()). */
+    /**
+     * Counter directory: app.rate_limit.path, else ratelimit/ in the cache directory (app.cache.path,
+     * else storage/cache; see Config::path()), where Cache::flush() does not reach.
+     */
     private static function directory(): string
     {
         $dir = (string) Config::get('app.rate_limit.path', '');
-        if ($dir === '') {
-            $dir = (string) Config::get('app.cache.path', '');
+        if ($dir !== '') {
+            return Config::path($dir);
         }
-        return Config::path($dir !== '' ? $dir : 'storage/cache');
+        $cache = (string) Config::get('app.cache.path', '');
+        return rtrim(Config::path($cache !== '' ? $cache : 'storage/cache'), '/\\') . '/ratelimit';
     }
 }

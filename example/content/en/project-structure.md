@@ -25,7 +25,7 @@ my-site/
 ├── frontend/src/           Vite sources
 ├── public/                 document root: index.php, .htaccess, dist/, img/
 ├── scripts/                CLI: health, sitemap, cache-clear
-├── storage/                logs/ and cache/
+├── storage/                logs/ and cache/ (rate-limit counters in cache/ratelimit/)
 └── bootstrap.php           shared init (web + CLI)
 ```
 
