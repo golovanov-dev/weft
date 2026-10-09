@@ -47,6 +47,7 @@ $request->isPost();  $request->wantsJson();  $request->header('authorization'); 
 Request::invalidProxyIps();   // PROXY_IPS entries that are neither an IP nor a CIDR range
 Request::trustAllProxyIps();  // PROXY_IPS entries too wide for a proxy (IPv4 wider than /8, IPv6 than /16)
 Request::proxyIpsError();     // why PROXY_IPS is unusable (not an array), or null
+Request::isHttps();           // came over HTTPS: X-Forwarded-Proto from PROXY_IPS, else $_SERVER['HTTPS']
 
 Response::html($html, 200);  Response::json($data, 200);  Response::text($t);  Response::redirect($url, 302);
 $response->withHeader($n, $v);  $response->send();
@@ -109,12 +110,13 @@ Headers::send();
 Trace::event($name, $data);  Trace::id();  Trace::isActive();   // LOGS_PATH/requests on the web, LOGS_PATH/cli in scripts
 Alert::send($msg, $severity, $type, $dedupeKey, $context, $category);  Alert::critical($msg, $ctx);  Alert::missingKeys();
 ErrorHandler::log($type, $code, $msg, $file, $line);  ErrorHandler::debug();
+Health::check($name, fn() => ['ok' => true, ...]);   // a site check in vendor/bin/weft-health
 ```
 
 ### Assets and views
 
 ```php
-Vite::tags('src/main.js');  Vite::devMode();
+Vite::tags('src/main.js');  Vite::devMode();  Vite::manifestError('src/main.js');
 View::render($file, $data);  View::page($pageFile, $layoutFile, $data);  View::share($key, $value);
 ```
 
@@ -126,7 +128,7 @@ Pages receive `$request`, `$route`, `$locale`, and on dynamic routes the params 
 ## CLI
 
 ```bash
-php scripts/health.php       # environment diagnostics (JSON, exit code 0/1)
+vendor/bin/weft-health       # readiness report (JSON, exit code 0/1); --dev on your machine
 php scripts/sitemap.php      # write a static public/sitemap.xml
 php scripts/cache-clear.php  # delete the cache entries (rate-limit counters stay); exit 1 if the store fails
 ```

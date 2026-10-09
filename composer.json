@@ -37,6 +37,9 @@
       "src/helpers.php"
     ]
   },
+  "bin": [
+    "bin/weft-health"
+  ],
   "autoload-dev": {
     "psr-4": {
       "Golovanov\\Weft\\Tests\\": "tests/"

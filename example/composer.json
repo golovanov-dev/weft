@@ -18,7 +18,7 @@
     "sort-packages": true
   },
   "scripts": {
-    "health": "php scripts/health.php",
+    "health": "weft-health",
     "sitemap": "php scripts/sitemap.php",
     "cache-clear": "php scripts/cache-clear.php"
   }

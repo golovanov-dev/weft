@@ -107,7 +107,7 @@ entries only. Values come back without their classes, so cache arrays and scalar
 Two properties worth knowing: when caching is **off**, a NullStore is used — `remember()` still runs
 the callback, so wrapping code in it is always safe and you can enable the cache later. And if Redis
 is unreachable or rejects `REDIS_PASSWORD` or `REDIS_DB`, the engine falls back to the file store
-instead of failing the request; `php scripts/health.php` then fails and says why. A store that fails
+instead of failing the request; `vendor/bin/weft-health` then fails and says why. A store that fails
 later (a read-only replica, `maxmemory` reached) does not fail the page either: reads are misses,
 writes are skipped, and the error log gets one line per request.
 
@@ -172,7 +172,7 @@ apart from its keys (in files when Redis cannot be used, as for the cache), othe
 reset them. A window starts at the first hit and later hits never extend it; the limiter deletes
 expired counter files now and then.
 If a counter cannot be written, the limiter **fails open**: the request is allowed and the failure
-goes to the error log, so a broken store never locks users out. `php scripts/health.php` shows
+goes to the error log, so a broken store never locks users out. `vendor/bin/weft-health` shows
 where counters go (`rate_limit_store`, `rate_limit_path`) and fails when they cannot be written.
 
 Limits count per client IP, taken from `REMOTE_ADDR`; an IPv6 client counts by its `/64` network,
@@ -182,12 +182,14 @@ another server proxying to PHP it is the proxy's address, so every visitor share
 example's contact form then takes one submission per 5 seconds for the whole site. List the proxies
 in the `PROXY_IPS` constant (`config/config.php`) as IP addresses or CIDR ranges
 (`'173.245.48.0/20'`, `'2400:cb00::/32'`); a host name such as `localhost` or a Docker service name
-is ignored, and `php scripts/health.php` lists it under `proxy_ips_invalid`. For a request from one of them, the client IP is the rightmost `X-Forwarded-For` entry
+is ignored, and `vendor/bin/weft-health` lists it under `proxy_ips_invalid`. For a request from one of them, the client IP is the rightmost `X-Forwarded-For` entry
 that is not in `PROXY_IPS`; entries further left are set by the client and ignored. No other header
 is read: a proxy that passes the address only in `X-Real-IP` or `X-Client-Ip`, or an entry that is
 not an IP, leaves the proxy's address in place. To see which address Weft took, look at `client_ip`
-in the `request_start` trace event. What to list for Cloudflare, a chain of proxies or Docker, and
-how to check it: [Deployment](/docs/deployment).
+in the `request_start` trace event. From the same proxies Weft reads `X-Forwarded-Proto`:
+`Request::isHttps()` is true when its last value is `https` or, without the header, when PHP sees
+HTTPS; the example uses it for the `Secure` flag of the session cookie. What to list for Cloudflare,
+a chain of proxies or Docker, and how to check it: [Deployment](/docs/deployment).
 
 The captcha is on when `app.captcha.enabled` is true and both keys are set; in this example the
 flag follows `RECAPTCHA_SECRETKEY`. While the flag is off, `verify()` returns a pass
@@ -195,7 +197,7 @@ flag follows `RECAPTCHA_SECRETKEY`. While the flag is off, `verify()` returns a 
 missing, `verify()` records a `captcha.misconfigured` trace event and a line in the error log
 (`storage/logs/errors/`), then: with `DEBUG` on it passes, so the form works locally; with `DEBUG`
 off it fails with the error code `misconfigured` and sends a critical alert (category `security`),
-so in production every submission is rejected until both keys are set. `php scripts/health.php`
+so in production every submission is rejected until both keys are set. `vendor/bin/weft-health`
 lists the missing keys under `captcha_missing_keys` and, with `DEBUG` off, fails.
 A rejection the visitor did not cause — Google unreachable (`request-failed`), the secret refused
 (`invalid-input-secret`), a token for a host not in `app.captcha.allowed_hosts` or for another
@@ -353,6 +355,31 @@ In production the tags also carry preload hints: `rel="modulepreload"` for the e
 chunk it statically imports (the manifest's `imports`, walked recursively) and `rel="preload"` for
 the stylesheets, so the browser fetches them without waiting to parse the entry. Dynamic imports
 are left out on purpose — preloading them would undo the code split.
+
+## Health check
+
+`vendor/bin/weft-health`, run in the site root, prints a JSON report and exits with 1 when the site
+is not ready to serve: logs or rate-limit counters PHP cannot write, an unusable `PROXY_IPS`, a
+captcha or alerts without their keys, development settings (`DEBUG`, example.com, no built assets),
+or a failed check of the site. What each field means: [Deployment](/docs/deployment), "What
+`weft-health` checks".
+
+The engine cannot know what your site needs, so the site adds its own checks in `app/Bootstrap.php`.
+A check returns the fields to show and `ok`; anything but `ok => true`, or an exception, fails the
+report. A minimal check that a contact form has a channel (this example's
+`App\Bootstrap::contactForm()` also fails on example.com addresses and on a `mail()` PHP cannot
+call):
+
+```php
+Health::check('contact_form', static function (): array {
+    $mailTo = (string) Config::get('app.contact.mail_to', '');
+    $alertloop = (bool) Config::get('app.alertloop.enabled', false);
+    return ['ok' => $mailTo !== '' || $alertloop, 'mail_to' => $mailTo, 'alertloop' => $alertloop];
+});
+```
+
+The result is under `checks.contact_form` in the report. Keep a check fast and free of side effects:
+cron may run it every few minutes.
 
 ## Security defaults
 

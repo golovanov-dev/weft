@@ -1,0 +1,24 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Health check of a Weft site. Run it from the site root, the directory holding bootstrap.php:
+ *
+ *   vendor/bin/weft-health        is the site ready for production?
+ *   vendor/bin/weft-health --dev  on a development machine: settings listed under "production" do not fail it
+ *
+ * Prints a JSON report and exits with 0 when "ok" is true, 1 otherwise.
+ */
+
+$bootstrap = getcwd() . '/bootstrap.php';
+if (!is_file($bootstrap)) {
+    fwrite(STDERR, 'weft-health: no bootstrap.php in ' . getcwd() . "; run it from the site root.\n");
+    exit(1);
+}
+require $bootstrap;
+
+$report = Golovanov\Weft\Observability\Health::report(in_array('--dev', $_SERVER['argv'] ?? [], true));
+echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) . "\n";
+exit($report['ok'] ? 0 : 1);

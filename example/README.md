@@ -14,7 +14,7 @@ after `composer install`:
 ```bash
 composer install
 php -S localhost:8000 -t public public/index.php
-php scripts/health.php
+vendor/bin/weft-health --dev   # environment check; on a server, without --dev
 ```
 
 Open <http://localhost:8000>. With no `config/config.php` present, `bootstrap.php` falls back to

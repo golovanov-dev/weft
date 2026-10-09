@@ -119,6 +119,25 @@ final class Vite
         return $order;
     }
 
+    /**
+     * Why tags() cannot serve $entry from the built files: the manifest or the entry in it is
+     * missing. Null when the entry is there. Health checks report it.
+     */
+    public static function manifestError(string $entry): ?string
+    {
+        if (isset(self::manifest()[ltrim($entry, '/')])) {
+            return null;
+        }
+        $path = self::manifestPath();
+        return is_file($path) ? "{$path} has no entry {$entry}" : "{$path} not found";
+    }
+
+    private static function manifestPath(): string
+    {
+        $root = (string) Config::env('WEB_ROOT', Config::root() . '/public');
+        return rtrim($root, '/\\') . '/dist/.vite/manifest.json';
+    }
+
     private static function assetUrl(string $file): string
     {
         return Url::asset('dist/' . ltrim($file, '/'));
@@ -140,8 +159,7 @@ final class Vite
         if (self::$manifest !== null) {
             return self::$manifest;
         }
-        $root = (string) Config::env('WEB_ROOT', Config::root() . '/public');
-        $path = rtrim($root, '/\\') . '/dist/.vite/manifest.json';
+        $path = self::manifestPath();
         $json = is_file($path) ? file_get_contents($path) : false;
         $data = $json !== false ? json_decode($json, true) : null;
         self::$manifest = is_array($data) ? $data : [];

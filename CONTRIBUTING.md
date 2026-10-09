@@ -40,7 +40,7 @@ with `git checkout example/composer.json` before opening a pull request.
 cd example
 composer install
 php -S localhost:8000 -t public public/index.php   # committed dist → runs without Node
-php scripts/health.php
+vendor/bin/weft-health --dev
 
 # To work on the frontend with HMR, opt into dev mode:
 cp config/config.example.php config/config.php      # set DEV_MODE=true in it

@@ -67,7 +67,7 @@ define('AUTH_JWT_KEY', '');         // JWT verification
 define('AUTH_JWT_ISSUER', '');
 
 define('PROXY_IPS', []);            // IPs or CIDR ranges of a CDN / proxy in front of PHP (not host names);
-                                    // X-Forwarded-For is read only from these. Empty on shared hosting
+                                    // X-Forwarded-For/-Proto are read only from these. Empty on shared hosting
                                     // and nginx + php-fpm; behind a proxy, empty means one rate limit for all
 define('TRACE_TRUST_INCOMING', false); // reuse an upstream X-Trace-Id / X-Request-Id
 ```
@@ -167,10 +167,12 @@ only with `'hsts_subdomains' => true`. A browser keeps it for `max-age` seconds;
 does not shorten that, only `max-age=0` sent to each returning visitor does. Read "HTTPS and HSTS" in
 [Deployment](/docs/deployment) before turning it on.
 
-The session cookie (set in `public/index.php`) is `HttpOnly`, `SameSite=Lax`, and `Secure` when PHP
-sees the request as HTTPS (`$_SERVER['HTTPS']`); `session.use_strict_mode` makes PHP replace a
-session id it did not issue. Behind a proxy that talks plain HTTP to PHP, pass `HTTPS=on` to PHP, or
-the cookie goes without `Secure`: "HTTPS behind a proxy" in [Deployment](/docs/deployment) shows how.
+The session cookie (set in `public/index.php`) is `HttpOnly`, `SameSite=Lax`, and `Secure` when the
+request came over HTTPS (`Request::isHttps()`: `X-Forwarded-Proto` from a proxy in `PROXY_IPS`,
+otherwise `$_SERVER['HTTPS']`); `session.use_strict_mode` makes PHP replace a session id it did not
+issue. Behind a proxy that talks plain HTTP to PHP, list it in `PROXY_IPS` or pass `HTTPS=on` to
+PHP, or the cookie goes without `Secure`: "HTTPS behind a proxy" in [Deployment](/docs/deployment)
+shows how.
 
 Caching is deliberately **on** in this demo (`'cache' => ['enabled' => true]` in
 `app/Configs/app.php`): it makes Markdown rendering cheap and shows the feature working in a real
@@ -197,7 +199,7 @@ Note how feature flags derive from the environment, so there is one source of tr
 ],
 ```
 
-So the keys `php scripts/health.php` names under `captcha_missing_keys` (`site_key`, `secret_key`)
+So the keys `vendor/bin/weft-health` names under `captcha_missing_keys` (`site_key`, `secret_key`)
 are set as `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` in `config/config.php`. To disable the
 captcha in this example, set `RECAPTCHA_SECRETKEY` to `''`.
 
@@ -214,7 +216,7 @@ captcha in this example, set `RECAPTCHA_SECRETKEY` to `''`.
 ```
 
 Alerts are on once `ALERTLOOP_API_KEY` is set and need `ALERTLOOP_BASE_URL` too: without it nothing
-is sent, the error log gets a line, and `php scripts/health.php` lists the key under
+is sent, the error log gets a line, and `vendor/bin/weft-health` lists the key under
 `alertloop_missing_keys`. To turn alerts off, set `ALERTLOOP_API_KEY` to `''`.
 
 ### Trace

@@ -140,6 +140,31 @@ final class Request
     }
 
     /**
+     * Whether the visitor's request came over HTTPS. From a trusted proxy (PROXY_IPS) that sends
+     * X-Forwarded-Proto, its rightmost value decides; otherwise $_SERVER['HTTPS'] set and not "off".
+     */
+    public static function isHttps(): bool
+    {
+        return self::resolveHttps($_SERVER, self::proxyIps());
+    }
+
+    /**
+     * @param array<string, mixed> $server
+     * @param array<mixed>         $trusted
+     */
+    private static function resolveHttps(array $server, array $trusted): bool
+    {
+        $remote = (string) ($server['REMOTE_ADDR'] ?? '');
+        $proto = trim((string) ($server['HTTP_X_FORWARDED_PROTO'] ?? ''));
+        if ($proto !== '' && filter_var($remote, FILTER_VALIDATE_IP) && self::isTrusted($remote, $trusted)) {
+            // A proxy that appends writes its own value last; values left of it come from the client.
+            $values = explode(',', $proto);
+            return strtolower(trim((string) end($values))) === 'https';
+        }
+        return !in_array(strtolower((string) ($server['HTTPS'] ?? '')), ['', 'off'], true);
+    }
+
+    /**
      * Entries of PROXY_IPS (or of $entries) that are neither an IP address nor a CIDR range, such as
      * a host name. The client IP resolution ignores them; health checks report them.
      *

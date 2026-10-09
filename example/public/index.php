@@ -26,13 +26,17 @@ ini_set('log_errors', '1');
 // Web root, used by the Vite manifest resolver.
 define('WEB_ROOT', __DIR__);
 
-// Session cookie parameters. The session itself starts only when a form needs a CSRF token
-// (Csrf), so pages without a form set no cookie. Secure when PHP sees the request as HTTPS;
-// strict mode refuses a session id the server did not issue.
-$https = !in_array(strtolower((string) ($_SERVER['HTTPS'] ?? '')), ['', 'off'], true);
-session_set_cookie_params(['path' => '/', 'httponly' => true, 'samesite' => 'Lax', 'secure' => $https]);
-ini_set('session.use_strict_mode', '1');
-
 require dirname(__DIR__) . '/bootstrap.php';
+
+// Session cookie parameters. The session itself starts only when a form needs a CSRF token
+// (Csrf), so pages without a form set no cookie. Secure when the request came over HTTPS, as PHP
+// or a proxy in PROXY_IPS says; strict mode refuses a session id the server did not issue.
+session_set_cookie_params([
+    'path' => '/',
+    'httponly' => true,
+    'samesite' => 'Lax',
+    'secure' => Golovanov\Weft\Http\Request::isHttps(),
+]);
+ini_set('session.use_strict_mode', '1');
 
 Golovanov\Weft\Kernel::handle();

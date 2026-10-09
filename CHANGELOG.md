@@ -47,26 +47,44 @@ pre-1.0 the API may change between minor versions.
 
 ### Added
 
-- `scripts/health.php` in the example exits with 1 (`ok: false`) when logs or rate-limit counters
-  cannot be written (`errors/` and the site's `requests/` under `LOGS_PATH`, though the script runs
-  from the console, with today's files and traceloom's lock file; the counter directory or a file
-  in it; with Redis, a probe write), when counters went to files while `app.cache.driver` is
-  `redis`, when `PROXY_IPS` is not an array or has an entry that is invalid or too wide for a proxy
-  (`/0`, IPv4 wider than `/8`, IPv6 wider than `/16`), and outside `DEBUG` when a captcha or alerts
-  are enabled without their keys. New fields: `cache_driver`, `rate_limit_store`,
-  `rate_limit_path`, `rate_limit_writable`, `rate_limit_error`, `proxy_ips_error`,
-  `proxy_ips_invalid`, `proxy_ips_trust_all`, `captcha_missing_keys`, `alertloop_missing_keys`,
-  `logs_error`. If your site copied the script, update the engine to 0.2.0 first, then copy the
-  script again: on an older engine it stops with a fatal error. Engine side:
-  `Captcha::missingKeys()`, `Alert::missingKeys()`, `ErrorHandler::logsError()`,
+- `vendor/bin/weft-health`, run in the site root, prints the health report of the site it boots
+  (through the site's `bootstrap.php`) and exits with 1 (`ok: false`) when logs or rate-limit
+  counters cannot be written (`errors/` and the site's `requests/` under `LOGS_PATH`, though the
+  command runs from the console, with today's files and traceloom's lock file; the counter directory
+  or a file in it; with Redis, a probe write), when counters went to files while `app.cache.driver`
+  is `redis`, when `PROXY_IPS` is not an array or has an entry that is invalid or too wide for a
+  proxy (`/0`, IPv4 wider than `/8`, IPv6 wider than `/16`), outside `DEBUG` when a captcha or
+  alerts are enabled without their keys, when `production` names a development setting (`DEBUG`,
+  `DEV_MODE`, `config/config.example.php` loaded, `app.url.base` or, with the captcha on,
+  `app.captcha.allowed_hosts` on example.com, no built `app.vite.entry` in the Vite manifest) unless
+  run with `--dev`, and when a check of the site fails. New fields: `config` (the environment config
+  loaded), `production`, `checks`, `cache_driver`, `rate_limit_store`, `rate_limit_path`,
+  `rate_limit_writable`, `rate_limit_error`, `proxy_ips_error`, `proxy_ips_invalid`,
+  `proxy_ips_trust_all`, `captcha_missing_keys`, `alertloop_missing_keys`, `logs_error`. Engine
+  side: `Captcha::missingKeys()`, `Alert::missingKeys()`, `ErrorHandler::logsError()`,
   `RateLimiter::storeStatus()`, `Request::invalidProxyIps()`, `Request::trustAllProxyIps()`,
-  `Request::proxyIpsError()`.
+  `Request::proxyIpsError()`, `Vite::manifestError()`.
+- `Health::check($name, $check)` adds a check of the site to `weft-health`: register it in
+  `app/Bootstrap.php`; the callable returns the fields to show and `ok`, reported under
+  `checks.<name>`, and anything but `ok => true`, or an exception, fails the report. The example
+  checks that its contact form has a channel and shows where requests go
+  (`checks.contact_form.mail_to`).
+- `Request::isHttps()`: a request from a proxy in `PROXY_IPS` came over HTTPS when the last value of
+  its `X-Forwarded-Proto` is `https`; from any other address, or without the header, when
+  `$_SERVER['HTTPS']` is set and not `off`. `example/public/index.php` uses it for the `Secure` flag
+  of the session cookie, so a proxy listed in `PROXY_IPS` needs no `HTTPS=on`. If your site copied
+  that file, take its session cookie block, which now comes after `require bootstrap.php`.
 - `PROXY_IPS` accepts IPv4 and IPv6 CIDR ranges (`'173.245.48.0/20'`, `'2400:cb00::/32'`) next to
   addresses, so a CDN such as Cloudflare can be listed by its published ranges. Host names
   (`localhost`, a Docker service name) are ignored: write the address.
 
 ### Changed
 
+- The health check moved from the example's `scripts/health.php` into the engine:
+  `vendor/bin/weft-health`, run in the site root. Delete your copy of `scripts/health.php` and call
+  `vendor/bin/weft-health` from deploy scripts, CI and cron (`--dev` on a development machine). The
+  report no longer has the `traceloom` field, which was always `true`: if you parse the output, stop
+  reading it. `ok` is now false on a server with development settings: fix what `production` names.
 - Weft requires `golovanov/traceloom` `^0.5`. If your site's `composer.json` requires traceloom
   itself, raise that constraint to `^0.5` too, or Composer cannot install Weft 0.2.0.
 - Each page has one address: a GET or HEAD request for `/about/` gets a 301 to `/about`, `/home`
@@ -116,7 +134,8 @@ pre-1.0 the API may change between minor versions.
   `umask 002`; step 5 also hands files your scripts left in `storage/logs/requests/` to PHP's
   group), add `umask 002;` to your cron lines and to commands you run over ssh or from CI, move cron
   jobs that run Weft scripts from the crontab of `www-data` or `root` to the deploy user's, exclude
-  `storage/` and `config/config.php` if you deploy with rsync, and run `health.php` as the PHP user.
+  `storage/` and `config/config.php` if you deploy with rsync, and run `vendor/bin/weft-health` as
+  the PHP user.
 - The Redis key prefix defaults to the host of `app.url.base` and a colon (`example.com:`), not
   `weft:`, and cache entries are kept under `<prefix>cache:`: `Cache::flush()` and `cache-clear.php`
   delete only those, not rate-limit counters or another site's keys. After the upgrade the Redis
@@ -189,12 +208,12 @@ pre-1.0 the API may change between minor versions.
   `maxmemory` under `noeviction`) no longer makes cached pages fail with 500. On a rejected
   connection the cache and rate limits fall back to files, as with an unreachable Redis; a rejected
   read is a miss, a write is skipped, and the error log gets one `Cache store failed` line per
-  request. If `health.php` reports `rate_limit_store: file`, `rate_limit_error` says why.
+  request. If `weft-health` reports `rate_limit_store: file`, `rate_limit_error` says why.
 - The example under PHP's built-in server (`php -S … -t public public/index.php`) serves its CSS, JS
   and images; before, every asset request returned 404. If your site copied
   `example/public/index.php` and you develop with `php -S`, copy the new `cli-server` block at its
   top.
-- 25 smaller fixes: 3 security, 12 reliability, 10 docs.
+- 26 smaller fixes: 3 security, 12 reliability, 11 docs.
 
 ### Removed
 

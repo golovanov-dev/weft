@@ -58,7 +58,9 @@ systemctl show -p UMask php8.4-fpm     # must print UMask=0002
 php scripts/sitemap.php
 
 # 8. Verify, as the user PHP runs as (sudo resets the umask, so set it for the check too)
-sudo -u www-data sh -c 'umask 002; php scripts/health.php'
+sudo -u www-data sh -c 'umask 002; vendor/bin/weft-health'
+#    then send one request through the contact form (/contact in the example) and see it arrive:
+#    weft-health checks the form's settings, not that its email reaches you (see "Monitoring")
 ```
 
 Run all of this on the server, in the site root (the directory holding `bootstrap.php`), as the
@@ -77,7 +79,7 @@ pool (for example `/etc/php/8.4/fpm/pool.d/www.conf`) or the user Apache runs as
 PHP writes the error log, traces, the file cache and rate-limit counters under `storage/` (counters
 live in `storage/cache/ratelimit/` even with caching off, unless `app.rate_limit.path` points
 elsewhere; `cache-clear.php` leaves them unless that path is the cache directory itself — check
-`rate_limit_path` in `php scripts/health.php`).
+`rate_limit_path` in `vendor/bin/weft-health`).
 Scripts write there too (`php scripts/sitemap.php`, your cron jobs), and you read the logs and
 traces.
 
@@ -119,29 +121,33 @@ put the line there); a command run over ssh does not read either, so it needs it
 server creates group-writable files. Without systemd (the Docker `php:fpm` image, supervisord),
 set the umask in the command that starts FPM, for example the container entrypoint:
 `umask 0002 && exec php-fpm`.
-`health.php` runs from the command line and cannot see PHP-FPM's umask: check it with the
+`weft-health` runs from the command line and cannot see PHP-FPM's umask: check it with the
 `systemctl show` line of step 6 (in a container, `grep Umask /proc/$(pgrep -o php-fpm)/status`).
 
 Run every script and cron job as one user, the deploy user (its own `crontab -e`), not as
 `www-data` or root. A script run as another user takes `cli/`, and the deploy user's scripts then
-lose their traces: only stderr and `errors/` say `fopen(.../cli/.traceloom.lock)`, `health.php` does
+lose their traces: only stderr and `errors/` say `fopen(.../cli/.traceloom.lock)`, `weft-health` does
 not check `cli/`. `sudo` also runs a command with umask `022`, so what it creates is not
 group-writable. To recover, run the `chgrp`, `chmod` and `find` lines of step 5 again.
 
-Run only `health.php` as the PHP user (step 8); it writes no trace. It checks the permissions of the
+Run only `weft-health` as the PHP user (step 8); it writes no trace. It checks the permissions of the
 user who runs it, so from your own shell it can report `ok: true` for a `storage/` that PHP cannot
 write.
 
 If PHP cannot write `storage/`, rate limits stop limiting: the limiter fails open so a broken disk
 never locks visitors out, and the line it writes about that goes to `storage/logs/errors/`, which is
-not writable either — nothing records it but `health.php` (`rate_limit_writable: false`).
+not writable either — nothing records it but `weft-health` (`rate_limit_writable: false`).
 
-### What `health.php` checks
+### What `weft-health` checks
 
-It prints a JSON report and exits with 1 when `ok` is false. `ok` is false when any of these is bad:
+Run it in the site root. It prints a JSON report and exits with 1 when `ok` is false, 0 otherwise.
+`config` names the environment config the site loaded (`config/config.php` on a server). `ok` is
+false when any of these is bad:
 
 | Field | Bad value | What to do |
 |---|---|---|
+| `production` | not empty | it names settings for a development machine: `DEBUG` or `DEV_MODE` on, `config/config.example.php` loaded (create `config/config.php`), `app.url.base` on example.com, `app.captcha.allowed_hosts` with example.com while the captcha is on, or, with `app.vite.entry` set, a `public/dist/.vite/manifest.json` without that entry (run `npm run build`). Fix each one it names |
+| `checks.<name>.ok` | `false` | a check your site added in `app/Bootstrap.php` failed; its other fields say why. This example's `contact_form` lists in `problems`: `MAIL_TO` or `MAIL_FROM` still on example.com, the template's addresses (requests would go to example.com while the visitor sees "Thanks"): set your inbox and an address of your domain; no channel, `MAIL_TO` empty and AlertLoop off: set either; `mail()` not available while it is the only channel. `mail_available` is `false` when `mail()` is disabled (`disable_functions`) or, outside Windows, the program in `sendmail_path` does not exist: install the server's mail transport (sendmail, postfix, msmtp) or set AlertLoop. With either of the last two, every form submission answers 503 (see "The contact form answers 503" below). `contact_form` sends nothing, so `ok: true` does not mean an email arrives: see "Monitoring" |
 | `logs_writable` | `false` | `logs_error` names what PHP cannot write: `errors/` or `requests/` under `LOGS_PATH`, today's file in it, or `requests/.traceloom.lock`. Run the `chgrp`, `chmod` and `find` lines of step 5 again, then find who created it: `ls -l` shows the owner. In `errors/`, a writer without `umask 002`: PHP-FPM (check step 6) or another user's cron lines (`sudo crontab -l -u <user>`), scripts, commands over ssh. In `requests/`, anyone but PHP, such as `php -S` started as another user |
 | `rate_limit_writable` | `false` | `rate_limit_error` names `rate_limit_path`, or how many files in it PHP cannot write and one of them: the same as for `logs_writable`; with Redis, see below |
 | `rate_limit_store` | `file` while `cache_driver` is `redis` | Redis is not used, the cache and counters are per server: see below |
@@ -152,7 +158,8 @@ It prints a JSON report and exits with 1 when `ok` is false. `ok` is false when 
 | `alertloop_missing_keys` | not empty, with `DEBUG` off | alerts are on but nothing is sent: set the keys or turn alerts off (below) |
 
 With `DEBUG` on, `captcha_missing_keys` and `alertloop_missing_keys` are still listed but do not fail
-the check.
+the check. On a development machine, `vendor/bin/weft-health --dev` lists `production` without
+failing on it; every other field counts as on a server.
 
 `captcha_missing_keys` names keys of `app.captcha`: `site_key`, `secret_key`. In this example they
 come from `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` in `config/config.php`, and the captcha is
@@ -165,11 +172,11 @@ a site with its own config, set `app.captcha.enabled` to `false`.
 
 `rate_limit_path` is `app.rate_limit.path`, else `ratelimit/` in `app.cache.path`
 (`storage/cache/ratelimit` by default); a relative one is taken from the site root (`APP_ROOT`), so
-`health.php` and the site use the same directory whatever their working directory. A counter file in
+`weft-health` and the site use the same directory whatever their working directory. A counter file in
 it that PHP cannot overwrite (created by a script without `umask 002`) also makes
 `rate_limit_writable` false; `rate_limit_error` names one of them.
 
-With `app.cache.driver` set to `redis`, the engine sends `PING` after connecting, and `health.php`
+With `app.cache.driver` set to `redis`, the engine sends `PING` after connecting, and `weft-health`
 writes a probe counter to Redis (ten-second TTL, deleted at once).
 
 | `rate_limit_store` | `rate_limit_error` contains | Cause |
@@ -186,7 +193,7 @@ writes a probe counter to Redis (ten-second TTL, deleted at once).
 When Redis is not used, the cache falls back to files as well. The cache and the counters share one
 connection per request. If Redis does not answer, every request that uses the cache, a rate limit or
 an alert with a dedupe key waits for it once, up to 2 seconds to connect and 1 second for a reply,
-until Redis is back; so does `health.php`. In the `redis` row pages are still served: a cache read or
+until Redis is back; so does `weft-health`. In the `redis` row pages are still served: a cache read or
 write Redis rejects is skipped, and a form submission whose counter it rejects is allowed.
 
 The site logs the reason to `errors/<date>.log` under `LOGS_PATH`, in lines like these (time in
@@ -199,7 +206,7 @@ The site logs the reason to `errors/<date>.log` under `LOGS_PATH`, in lines like
 [2026-10-08 12:00:00] RATE_LIMIT ERRNO:500 | Rate limit failed open: <reason> | …
 ```
 
-The first line comes from form submissions and `health.php`, the second from page views; both mean
+The first line comes from form submissions and `weft-health`, the second from page views; both mean
 Redis is not used. The last two mean Redis rejects commands, as in the `redis` row.
 
 ## Document root is `public/`
@@ -271,7 +278,7 @@ define('PROXY_IPS', ['203.0.113.10', '173.245.48.0/20', '2400:cb00::/32']);
 
 Each entry is an IP address or a CIDR range. A host name is ignored: write the address — for
 `localhost`, `'127.0.0.1'` and/or `'::1'`; for a Docker service name such as `nginx`, its address
-(below). `health.php` lists such entries under `proxy_ips_invalid`. It also fails on `0.0.0.0/0` and
+(below). `weft-health` lists such entries under `proxy_ips_invalid`. It also fails on `0.0.0.0/0` and
 `::/0` (`proxy_ips_trust_all`): every address then counts as a proxy, the client IP is always the
 proxy's, and the whole site shares one rate limit. Ranges wider than `/8` (IPv4) or `/16` (IPv6)
 fail too: visitors from them share that limit or, with a forged `X-Forwarded-For`, pick their own
@@ -302,28 +309,27 @@ grep -h '"request_start"' storage/logs/requests/*.jsonl | tail -n 1 | grep -o '"
 
 ### HTTPS behind a proxy
 
-The session cookie gets `Secure` only when PHP sees the request as HTTPS (`$_SERVER['HTTPS']` set
-and not `off`). Weft does not read `X-Forwarded-Proto`. Where HTTPS ends before the server that runs
-PHP, set `HTTPS=on` for PHP yourself; otherwise the site and its forms work, and the cookie goes
-without `Secure`, with no error anywhere.
+The session cookie gets `Secure` when the request came over HTTPS (`Request::isHttps()`): for a
+request from a proxy in `PROXY_IPS`, its `X-Forwarded-Proto` header says so; otherwise PHP does
+(`$_SERVER['HTTPS']` set and not `off`). When neither says HTTPS, the site and its forms work, and
+the cookie goes without `Secure`, with no error anywhere.
 
+- **A proxy or CDN listed in `PROXY_IPS`** (above) — nothing more to do, as long as it sends
+  `X-Forwarded-Proto`. Cloudflare does; in your own nginx that ends HTTPS, set
+  `proxy_set_header X-Forwarded-Proto $scheme;` in the `location` that proxies to PHP. Of several
+  values (`https, http`) Weft takes the last one, written by the nearest proxy. The header from
+  any other address is ignored.
 - **nginx + PHP-FPM on one machine, the certificate in this nginx** — nothing to do:
   `include fastcgi_params;` passes `fastcgi_param HTTPS $https if_not_empty;`, so PHP gets `on` for
   every HTTPS request. If your config does not include that file, add that line to the
   `location ~ \.php$` block.
-- **nginx + PHP-FPM, HTTPS ends earlier** (Cloudflare without a certificate on your server, a load
-  balancer) — add `fastcgi_param HTTPS on;` to the `location ~ \.php$` block, after
-  `include fastcgi_params;`. Do it only when the server in front redirects plain HTTP to HTTPS, so
-  every request PHP gets came over HTTPS.
-- **Apache behind a proxy** (nginx proxying to Apache or to a container with Apache, a CDN) — in the
-  virtual host or in `public/.htaccess`, with `mod_setenvif` on, add
-  `SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on`. The proxy has to send that header: Cloudflare
-  does; in your own nginx, set `proxy_set_header X-Forwarded-Proto $scheme;` in the `location`
-  that proxies to Apache.
+- **HTTPS ends earlier, and `PROXY_IPS` is empty** — set `HTTPS=on` for PHP yourself. nginx +
+  PHP-FPM: add `fastcgi_param HTTPS on;` to the `location ~ \.php$` block, after
+  `include fastcgi_params;`, only when the server in front redirects plain HTTP to HTTPS, so every
+  request PHP gets came over HTTPS. Apache: in the virtual host or in `public/.htaccess`, with
+  `mod_setenvif` on, add `SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on`.
 - **Cloudflare or another CDN** — best, give the server a certificate and let the CDN connect to it
-  over HTTPS (Cloudflare: SSL mode "Full (strict)"); then the server sees HTTPS itself and the cases
-  above need nothing more. If the CDN talks plain HTTP to the server ("Flexible"), use the nginx or
-  Apache line above.
+  over HTTPS (Cloudflare: SSL mode "Full (strict)"); then the server sees HTTPS itself.
 
 **Check it** on a page with a form (in the example, `/contact`), from any machine:
 
@@ -332,6 +338,47 @@ curl -s -D - -o /dev/null https://example.com/contact | grep -i '^set-cookie'
 ```
 
 The `Set-Cookie` line must contain `secure`.
+
+## Monitoring
+
+Step 8 checks the site once. Two things tell you when it breaks later:
+
+- **Availability** — any uptime monitoring service requesting your home page every few minutes and
+  alerting you when the answer is not `200`. It sees what visitors see: DNS, the certificate, the web
+  server and PHP.
+- **`weft-health` by cron** — in the crontab of the PHP user (`sudo crontab -u www-data -e`; like
+  step 8, the one script run as that user), with your address and site root:
+
+```text
+MAILTO=you@example.com
+*/15 * * * * umask 002; cd /var/www/site && out=$(vendor/bin/weft-health) || echo "$out"
+```
+
+cron mails what a job prints, so the report reaches you only when `weft-health` exits with 1; the
+server needs working mail for that, as `mail()` does. Without it, use a heartbeat check of your
+uptime service instead, which alerts when the pings stop:
+
+```text
+*/15 * * * * umask 002; cd /var/www/site && vendor/bin/weft-health > /dev/null && curl -fsS -m 10 https://<your heartbeat URL>
+```
+
+When it fails, fix what the report names ("What `weft-health` checks" above), then run step 8 again
+until it exits with 0.
+
+Neither of them sees whether the contact form's email arrives. `weft-health` checks the addresses and
+that PHP can hand `mail()` a message; the mail server can still refuse it or the email can bounce
+later (on Windows, `mail()` is only tried when a message is sent). So after each deploy and after any
+change to `MAIL_TO`, `MAIL_FROM` or the server's mail setup, send one request through the form
+yourself and check that it reached your inbox (or AlertLoop). If the form answered 503, or the email
+did not come, look in the error log:
+
+```bash
+grep -h 'not delivered\|not sent' storage/logs/errors/*
+```
+
+A line there is explained in "The contact form answers 503" below; no line and no email means the
+server's mail transport took the email and did not deliver it: see its own log (for example
+`/var/log/mail.log`).
 
 ## Updating
 
@@ -392,7 +439,7 @@ grep -h '<trace_id>' storage/logs/requests/*.jsonl | grep alert.failed
 ```
 
 No `alert.failed` event means AlertLoop is off or lacks a key: see `alertloop_enabled` and
-`alertloop_missing_keys` in `php scripts/health.php`. To fix it, set `MAIL_TO` on a server where
+`alertloop_missing_keys` in `vendor/bin/weft-health`. To fix it, set `MAIL_TO` on a server where
 `mail()` works, or `ALERTLOOP_BASE_URL` and `ALERTLOOP_API_KEY` (see
 [Configuration](/docs/configuration)). The visitor's message stays in the `request_start` event of
 the same trace, among the form fields, only while the request body is at most 8 KB. A long message
@@ -416,13 +463,17 @@ goes over that within the form's 4,000-character limit, especially one not in La
   and `hsts_subdomains` only if every subdomain serves HTTPS
 - [ ] keys set for whichever of captcha / alerts / mail you use; a captcha enabled with a key missing
   passes forms while `DEBUG` is on and rejects every submission with it off, alerts without the
-  address send nothing — `health.php` lists the missing keys under `captcha_missing_keys` and
+  address send nothing — `weft-health` lists the missing keys under `captcha_missing_keys` and
   `alertloop_missing_keys`
 - [ ] `app.captcha.allowed_hosts` lists your real domain, if the captcha is on
-- [ ] the contact form has a channel: `MAIL_TO` with a working `mail()`, or AlertLoop; otherwise every
-  submission answers 503 and leaves `Contact request not delivered` in `storage/logs/errors/` (see
-  "The contact form answers 503" above)
-- [ ] `sudo -u www-data sh -c 'umask 002; php scripts/health.php'` (your PHP user) → `ok: true`
+- [ ] the contact form has a channel: `MAIL_TO` (your inbox, not example.com) with a working
+  `mail()`, or AlertLoop; otherwise every submission answers 503 and leaves `Contact request not
+  delivered` in `storage/logs/errors/` (see "The contact form answers 503" above)
+- [ ] a test request sent through the contact form reached you, after this deploy and after every
+  change of the mail settings: `weft-health` does not check delivery (see "Monitoring")
+- [ ] `sudo -u www-data sh -c 'umask 002; vendor/bin/weft-health'` (your PHP user) → `ok: true`,
+  exit code 0
+- [ ] an uptime service watches the home page, and `weft-health` runs from cron (see "Monitoring")
 
 That is the whole engine. If something is missing from these docs, please
 [open an issue](https://github.com/golovanov-dev/weft/issues).

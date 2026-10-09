@@ -114,7 +114,7 @@ final class ErrorHandlerTest extends TestCase
         $this->assertSame('PHP cannot write ' . $file, $error);
     }
 
-    /** health.php runs from the console, but the traces to check are the web's. */
+    /** weft-health runs from the console, but the traces to check are the web's. */
     public function testLogsErrorChecksTheWebTraceDirectoryFromAScript(): void
     {
         $dir = sys_get_temp_dir() . '/weft-logs/requests';

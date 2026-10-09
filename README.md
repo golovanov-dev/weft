@@ -151,7 +151,7 @@ Everything optional is a flag in `app/Configs/app.php`:
 
 The captcha needs both keys: enabled without them, it rejects every form submission unless `DEBUG` is on.
 Alerts need both `ALERTLOOP_*` constants in `config/config.php`: without the address nothing is sent.
-`php scripts/health.php` lists the missing keys of either.
+`vendor/bin/weft-health` lists the missing keys of either.
 
 ## Documentation
 

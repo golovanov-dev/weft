@@ -124,6 +124,28 @@ final class RequestTest extends TestCase
         ];
     }
 
+    /**
+     * @param array<string, string> $server
+     */
+    #[DataProvider('forwardedProtos')]
+    public function testHttpsBehindTrustedProxies(array $server, bool $expected): void
+    {
+        $resolve = new \ReflectionMethod(Request::class, 'resolveHttps');
+        $this->assertSame($expected, $resolve->invoke(null, $server, ['173.245.48.0/20']));
+    }
+
+    /** @return array<string, array{0: array<string, string>, 1: bool}> */
+    public static function forwardedProtos(): array
+    {
+        $proxy = ['REMOTE_ADDR' => '173.245.48.10'];
+        return [
+            'trusted proxy says https' => [$proxy + ['HTTP_X_FORWARDED_PROTO' => 'https'], true],
+            'trusted proxy appends http to a forged https' => [$proxy + ['HTTP_X_FORWARDED_PROTO' => 'https, http'], false],
+            'untrusted address says https' => [['REMOTE_ADDR' => '203.0.113.7', 'HTTP_X_FORWARDED_PROTO' => 'https'], false],
+            'no header: HTTPS from the server' => [$proxy + ['HTTPS' => 'on'], true],
+        ];
+    }
+
     public function testInvalidProxyIpsListsEntriesThatAreNeitherAnAddressNorARange(): void
     {
         $this->assertSame(

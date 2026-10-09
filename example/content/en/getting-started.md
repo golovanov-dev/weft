@@ -70,16 +70,21 @@ machine (on Windows or without sendmail it usually does not) or AlertLoop is set
 [Deployment](/docs/deployment), "The contact form answers 503". Then check the environment:
 
 ```bash
-php scripts/health.php
+vendor/bin/weft-health --dev
 ```
 
 ```json
 {
-  "ok": true,
+  "ok": false,
   "php": "8.4.13",
   "timezone": "UTC",
+  "config": "config/config.example.php",
   "debug": false,
   "dev_mode": false,
+  "production": [
+    "config/config.example.php is loaded",
+    "app.url.base is on example.com"
+  ],
   "logs_writable": true,
   "logs_error": null,
   "cache_driver": "file",
@@ -90,18 +95,38 @@ php scripts/health.php
   "proxy_ips_error": null,
   "proxy_ips_invalid": [],
   "proxy_ips_trust_all": [],
-  "traceloom": true,
   "multilingual": false,
   "cache_enabled": true,
   "captcha_enabled": false,
   "captcha_missing_keys": [],
   "alertloop_enabled": false,
-  "alertloop_missing_keys": []
+  "alertloop_missing_keys": [],
+  "checks": {
+    "contact_form": {
+      "ok": false,
+      "mail_to": "hello@example.com",
+      "mail_from": "noreply@example.com",
+      "mail_available": true,
+      "alertloop": false,
+      "problems": [
+        "MAIL_TO is on example.com",
+        "MAIL_FROM is on example.com"
+      ]
+    }
+  }
 }
 ```
 
-If `ok` is false (exit code 1), the usual cause is that `storage/` is not writable. What each field
-means and how to fix it: [Deployment](/docs/deployment), "What `health.php` checks".
+`--dev` is for your machine: `production` lists what a server must not have, without failing the
+check. On the server you run it without `--dev`. On a fresh copy `ok` is false and the exit code is
+1 because of `contact_form`: `MAIL_TO` and `MAIL_FROM` are still the template's example.com
+addresses, so a request would go to example.com even where `mail()` works. Outside Windows without
+a mail transport (sendmail, postfix, msmtp) `mail_available` is `false` as well. `contact_form`
+sends nothing: on Windows `mail_available` is `true` and the form still answers 503 here, because
+`mail()` finds no mail server only when it sends. Set your own addresses in a `config/config.php`
+(see [Configuration](/docs/configuration)) or leave them until you deploy; anything else that makes
+`ok` false, most often that `storage/` is not writable, needs fixing now. What each field means and how to fix it:
+[Deployment](/docs/deployment), "What `weft-health` checks".
 
 ## Working on the frontend (optional)
 

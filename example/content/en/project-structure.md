@@ -12,7 +12,7 @@ order: 2
 my-site/
 ├── app/
 │   ├── Configs/app.php     business config, read with config('app.*')
-│   ├── Bootstrap.php       site wiring (resolvers, services, …)
+│   ├── Bootstrap.php       site wiring (resolvers, services, health checks, …)
 │   └── Services/           your business logic
 ├── config/
 │   ├── config.example.php  documented template + fallback (DEV_MODE=false)
@@ -24,7 +24,7 @@ my-site/
 ├── content/                your content (Markdown, JSON, …) — optional
 ├── frontend/src/           Vite sources
 ├── public/                 document root: index.php, .htaccess, dist/, img/
-├── scripts/                CLI: health, sitemap, cache-clear
+├── scripts/                CLI: sitemap, cache-clear
 ├── storage/                logs/ and cache/ (rate-limit counters in cache/ratelimit/)
 └── bootstrap.php           shared init (web + CLI)
 ```
@@ -81,6 +81,10 @@ reads pages gets no `PHPSESSID` cookie.
 
 **`scripts/*.php`** — the CLI. Each requires `bootstrap.php` and does its job. Its trace events go
 to `storage/logs/cli/`, not to the site's `storage/logs/requests/`.
+
+**`vendor/bin/weft-health`** — the health check, shipped with the engine. Run it in the site root:
+it requires the site's `bootstrap.php`, so the checks `app/Bootstrap.php` adds with `Health::check()`
+are in its report.
 
 `bootstrap.php` is the single place where initialisation happens:
 
