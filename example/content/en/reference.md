@@ -24,7 +24,7 @@ Defined in `src/helpers.php`, available everywhere without a `use`.
 | `locale()` | current locale | `<html lang="<?= e(locale()) ?>">` |
 | `seo($attrs = [])` | render the SEO head block | `<?= seo() ?>` |
 | `csrf_field()` | hidden CSRF input | `<?= csrf_field() ?>` |
-| `is_active($route, $class = 'active')` | class if the route is current | `class="<?= is_active('docs') ?>"` |
+| `is_active($route, $class = 'active')` | class if the route is current (`/` is `app.default_route`) | `class="<?= is_active('docs') ?>"` |
 
 ## Engine classes
 
@@ -128,7 +128,7 @@ Pages receive `$request`, `$route`, `$locale`, and on dynamic routes the params 
 ```bash
 php scripts/health.php       # environment diagnostics (JSON, exit code 0/1)
 php scripts/sitemap.php      # write a static public/sitemap.xml
-php scripts/cache-clear.php  # delete the cache entries (rate-limit counters stay)
+php scripts/cache-clear.php  # delete the cache entries (rate-limit counters stay); exit 1 if the store fails
 ```
 
 Your own script: `require dirname(__DIR__) . '/bootstrap.php';` and the whole engine is initialised.

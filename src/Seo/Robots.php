@@ -8,8 +8,10 @@ use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\I18n\Url;
 
 /**
- * robots.txt generator. Blocks everything in DEBUG/non-production, allows all otherwise,
- * and always advertises the sitemap.
+ * robots.txt generator. Blocks everything in DEBUG or with app.seo.robots_allow off, allows all
+ * otherwise, and then advertises /sitemap.xml when app.sitemap is set: a non-empty list or a
+ * callable. The callable is not called here: robots.txt is fetched on every crawl, and a generator
+ * that throws would turn it into a 500, which crawlers read as "the whole site is closed".
  */
 final class Robots
 {
@@ -25,9 +27,10 @@ final class Robots
             $lines[] = 'Disallow: ' . $path;
         }
 
-        if ($allow) {
+        $sitemap = Config::get('app.sitemap', []);
+        if ($allow && (is_callable($sitemap) || (array) $sitemap !== [])) {
             $lines[] = '';
-            $lines[] = 'Sitemap: ' . Url::origin() . '/sitemap.xml';
+            $lines[] = 'Sitemap: ' . Url::origin() . Url::asset('sitemap.xml');
         }
 
         return implode("\n", $lines) . "\n";

@@ -22,9 +22,10 @@ the constants are defined.
 ```php
 define('DEBUG', false);       // verbose errors, curl info, robots blocks indexing
 define('DEV_MODE', false);    // assets from the Vite dev server; HSTS off
-define('BASE_URI', '');       // sub-directory mount point, '' for a domain root
+define('BASE_URI', '');       // '' at a domain root; '/blog' for example.com/blog: with the
+                              // leading /, without a trailing one ('blog' breaks every URL)
 define('APP_TIMEZONE', 'UTC');// every date, log and DB session uses this
-define('LOGS_PATH', dirname(__DIR__) . '/storage/logs'); // errors/, traces: requests/ (site), cli/ (scripts)
+define('LOGS_PATH', dirname(__DIR__) . '/storage/logs'); // errors/, traces: requests/ (site), cli/ (scripts); unset: weft-logs in the system temp dir
 ```
 
 Database (only if you use `Golovanov\Weft\Database`):
@@ -103,14 +104,16 @@ The file returns an array. Read it anywhere with `config('app.<path>')`.
     'default_title'  => 'Weft — a lightweight PHP engine',  // used when a page sets no title
     'title_template' => '%s — Weft',    // Seo::set(['title' => 'About']) → "About — Weft"
     'description'    => '…',
-    'og_image'       => '/img/og.png',
+    'og_image'       => '/img/og.png',  // under public/ (BASE_URI is added) or a full URL
     'og_image_alt'   => 'Weft social card',  // describes og_image; a page setting its own
                                              // image without an alt gets none, not this one
     'og_image_width' => 1200,           // both or neither, and only if every OG image on the
     'og_image_height'=> 630,            // site is that size; a page may override or clear them
     'twitter'        => '',
     'robots'         => 'index, follow',
-    'robots_allow'   => true,           // robots.txt (DEBUG always blocks indexing)
+    'robots_allow'   => true,           // robots.txt (DEBUG always blocks indexing); it lists
+                                        // /sitemap.xml when app.sitemap is a non-empty list
+                                        // or a callable (not called for robots.txt)
     'robots_disallow'=> ['/api/'],
     'json_ld'        => [ /* one schema or a list */ ],
 ],
@@ -154,8 +157,20 @@ and without it is valid.
 'captcha'    => ['enabled' => …, 'site_key' => …, 'secret_key' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],
 'trace'      => ['log_body' => true, 'sensitive_keys' => [], 'retention_days' => 30],    // see below
 'security'   => ['frame_options' => 'SAMEORIGIN', 'referrer_policy' => 'strict-origin-when-cross-origin',
-                 'permissions_policy' => 'geolocation=(), microphone=(), camera=()', 'hsts' => true, 'csp' => ''],
+                 'permissions_policy' => 'geolocation=(), microphone=(), camera=()', 'csp' => '',
+                 'hsts' => false, 'hsts_max_age' => 31536000, 'hsts_subdomains' => false],
 ```
+
+HSTS is off by default and in this example. With `'hsts' => true` every response outside
+`DEV_MODE` carries `Strict-Transport-Security: max-age=<hsts_max_age>`, plus `; includeSubDomains`
+only with `'hsts_subdomains' => true`. A browser keeps it for `max-age` seconds; turning `hsts` off
+does not shorten that, only `max-age=0` sent to each returning visitor does. Read "HTTPS and HSTS" in
+[Deployment](/docs/deployment) before turning it on.
+
+The session cookie (set in `public/index.php`) is `HttpOnly`, `SameSite=Lax`, and `Secure` when PHP
+sees the request as HTTPS (`$_SERVER['HTTPS']`); `session.use_strict_mode` makes PHP replace a
+session id it did not issue. Behind a proxy that talks plain HTTP to PHP, pass `HTTPS=on` to PHP, or
+the cookie goes without `Secure`: "HTTPS behind a proxy" in [Deployment](/docs/deployment) shows how.
 
 Caching is deliberately **on** in this demo (`'cache' => ['enabled' => true]` in
 `app/Configs/app.php`): it makes Markdown rendering cheap and shows the feature working in a real

@@ -30,13 +30,18 @@ use Golovanov\Weft\View\View;
  *   /components/layout.php     the page layout (receives $content)
  *
  * The default locale is served without a URL prefix; other locales use /<locale>/...
- * Every page has one address: GET/HEAD of /about/, /home or /en/about is redirected (301) to
- * /about, / or /about; a path with characters Sanitize::path() would drop or fold is a 404.
+ * Every page has one address: GET/HEAD of /about/, /home, /en/about or /RU/about is redirected
+ * (301) to /about, /, /about or /ru/about; a path with characters Sanitize::path() would drop or
+ * fold is a 404.
  */
 final class Kernel
 {
+    /** Whether route() took the request for an API endpoint; errorResponse() then answers JSON. */
+    private static bool $api = false;
+
     public static function handle(): void
     {
+        self::$api = false;
         $request = Request::fromGlobals();
         RequestContext::setRequest($request);
         Trace::boot($request);
@@ -90,24 +95,22 @@ final class Kernel
         $locale = Locale::default();
         if (Locale::enabled() && $path !== '/') {
             $parts = explode('/', ltrim($path, '/'), 2);
-            $seg = strtolower($parts[0] ?? '');
+            $seg = $parts[0] ?? '';
             if ($seg !== '' && Locale::isSupported($seg)) {
-                $locale = $seg;
+                $locale = strtolower($seg);
                 $path = '/' . ($parts[1] ?? '');
                 // /en/about -> /about: the default locale is served without a prefix.
-                $redirect = $redirect || ($canonicalise && $seg === Locale::default());
+                // /RU/about -> /ru/about: a locale prefix has one spelling.
+                $redirect = $redirect || ($canonicalise && ($locale === Locale::default() || $seg !== $locale));
             }
         }
         Locale::set($locale);
 
-        if (!defined('LOCALE')) {
-            define('LOCALE', Locale::current());
-        }
-
-        // pages/404.php and pages/<dir>/index.php have no address of their own (the latter is
-        // served at /<dir>): /404 and /<dir>/index are a 404, with or without a slash, never a redirect.
-        $isApi = $path === '/api' || str_starts_with($path, '/api/');
-        if (!$isApi && ($path === '/404' || ($path !== '/index' && str_ends_with($path, '/index')))) {
+        // pages/404.php, pages/500.php and pages/<dir>/index.php have no address of their own (the
+        // last is served at /<dir>): /404, /500 and /<dir>/index are a 404, with or without a slash,
+        // never a redirect.
+        $isApi = self::$api = $path === '/api' || str_starts_with($path, '/api/');
+        if (!$isApi && ($path === '/404' || $path === '/500' || ($path !== '/index' && str_ends_with($path, '/index')))) {
             $clean = $canonicalise = $redirect = false;
         }
 
@@ -261,8 +264,9 @@ final class Kernel
             return self::apiNotFound($route);
         }
 
-        // The endpoint manages its own JSON output (echo / http_response_code); we capture it so
-        // the kernel can still record the trace end and emit a single Response.
+        // The endpoint prints its JSON and may set the status (http_response_code() or a
+        // Response it sends); its return value is ignored. The output is captured so the kernel
+        // can still record the trace end and emit a single Response, always as JSON.
         $run = static function (string $__file, Request $request): void {
             require $__file;
         };
@@ -292,7 +296,7 @@ final class Kernel
     private static function errorResponse(Request $request, \Throwable $e): Response
     {
         $debug = ErrorHandler::debug();
-        if ($request->wantsJson() || str_starts_with($request->path, (Url::baseUri() . '/api'))) {
+        if (self::$api || $request->wantsJson()) {
             return Response::json([
                 'success' => false,
                 'error' => $debug ? $e->getMessage() : 'Internal Server Error',
@@ -302,7 +306,12 @@ final class Kernel
         $errorPage = self::root() . '/pages/500.php';
         if (is_file($errorPage)) {
             Url::setRoute(null);
-            return Response::html(View::page($errorPage, self::layoutFile(), ['error' => $e]), 500);
+            try {
+                return Response::html(View::page($errorPage, self::layoutFile(), ['error' => $e]), 500);
+            } catch (\Throwable $pageError) {
+                // The error page or the layout failed too: log it and answer with the built-in page.
+                ErrorHandler::logException($pageError, 'kernel');
+            }
         }
 
         $message = $debug ? '<pre>' . Sanitize::output((string) $e) . '</pre>' : '<p>Something went wrong.</p>';
@@ -327,6 +336,6 @@ final class Kernel
 
     private static function root(): string
     {
-        return rtrim((string) Config::env('APP_ROOT', getcwd() ?: '.'), '/\\');
+        return Config::root();
     }
 }

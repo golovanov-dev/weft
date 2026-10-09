@@ -13,7 +13,6 @@ final class ConfigTest extends TestCase
     {
         Config::load(__DIR__ . '/../fixtures/config');
 
-        $this->assertTrue(Config::isLoaded());
         $this->assertSame('Fixture', Config::get('app.name'));
         $this->assertSame('value', Config::get('app.nested.key'));
     }

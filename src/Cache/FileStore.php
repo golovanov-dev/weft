@@ -113,7 +113,9 @@ final class FileStore implements Store
     public function flush(): void
     {
         foreach (glob($this->dir . '/*.cache') ?: [] as $file) {
-            @unlink($file);
+            if (!@unlink($file) && is_file($file)) {
+                throw new \RuntimeException('Cannot delete cache file ' . $file);
+            }
         }
     }
 

@@ -10,7 +10,9 @@ use Golovanov\Weft\Http\RequestContext;
 /**
  * Baseline security response headers, sent once per request by the Kernel. Values are
  * conservative and safe for a content site; a Content-Security-Policy can be supplied via
- * config('app.security.csp') when you're ready to lock scripts down.
+ * config('app.security.csp') when you're ready to lock scripts down. HSTS goes out only with
+ * app.security.hsts on and DEV_MODE off: max-age from app.security.hsts_max_age (default one
+ * year), includeSubDomains only with app.security.hsts_subdomains on.
  */
 final class Headers
 {
@@ -19,29 +21,44 @@ final class Headers
         if (headers_sent()) {
             return;
         }
+        foreach (self::lines() as $line) {
+            header($line);
+        }
+    }
 
-        header('X-Content-Type-Options: nosniff');
-        header('X-Frame-Options: ' . (string) Config::get('app.security.frame_options', 'SAMEORIGIN'));
-        header('Referrer-Policy: ' . (string) Config::get('app.security.referrer_policy', 'strict-origin-when-cross-origin'));
+    /**
+     * @internal The header lines send() emits; public so tests can read them from the CLI.
+     * @return list<string>
+     */
+    public static function lines(): array
+    {
+        $lines = [
+            'X-Content-Type-Options: nosniff',
+            'X-Frame-Options: ' . (string) Config::get('app.security.frame_options', 'SAMEORIGIN'),
+            'Referrer-Policy: ' . (string) Config::get('app.security.referrer_policy', 'strict-origin-when-cross-origin'),
+        ];
 
         $permissions = (string) Config::get('app.security.permissions_policy', 'geolocation=(), microphone=(), camera=()');
         if ($permissions !== '') {
-            header('Permissions-Policy: ' . $permissions);
+            $lines[] = 'Permissions-Policy: ' . $permissions;
         }
 
         $csp = (string) Config::get('app.security.csp', '');
         if ($csp !== '') {
-            header('Content-Security-Policy: ' . $csp);
+            $lines[] = 'Content-Security-Policy: ' . $csp;
         }
 
         if (!(bool) Config::env('DEV_MODE', false) && (bool) Config::get('app.security.hsts', false)) {
-            header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+            $lines[] = 'Strict-Transport-Security: max-age=' . (int) Config::get('app.security.hsts_max_age', 31536000)
+                . ((bool) Config::get('app.security.hsts_subdomains', false) ? '; includeSubDomains' : '');
         }
 
         // Expose the correlation id so clients can quote it in support requests.
         $traceId = RequestContext::traceId();
         if ($traceId !== '') {
-            header('X-Trace-Id: ' . $traceId);
+            $lines[] = 'X-Trace-Id: ' . $traceId;
         }
+
+        return $lines;
     }
 }

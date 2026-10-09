@@ -256,6 +256,18 @@ final class KernelTest extends TestCase
         $this->assertStringContainsString('User-agent: *', $response->body);
     }
 
+    public function testRobotsTxtIsServedWhenTheSitemapCallableThrows(): void
+    {
+        Config::set('app.url.base', 'https://example.com');
+        Config::set('app.sitemap', static function (): array {
+            throw new \RuntimeException('sitemap generator failed');
+        });
+        $response = $this->route('/robots.txt');
+
+        $this->assertSame(200, $response->status);
+        $this->assertStringContainsString('Sitemap: https://example.com/sitemap.xml', $response->body);
+    }
+
     public function testApiEndpointOutputIsCaptured(): void
     {
         $response = $this->route('/api/ping');
@@ -281,6 +293,65 @@ final class KernelTest extends TestCase
         $this->assertSame(200, $response->status);
         $this->assertStringContainsString('about-page', $response->body);
         $this->assertSame('ru', Locale::current());
+    }
+
+    public function testLocalePrefixInAnotherCaseRedirectsToTheLowercaseOne(): void
+    {
+        Config::set('app.locales', ['enabled' => true, 'supported' => ['en', 'ru'], 'default' => 'en']);
+
+        $response = $this->route('/RU/about?x=1');
+        $this->assertSame(301, $response->status);
+        $this->assertSame('/ru/about?x=1', $response->headers['Location']);
+    }
+
+    /** pages/500.php is what an error shows, not a page of its own. */
+    public function testTheErrorPageRequestedDirectlyIsNotFound(): void
+    {
+        $response = $this->route('/500');
+        $this->assertSame(404, $response->status);
+        $this->assertStringContainsString('custom-404', $response->body);
+    }
+
+    /** An error answers JSON exactly when routing took the request for an endpoint. */
+    public function testErrorResponseFollowsTheApiRouting(): void
+    {
+        Config::set('app.locales', ['enabled' => true, 'supported' => ['en', 'ru'], 'default' => 'en']);
+        $error = new \RuntimeException('boom');
+
+        try {
+            $this->route('/ru/api/broken');
+            $this->fail('the endpoint exception must reach the kernel');
+        } catch (\RuntimeException) {
+        }
+        $response = $this->errorResponse('/ru/api/broken', $error);
+        $this->assertSame('application/json; charset=utf-8', $response->headers['Content-Type']);
+
+        $this->route('/apiary');
+        $response = $this->errorResponse('/apiary', $error);
+        $this->assertSame(500, $response->status);
+        $this->assertStringContainsString('custom-500', $response->body);
+    }
+
+    /** pages/500.php whose layout throws still answers a 500, with the engine's own page. */
+    public function testFailingErrorPageFallsBackToTheBuiltIn500(): void
+    {
+        Config::set('app.layout', 'broken-layout');
+
+        $response = $this->errorResponse('/about', new \RuntimeException('boom'));
+        $this->assertSame(500, $response->status);
+        $this->assertStringContainsString('<h1>500</h1>', $response->body);
+        $this->assertStringNotContainsString('custom-500', $response->body);
+    }
+
+    private function errorResponse(string $uri, \Throwable $error): Response
+    {
+        $server = $_SERVER;
+        $_SERVER['REQUEST_URI'] = $uri;
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $request = Request::fromGlobals();
+        $_SERVER = $server;
+
+        return (new \ReflectionMethod(Kernel::class, 'errorResponse'))->invoke(null, $request, $error);
     }
 
     public function testDefaultLocalePrefixRedirectsToUnprefixedUrl(): void

@@ -12,8 +12,8 @@ use Golovanov\Weft\Support\Sanitize;
 /**
  * sitemap.xml generator.
  *
- * Give it the list of public routes (from config 'app.sitemap' or discovered from /pages) and
- * it emits a valid urlset, including xhtml:link hreflang alternates for every locale when
+ * Give it the list of public routes (config 'app.sitemap'; pages are not discovered) and it
+ * emits a valid urlset, including xhtml:link hreflang alternates for every locale when
  * multilingual mode is on.
  */
 final class Sitemap

@@ -125,7 +125,7 @@ final class Url
             return false;
         }
         $current = trim($path, '/');
-        $current = $current === '' ? 'home' : $current;
+        $current = $current === '' ? (string) Config::get('app.default_route', 'home') : $current;
         return $current === trim($route, '/');
     }
 }

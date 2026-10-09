@@ -140,13 +140,8 @@ final class Vite
         if (self::$manifest !== null) {
             return self::$manifest;
         }
-        $root = (string) Config::env('WEB_ROOT', (string) Config::env('APP_ROOT', getcwd() ?: '.') . '/public');
+        $root = (string) Config::env('WEB_ROOT', Config::root() . '/public');
         $path = rtrim($root, '/\\') . '/dist/.vite/manifest.json';
-        if (!is_file($path)) {
-            // Vite <5 wrote the manifest to dist/manifest.json.
-            $legacy = rtrim($root, '/\\') . '/dist/manifest.json';
-            $path = is_file($legacy) ? $legacy : $path;
-        }
         $json = is_file($path) ? file_get_contents($path) : false;
         $data = $json !== false ? json_decode($json, true) : null;
         self::$manifest = is_array($data) ? $data : [];

@@ -192,7 +192,9 @@ final class Seo
         // JSON-LD.
         foreach (self::$jsonLd as $schema) {
             $schema = array_merge(['@context' => 'https://schema.org'], $schema);
-            $json = json_encode($schema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+            // JSON_HEX_TAG writes < and > as \u003C and \u003E: a value holding "</script>" or "<!--"
+            // cannot end the script element early.
+            $json = json_encode($schema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT | JSON_HEX_TAG);
             if ($json !== false) {
                 $out[] = '<script type="application/ld+json">' . $json . '</script>';
             }
@@ -206,6 +208,6 @@ final class Seo
         if (str_starts_with($image, 'http://') || str_starts_with($image, 'https://')) {
             return $image;
         }
-        return Url::origin() . '/' . ltrim($image, '/');
+        return Url::origin() . Url::asset($image);
     }
 }

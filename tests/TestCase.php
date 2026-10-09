@@ -14,6 +14,7 @@ use Golovanov\Weft\Http\RequestContext;
 use Golovanov\Weft\I18n\I18n;
 use Golovanov\Weft\I18n\Locale;
 use Golovanov\Weft\I18n\Url;
+use Golovanov\Weft\Kernel;
 use Golovanov\Weft\Observability\Alert;
 use Golovanov\Weft\Observability\Trace;
 use Golovanov\Weft\Security\RateLimiter;
@@ -48,7 +49,8 @@ abstract class TestCase extends BaseTestCase
 
     protected static function resetEngineState(): void
     {
-        self::setStatics(Config::class, ['items' => [], 'loaded' => false]);
+        self::setStatics(Config::class, ['items' => []]);
+        self::setStatics(Kernel::class, ['api' => false]);
         self::setStatics(Seo::class, ['data' => [], 'jsonLd' => [], 'booted' => false]);
         self::setStatics(Locale::class, ['current' => null]);
         self::setStatics(Url::class, ['route' => null]);
@@ -66,7 +68,6 @@ abstract class TestCase extends BaseTestCase
             'request' => null,
             'traceId' => '',
             'startedAt' => 0.0,
-            'logPath' => 'requests',
         ]);
 
         // A page may set its own status (http_response_code(404)) and Seo::render() reads it;

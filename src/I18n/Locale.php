@@ -10,7 +10,8 @@ use Golovanov\Weft\Config\Config;
  * Locale configuration and resolution.
  *
  * Multilingual mode is OPTIONAL (config 'app.locales.enabled'). When disabled the site is
- * single-language: no URL prefix, no Accept-Language detection, everything uses the default.
+ * single-language: no URL prefix, everything uses the default. The locale comes from the URL
+ * only, never from Accept-Language.
  *
  * When enabled, the default locale is served WITHOUT a prefix ("/about") and other locales
  * carry a first-segment prefix ("/ru/about"). This matches the reference site's URL scheme.
@@ -60,28 +61,5 @@ final class Locale
     {
         $names = Config::get('app.locales.names', []);
         return is_array($names) && isset($names[$locale]) ? (string) $names[$locale] : strtoupper($locale);
-    }
-
-    /**
-     * Best-effort locale from the Accept-Language header, limited to supported locales.
-     */
-    public static function fromAcceptLanguage(): string
-    {
-        $supported = self::supported();
-        $header = (string) ($_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '');
-        foreach (explode(',', $header) as $candidate) {
-            $lang = strtolower(trim(explode(';', $candidate)[0] ?? ''));
-            if ($lang === '') {
-                continue;
-            }
-            if (in_array($lang, $supported, true)) {
-                return $lang;
-            }
-            $short = substr($lang, 0, 2);
-            if (in_array($short, $supported, true)) {
-                return $short;
-            }
-        }
-        return self::default();
     }
 }

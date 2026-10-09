@@ -66,8 +66,28 @@ Seo::jsonLd(['@type' => 'TechArticle', 'headline' => '…']);
 Rendered for you: title, description, robots, canonical, full Open Graph, Twitter card, hreflang
 alternates and every JSON-LD block. Canonical, `og:url` and hreflang are built from the page the
 engine matched, never from the URL as requested. A 404 gets none of the three — the engine's own and
-a page that answers `http_response_code(404)` itself, like an unknown slug on a dynamic page. `/sitemap.xml` and `/robots.txt` are generated too; in `DEBUG`
-robots blocks indexing automatically.
+a page that answers `http_response_code(404)` itself, like an unknown slug on a dynamic page. JSON-LD
+is written with `<` and `>` escaped, so no value can end its `<script>` element. `/sitemap.xml` and
+`/robots.txt` are generated too; in `DEBUG` robots blocks indexing automatically, and it lists the
+sitemap only when `app.sitemap` is a non-empty list or a callable. robots.txt does not call the
+callable, so a sitemap generator that fails cannot turn it into an error.
+
+## API endpoints
+
+`api/<name>.php` (or `api/<name>/index.php`) answers `/api/<name>`; `api_url('<name>')` builds the
+link. The engine runs the file with `$request` in scope and turns what it prints into the response:
+
+- the body is what the file echoes; its `return` value is ignored;
+- the status is the one it set (`http_response_code()`, or a `Response` it `send()`s), otherwise 200;
+- `Content-Type` is always `application/json; charset=utf-8`, whatever the file set; its other
+  headers (`Location`) are sent as set;
+- an uncaught throwable discards the printed output and becomes a JSON 500, logged and alerted like
+  any other;
+- `exit` or `die` bypasses the engine: the output goes out with PHP's default `Content-Type`, and the
+  trace has no `request_end`. Use `return` to stop early.
+
+`api_url()` adds no locale prefix, so an endpoint runs in the default locale, and no translations are
+loaded: `t()` returns the key. Write an endpoint's texts in the file.
 
 ## Caching
 
@@ -337,7 +357,8 @@ are left out on purpose — preloading them would undo the code split.
 ## Security defaults
 
 Sent on every response: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
-`Permissions-Policy`, optional `Content-Security-Policy` and HSTS, plus `X-Trace-Id`.
+`Permissions-Policy`, optional `Content-Security-Policy` and HSTS (off by default; see
+[Configuration](/docs/configuration)), plus `X-Trace-Id`.
 
 Sanitising is split by direction: `Sanitize::input()` normalises incoming data (no HTML escaping),
 `Sanitize::output()` escapes for HTML — that is what `e()` calls. Escape when you render, never when

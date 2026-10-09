@@ -105,7 +105,9 @@ return [
         'frame_options' => 'SAMEORIGIN',
         'referrer_policy' => 'strict-origin-when-cross-origin',
         'permissions_policy' => 'geolocation=(), microphone=(), camera=()',
-        'hsts' => true,
+        'hsts' => false,             // turn on only once every page of the domain is HTTPS; see Deployment
+        'hsts_max_age' => 31536000,  // seconds browsers keep HTTPS-only (one year)
+        'hsts_subdomains' => false,  // includeSubDomains: every subdomain must serve HTTPS too
         'csp' => '',
     ],
 

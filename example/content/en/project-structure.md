@@ -46,15 +46,16 @@ There is no route file. The URL path maps straight onto a file:
 | `/ru/about` | `pages/about.php` rendered in the `ru` locale |
 | `/sitemap.xml`, `/robots.txt` | generated from config |
 | anything else | `pages/404.php` |
-| an uncaught exception in a page | `pages/500.php`, if present (receives `$error`) |
+| an uncaught exception in a page | `pages/500.php`, if present (receives `$error`); the engine's own 500 if it or the layout throws too |
 
 Each page has one address. A GET or HEAD request for `/about/` gets a 301 to `/about`, `/home` (the
 `app.default_route` page) to `/`, `/ru/home` and `/ru/` to `/ru`, `/en/about` (default locale) to
-`/about`; the query string is kept. Other methods are served without a redirect, so a form posting
-to `/api/contact/` still works. A path with any character other than `A-Z a-z 0-9 / _ - .` (so
+`/about`, `/RU/about` to `/ru/about`; the query string is kept. Other methods are served without a
+redirect, so a form posting to `/api/contact/` still works. A path with any character other than `A-Z a-z 0-9 / _ - .` (so
 also non-ASCII and any percent-encoding), or with an empty, `.` or `..` segment (`//about` too), is
-a 404 — a JSON one under `/api` — and is never redirected. So are `/404` and `/blog/index`:
-`pages/404.php` is what a 404 shows, and `pages/blog/index.php` is served at `/blog` only.
+a 404 — a JSON one under `/api` — and is never redirected. So are `/404`, `/500` and `/blog/index`:
+`pages/404.php` and `pages/500.php` are what a 404 and an error show, and `pages/blog/index.php` is
+served at `/blog` only.
 
 ### Dynamic segments
 
@@ -71,7 +72,8 @@ come from the parent directory name (`pages/docs/[slug].php` → `lang/<locale>/
 
 ## Two entry points
 
-**`public/index.php`** — the web. It sets error handling and the session cookie parameters,
+**`public/index.php`** — the web. It sets error handling and the session cookie parameters (see
+[Configuration](/docs/configuration)),
 requires `bootstrap.php` and calls `Golovanov\Weft\Kernel::handle()`. Under PHP's built-in server
 (`php -S`) it first hands an existing file in `public/` (CSS, JS, images) back to the server. The
 session itself starts only when a form needs a CSRF token (`Csrf`), so a visitor who only
@@ -109,9 +111,10 @@ App\Bootstrap::init();                        // 6) site wiring
 6. Response->send()            status, headers, body
 ```
 
-Any uncaught `Throwable` is logged, alerted (if AlertLoop is on) and turned into a 500 — JSON when
-the client wanted JSON, HTML otherwise, with a stack trace only when `DEBUG` is on. Whatever the
-page or endpoint printed before it threw is dropped.
+Any uncaught `Throwable` is logged, alerted (if AlertLoop is on) and turned into a 500 — JSON for
+a request routed to `/api/` or one that asked for JSON, HTML otherwise, with a stack trace only
+when `DEBUG` is on. Whatever the page or endpoint printed before it threw is dropped. The API
+contract is in [Features](/docs/features).
 
 ## How a page becomes HTML
 

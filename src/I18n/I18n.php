@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Golovanov\Weft\I18n;
 
 use Golovanov\Weft\Config\Config;
+use Golovanov\Weft\Support\Arr;
 
 /**
  * Tiny translation store loaded from PHP array files:
@@ -86,22 +87,14 @@ final class I18n
 
     private static function lookup(string $key): mixed
     {
-        $node = self::$dict;
-        foreach (explode('.', $key) as $segment) {
-            if (!is_array($node) || !array_key_exists($segment, $node)) {
-                return null;
-            }
-            $node = $node[$segment];
-        }
-        return $node;
+        return Arr::get(self::$dict, $key);
     }
 
     private static function langPath(): string
     {
         $path = (string) Config::env('LANG_PATH', '');
         if ($path === '') {
-            $root = (string) Config::env('APP_ROOT', getcwd() ?: '.');
-            $path = $root . '/lang';
+            $path = Config::root() . '/lang';
         }
         return rtrim($path, '/\\');
     }

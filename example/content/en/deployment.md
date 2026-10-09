@@ -236,6 +236,24 @@ server {
 }
 ```
 
+## HTTPS and HSTS
+
+HSTS (`app.security.hsts`) is off by default. Once on, every response tells the browser to open the
+domain only over HTTPS for `hsts_max_age` seconds (default `31536000`, a year). A browser that has
+seen the header refuses plain HTTP and certificate warnings for the domain until that time runs out.
+Turning HSTS off does not shorten it: the header stops coming, and browsers keep the time they got.
+
+- Turn it on only when every page of the domain answers over HTTPS with a certificate that renews
+  itself.
+- Start with `'hsts_max_age' => 300`, check the site in a browser, then raise it to `31536000`.
+- `'hsts_subdomains' => true` adds `includeSubDomains`: then every subdomain (`crm.`, `mail.`, a
+  hosting panel) has to serve HTTPS too, or browsers that visited the site stop opening it. Leave it
+  `false` unless all of them do.
+- To take HSTS back, keep `'hsts' => true` and set `'hsts_max_age' => 0` in `app/Configs/app.php`:
+  Weft then sends `max-age=0`, and a browser that opens the site over HTTPS forgets the rule. Leave
+  it so until the old `hsts_max_age` has passed since the change, then turn `hsts` off. A browser
+  that does not come back in that time keeps the rule until its own time runs out.
+
 ## Behind a proxy or CDN
 
 Rate limits count per visitor IP, so PHP has to see the visitor's address. Which one it sees depends
@@ -281,6 +299,39 @@ grep -h '"request_start"' storage/logs/requests/*.jsonl | tail -n 1 | grep -o '"
 
 `client_ip` must be your own public address (any "what is my IP" page shows it), not the proxy's,
 `127.0.0.1` or a Docker address.
+
+### HTTPS behind a proxy
+
+The session cookie gets `Secure` only when PHP sees the request as HTTPS (`$_SERVER['HTTPS']` set
+and not `off`). Weft does not read `X-Forwarded-Proto`. Where HTTPS ends before the server that runs
+PHP, set `HTTPS=on` for PHP yourself; otherwise the site and its forms work, and the cookie goes
+without `Secure`, with no error anywhere.
+
+- **nginx + PHP-FPM on one machine, the certificate in this nginx** — nothing to do:
+  `include fastcgi_params;` passes `fastcgi_param HTTPS $https if_not_empty;`, so PHP gets `on` for
+  every HTTPS request. If your config does not include that file, add that line to the
+  `location ~ \.php$` block.
+- **nginx + PHP-FPM, HTTPS ends earlier** (Cloudflare without a certificate on your server, a load
+  balancer) — add `fastcgi_param HTTPS on;` to the `location ~ \.php$` block, after
+  `include fastcgi_params;`. Do it only when the server in front redirects plain HTTP to HTTPS, so
+  every request PHP gets came over HTTPS.
+- **Apache behind a proxy** (nginx proxying to Apache or to a container with Apache, a CDN) — in the
+  virtual host or in `public/.htaccess`, with `mod_setenvif` on, add
+  `SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on`. The proxy has to send that header: Cloudflare
+  does; in your own nginx, set `proxy_set_header X-Forwarded-Proto $scheme;` in the `location`
+  that proxies to Apache.
+- **Cloudflare or another CDN** — best, give the server a certificate and let the CDN connect to it
+  over HTTPS (Cloudflare: SSL mode "Full (strict)"); then the server sees HTTPS itself and the cases
+  above need nothing more. If the CDN talks plain HTTP to the server ("Flexible"), use the nginx or
+  Apache line above.
+
+**Check it** on a page with a form (in the example, `/contact`), from any machine:
+
+```bash
+curl -s -D - -o /dev/null https://example.com/contact | grep -i '^set-cookie'
+```
+
+The `Set-Cookie` line must contain `secure`.
 
 ## Updating
 
@@ -359,7 +410,10 @@ goes over that within the form's 4,000-character limit, especially one not in La
   commands and your shell run with `umask 002` (steps 5 and 6)
 - [ ] `client_ip` in the newest `request_start` trace is your own address, not a proxy's (see
   "Behind a proxy or CDN" above); otherwise all visitors share one rate limit
-- [ ] HTTPS on; consider `app.security.hsts`
+- [ ] over HTTPS the session cookie has `Secure`: `Set-Cookie` of a page with a form contains
+  `secure` (see "HTTPS behind a proxy" above)
+- [ ] HTTPS on for every page; HSTS (`app.security.hsts`) only after reading "HTTPS and HSTS" above,
+  and `hsts_subdomains` only if every subdomain serves HTTPS
 - [ ] keys set for whichever of captcha / alerts / mail you use; a captcha enabled with a key missing
   passes forms while `DEBUG` is on and rejects every submission with it off, alerts without the
   address send nothing — `health.php` lists the missing keys under `captcha_missing_keys` and

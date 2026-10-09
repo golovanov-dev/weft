@@ -18,9 +18,33 @@ final class RobotsTest extends TestCase
 
     public function testAllowsEverythingAndAdvertisesSitemapByDefault(): void
     {
+        Config::set('app.sitemap', ['/']);
         $text = Robots::text();
 
         $this->assertStringContainsString("User-agent: *\nAllow: /", $text);
+        $this->assertStringContainsString('Sitemap: https://example.com/sitemap.xml', $text);
+    }
+
+    /** /sitemap.xml without a route is an empty urlset: not worth pointing a crawler at. */
+    public function testNoSitemapLineWhenTheSitemapListsNoRoute(): void
+    {
+        $text = Robots::text();
+
+        $this->assertStringContainsString("User-agent: *\nAllow: /", $text);
+        $this->assertStringNotContainsString('Sitemap:', $text);
+    }
+
+    /** robots.txt never runs the sitemap generator: one that throws must not make it a 500. */
+    public function testSitemapCallableIsNotCalled(): void
+    {
+        $called = false;
+        Config::set('app.sitemap', static function () use (&$called): array {
+            $called = true;
+            throw new \RuntimeException('sitemap generator failed');
+        });
+        $text = Robots::text();
+
+        $this->assertFalse($called);
         $this->assertStringContainsString('Sitemap: https://example.com/sitemap.xml', $text);
     }
 

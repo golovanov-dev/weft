@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Golovanov\Weft\Tests\Seo;
 
 use Golovanov\Weft\Config\Config;
+use Golovanov\Weft\Seo\Robots;
 use Golovanov\Weft\Seo\Seo;
 use Golovanov\Weft\Tests\TestCase;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
 final class SeoTest extends TestCase
 {
@@ -155,6 +157,30 @@ final class SeoTest extends TestCase
     {
         Seo::noindex();
         $this->assertStringContainsString('<meta name="robots" content="noindex, nofollow" />', Seo::render());
+    }
+
+    public function testJsonLdValueCannotCloseTheScriptElement(): void
+    {
+        $value = '</script><script>alert(1)</script><!--';
+        Seo::jsonLd(['@type' => 'WebSite', 'name' => $value]);
+        $html = Seo::render();
+
+        preg_match_all('~<script type="application/ld\+json">(.*?)</script>~s', $html, $blocks);
+        $this->assertCount(1, $blocks[1]);
+        $this->assertStringNotContainsString('<', $blocks[1][0]);
+        $this->assertSame($value, json_decode($blocks[1][0], true)['name']);
+    }
+
+    /** A site mounted under BASE_URI serves its images and sitemap there too. */
+    #[RunInSeparateProcess]
+    public function testRelativeImageAndSitemapCarryTheBaseUri(): void
+    {
+        define('BASE_URI', '/site');
+        Config::set('app.sitemap', ['/']);
+        Seo::set(['image' => 'img/og.png']);
+
+        $this->assertStringContainsString('<meta property="og:image" content="https://example.com/site/img/og.png" />', Seo::render());
+        $this->assertStringContainsString('Sitemap: https://example.com/site/sitemap.xml', Robots::text());
     }
 
     public function testJsonLdBlocksGetSchemaContextInjected(): void

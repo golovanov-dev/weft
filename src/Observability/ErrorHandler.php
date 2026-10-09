@@ -206,8 +206,7 @@ final class ErrorHandler
 
     private static function directory(): string
     {
-        $base = defined('LOGS_PATH') ? (string) LOGS_PATH : sys_get_temp_dir() . '/weft-logs';
-        return rtrim($base, '/\\') . '/errors';
+        return Config::logsPath() . '/errors';
     }
 
     public static function debug(): bool

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Golovanov\Weft\Config;
 
+use Golovanov\Weft\Support\Arr;
+
 /**
  * Business configuration store.
  *
@@ -22,8 +24,6 @@ final class Config
     /** @var array<string, mixed> */
     private static array $items = [];
 
-    private static bool $loaded = false;
-
     /**
      * Load every *.php file in a directory. Filename (without extension) becomes the top-level key.
      */
@@ -37,7 +37,6 @@ final class Config
                 self::$items[$name] = $data;
             }
         }
-        self::$loaded = true;
     }
 
     /**
@@ -45,14 +44,7 @@ final class Config
      */
     public static function get(string $key, mixed $default = null): mixed
     {
-        $node = self::$items;
-        foreach (explode('.', $key) as $segment) {
-            if (!is_array($node) || !array_key_exists($segment, $node)) {
-                return $default;
-            }
-            $node = $node[$segment];
-        }
-        return $node;
+        return Arr::get(self::$items, $key, $default);
     }
 
     public static function has(string $key): bool
@@ -79,11 +71,6 @@ final class Config
         }
     }
 
-    public static function isLoaded(): bool
-    {
-        return self::$loaded;
-    }
-
     /**
      * Convenience reader for environment constants with a typed default.
      */
@@ -93,8 +80,8 @@ final class Config
     }
 
     /**
-     * A configured filesystem path: an absolute one as is, a relative one from APP_ROOT (from the
-     * working directory when APP_ROOT is undefined or empty), so the site and CLI scripts agree.
+     * A configured filesystem path: an absolute one as is, a relative one from root(), so the site
+     * and CLI scripts agree.
      *
      * @internal Used by the engine's file stores.
      */
@@ -103,10 +90,30 @@ final class Config
         if ($path === '' || preg_match('~^(/|\\\\|[a-z]:|[a-z][a-z0-9+.-]*://)~i', $path)) {
             return $path;
         }
+        return self::root() . '/' . $path;
+    }
+
+    /**
+     * The site root: APP_ROOT, or the working directory when APP_ROOT is undefined or empty.
+     * pages/, api/, components/, lang/ and relative configured paths are found from here.
+     *
+     * @internal
+     */
+    public static function root(): string
+    {
         $root = (string) self::env('APP_ROOT', '');
-        if ($root === '') {
-            $root = getcwd() ?: '.';
-        }
-        return rtrim($root, '/\\') . '/' . $path;
+        return rtrim($root !== '' ? $root : (getcwd() ?: '.'), '/\\');
+    }
+
+    /**
+     * The log directory: LOGS_PATH, or weft-logs in the system temp directory when LOGS_PATH is
+     * undefined or empty. Errors go to errors/ in it, traces to requests/ and cli/.
+     *
+     * @internal
+     */
+    public static function logsPath(): string
+    {
+        $path = (string) self::env('LOGS_PATH', '');
+        return rtrim($path !== '' ? $path : sys_get_temp_dir() . '/weft-logs', '/\\');
     }
 }

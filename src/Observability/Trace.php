@@ -188,8 +188,7 @@ final class Trace
      */
     public static function directory(string $sapi = PHP_SAPI): string
     {
-        $base = defined('LOGS_PATH') ? (string) LOGS_PATH : sys_get_temp_dir() . '/weft-logs';
-        return rtrim($base, '/\\') . (in_array($sapi, ['cli', 'phpdbg'], true) ? '/cli' : '/requests');
+        return Config::logsPath() . (in_array($sapi, ['cli', 'phpdbg'], true) ? '/cli' : '/requests');
     }
 
     /**

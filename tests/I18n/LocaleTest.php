@@ -61,21 +61,4 @@ final class LocaleTest extends TestCase
         $this->assertSame('Русский', Locale::name('ru'));
         $this->assertSame('EN', Locale::name('en'));
     }
-
-    public function testFromAcceptLanguageMatchesShortCode(): void
-    {
-        $this->enableLocales();
-        $_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'ru-RU,ru;q=0.9,en-US;q=0.8';
-        $this->assertSame('ru', Locale::fromAcceptLanguage());
-    }
-
-    public function testFromAcceptLanguageFallsBackToDefault(): void
-    {
-        $this->enableLocales();
-        $_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'de-DE,fr;q=0.9';
-        $this->assertSame('en', Locale::fromAcceptLanguage());
-
-        unset($_SERVER['HTTP_ACCEPT_LANGUAGE']);
-        $this->assertSame('en', Locale::fromAcceptLanguage());
-    }
 }

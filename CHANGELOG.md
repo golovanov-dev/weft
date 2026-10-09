@@ -167,6 +167,17 @@ pre-1.0 the API may change between minor versions.
 - `Jwt::decode()` rejects a token without `exp`, and `Jwt::encode()` without `ttl` issues a token
   that expires in an hour instead of one that never does. Tokens issued by `encode()` without `ttl`
   stop working after the upgrade: issue new ones, and pass `ttl` where an hour is too short.
+- HSTS no longer sends `includeSubDomains`, and its lifetime is configurable: `app.security.hsts`
+  stays the switch, the new `app.security.hsts_max_age` (default `31536000`) sets `max-age`, and the
+  new `app.security.hsts_subdomains` (default `false`) adds `includeSubDomains`. If every subdomain of
+  your domain serves HTTPS and you want them covered, set `hsts_subdomains` to `true`. The example's
+  `app.php` now ships with `hsts` off: read "HTTPS and HSTS" in the deployment guide before turning
+  it on.
+- A relative `og:image` (`app.seo.og_image`, or an image a page sets with `Seo::set()`) gets
+  `BASE_URI` ahead of it, as links do. If your site lives in a sub-directory and the value includes
+  it (`'/site/img/og.png'`), remove it (`'/img/og.png'`), or the address doubles it
+  (`https://example.com/site/site/img/og.png`) and social previews lose their picture. A full URL
+  is used as it is.
 
 ### Fixed
 
@@ -183,7 +194,14 @@ pre-1.0 the API may change between minor versions.
   and images; before, every asset request returned 404. If your site copied
   `example/public/index.php` and you develop with `php -S`, copy the new `cli-server` block at its
   top.
-- 15 smaller fixes: 1 security, 5 reliability, 9 docs.
+- 25 smaller fixes: 3 security, 12 reliability, 10 docs.
+
+### Removed
+
+- Unused API: `Config::isLoaded()`, `Locale::fromAcceptLanguage()`, the `LOCALE` constant,
+  `RequestContext::hasRequest()`, `logPath()` and `setLogPath()`, and reading the manifest from
+  `public/dist/manifest.json`, where Vite before 5 wrote it. Use `locale()` instead of `LOCALE` and
+  `RequestContext::request() !== null` instead of `hasRequest()`; build assets with Vite 5 or later.
 
 ## 0.1.3 - 2026-08-24
 

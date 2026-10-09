@@ -93,5 +93,11 @@ final class UrlTest extends TestCase
 
         $_SERVER['REQUEST_URI'] = '/about';
         $this->assertTrue(Url::isActive('about'));
+
+        // The root is the app.default_route page, whatever it is called.
+        Config::set('app.default_route', 'start');
+        $_SERVER['REQUEST_URI'] = '/';
+        $this->assertTrue(Url::isActive('start'));
+        $this->assertFalse(Url::isActive('home'));
     }
 }

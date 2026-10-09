@@ -27,8 +27,11 @@ ini_set('log_errors', '1');
 define('WEB_ROOT', __DIR__);
 
 // Session cookie parameters. The session itself starts only when a form needs a CSRF token
-// (Csrf), so pages without a form set no cookie.
-session_set_cookie_params(['path' => '/', 'httponly' => true, 'samesite' => 'Lax']);
+// (Csrf), so pages without a form set no cookie. Secure when PHP sees the request as HTTPS;
+// strict mode refuses a session id the server did not issue.
+$https = !in_array(strtolower((string) ($_SERVER['HTTPS'] ?? '')), ['', 'off'], true);
+session_set_cookie_params(['path' => '/', 'httponly' => true, 'samesite' => 'Lax', 'secure' => $https]);
+ini_set('session.use_strict_mode', '1');
 
 require dirname(__DIR__) . '/bootstrap.php';
 
