@@ -209,10 +209,17 @@ seconds, nothing is retried and no failure reaches your code. It is not silent, 
 that fails is recorded on the request trace as an `alert.failed` event (status, transport flag, event
 type and category; never the alert body).
 
+An alert with a dedupe key is sent once per five minutes: a repeat within that window is dropped
+locally and `send()` returns `false`, so an error hit on every request does not make every request
+wait for AlertLoop. The window opens when a send starts and is dropped when delivery fails, so the
+next repeat tries again. It is kept where rate-limit counters are (Redis or files); if that store
+fails, the alert is sent. Alerts without a dedupe key, such as `business_event`, are always sent.
+
 Unhandled exceptions and fatals alert automatically. For an exception thrown by a page or an API
 endpoint the 500 response goes out first and the alert after it, so under PHP-FPM the visitor does
 not wait for AlertLoop. Database errors alert once the site registers a notifier, as this example's
-`app/Bootstrap.php` does with `Database::setErrorNotifier(Alert::notifier())`.
+`app/Bootstrap.php` does with `Database::setErrorNotifier(Alert::notifier())`; the same database
+error message is one dedupe key.
 
 ## Database
 
@@ -257,8 +264,10 @@ $res = $http->post('https://api.example.com/orders', ['amount' => 100]);
 // ['ok' => bool, 'status' => int, 'headers' => [...], 'error' => ?string, 'body' => mixed]
 ```
 
-Safe defaults: SSL verification on, short timeouts, JSON in/out, and every call recorded on the
-current request's trace timeline.
+`ok` is `false` when no response arrived, when the status is 400 or higher, or when the body is not
+valid JSON (with `decodeJson`, the default); `status` and the decoded `body` are returned either way,
+and `error` says what went wrong. Safe defaults: SSL verification on, short timeouts, JSON in/out,
+and every call recorded on the current request's trace timeline.
 
 ## Vite
 

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Golovanov\Weft\Observability;
 
 use Golovanov\Weft\Config\Config;
+use Golovanov\Weft\Http\HttpClient;
 use Golovanov\Weft\Http\RequestContext;
+use Golovanov\Weft\Security\RateLimiter;
 
 /**
  * AlertLoop client — fire notifications for sensitive spots (payment failures, captcha
@@ -19,6 +21,11 @@ use Golovanov\Weft\Http\RequestContext;
  * switched on without base_url or api_key leave a line in the error log. Configured by the
  * 'alertloop' block of app/Configs/app.php (app.alertloop.*).
  *
+ * An alert with a dedupe key is sent once per five minutes: repeats within that window are dropped
+ * locally, so an incident hit on every request does not make every request wait for AlertLoop.
+ * The window opens when a send starts and is dropped if delivery fails, so the next repeat
+ * tries again. It lives in the rate-limit store; when that store fails, the alert is sent.
+ *
  * @see https://github.com/golovanov-dev/alertloop
  */
 final class Alert
@@ -27,6 +34,9 @@ final class Alert
     public const WARNING = 'warning';
     public const INFO = 'info';
 
+    /** Seconds during which a repeat of a delivered dedupe key is not sent. */
+    private const REPORTED_WINDOW = 300;
+
     /** Re-entry guard: reporting a failed alert must never trigger another alert. */
     private static bool $reporting = false;
 
@@ -34,15 +44,10 @@ final class Alert
     private static bool $misconfiguredLogged = false;
 
     /**
-     * Transport seam. Null means the built-in curl transport; tests replace it to exercise
-     * success, transport errors and non-2xx responses without a network.
-     *
-     * @var null|\Closure(string, string, array<string, mixed>): array{status: int, error: string}
-     */
-    private static ?\Closure $transport = null;
-
-    /**
      * @param array<string, mixed> $context free-form data sent as the event's `payload`
+     * @return bool true when AlertLoop accepted this event; false when nothing was delivered:
+     *   alerting off or misconfigured, delivery failed, or the dedupe key was already reported
+     *   within the window
      */
     public static function send(
         string $message,
@@ -91,7 +96,17 @@ final class Alert
             $payload['payload'] = $context;
         }
 
-        return self::post($baseUrl . '/v1/events', $apiKey, $payload);
+        if ($dedupeKey === null || $dedupeKey === '') {
+            return self::post($baseUrl . '/v1/events', $apiKey, $payload);
+        }
+        if (!RateLimiter::claim('alert:' . $dedupeKey, self::REPORTED_WINDOW)) {
+            return false;
+        }
+        $delivered = self::post($baseUrl . '/v1/events', $apiKey, $payload);
+        if (!$delivered) {
+            RateLimiter::release('alert:' . $dedupeKey);
+        }
+        return $delivered;
     }
 
     /**
@@ -123,7 +138,8 @@ final class Alert
     }
 
     /**
-     * Convenience: register this as the Database error notifier in bootstrap.
+     * Convenience: register this as the Database error notifier in bootstrap. The same message
+     * is one incident: its dedupe key is derived from it.
      */
     public static function notifier(): callable
     {
@@ -131,7 +147,7 @@ final class Alert
             $message,
             self::CRITICAL,
             'incident',
-            null,
+            'database:' . md5($message),
             [],
             'database',
         );
@@ -142,60 +158,32 @@ final class Alert
      */
     private static function post(string $url, string $apiKey, array $payload): bool
     {
-        $transport = self::$transport ?? self::curl(...);
-
         try {
-            $result = $transport($url, $apiKey, $payload);
+            $client = new HttpClient(timeout: (int) Config::get('app.alertloop.timeout', 4), connectTimeout: 3);
+            // log => false: the payload can carry user input and secrets, and the trace keeps
+            // only the alert.failed metadata below.
+            $response = $client->post($url, (string) json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), [
+                'headers' => ['X-API-Key: ' . $apiKey],
+                'decodeJson' => false,
+                'log' => false,
+            ]);
         } catch (\Throwable $e) {
             // Best-effort by contract: the caller must not see a delivery problem as an error.
             self::reportFailure($payload, 0, true, $e->getMessage());
             return false;
         }
 
-        if ($result['error'] !== '') {
-            self::reportFailure($payload, $result['status'], true, $result['error']);
-            return false;
+        $status = $response['status'];
+        if ($response['ok'] && $status >= 200 && $status < 300) {
+            return true;
         }
-        if ($result['status'] < 200 || $result['status'] >= 300) {
-            self::reportFailure($payload, $result['status'], false, 'unexpected HTTP status');
-            return false;
+        if (!$response['ok'] && $status < 400) {
+            // No response, or a broken one: the transport failed, not AlertLoop.
+            self::reportFailure($payload, $status, true, (string) $response['error']);
+        } else {
+            self::reportFailure($payload, $status, false, 'unexpected HTTP status');
         }
-
-        return true;
-    }
-
-    /**
-     * @param array<string, mixed> $payload
-     * @return array{status: int, error: string}
-     */
-    private static function curl(string $url, string $apiKey, array $payload): array
-    {
-        $ch = curl_init($url);
-        if ($ch === false) {
-            return ['status' => 0, 'error' => 'curl_init() failed'];
-        }
-
-        curl_setopt_array($ch, [
-            CURLOPT_POST => true,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            CURLOPT_HTTPHEADER => [
-                'Content-Type: application/json',
-                'X-API-Key: ' . $apiKey,
-            ],
-            CURLOPT_TIMEOUT => (int) Config::get('app.alertloop.timeout', 4),
-            CURLOPT_CONNECTTIMEOUT => 3,
-        ]);
-
-        $response = curl_exec($ch);
-        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error = curl_error($ch);
-        curl_close($ch);
-
-        if ($response === false) {
-            return ['status' => $status, 'error' => $error !== '' ? $error : 'transport error'];
-        }
-        return ['status' => $status, 'error' => ''];
+        return false;
     }
 
     /**

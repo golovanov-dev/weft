@@ -111,6 +111,15 @@ pre-1.0 the API may change between minor versions.
   group), add `umask 002;` to your cron lines and to commands you run over ssh or from CI, move cron
   jobs that run Weft scripts from the crontab of `www-data` or `root` to the deploy user's, exclude
   `storage/` and `config/config.php` if you deploy with rsync, and run `health.php` as the PHP user.
+- `HttpClient` returns `ok => false` for a response with status 400 or higher (`error` is
+  `HTTP <status>`); `status` and the decoded `body` are still returned. Before, any response that
+  arrived was `ok`, so a 503 `{"error":"maintenance"}` counted as success. Where your code reads an
+  error response's body, branch on `status`, not on `ok`.
+- An alert with a dedupe key is sent at most once per five minutes: a repeat within that window is
+  not sent and `Alert::send()` returns `false`; a failed delivery does not open the window. The
+  window is kept with the rate-limit counters, and if that store fails the alert is sent.
+  `Alert::notifier()` gives database errors a dedupe key made from the message. Where every
+  occurrence must arrive, send the alert without a dedupe key.
 
 ### Fixed
 

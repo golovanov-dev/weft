@@ -11,6 +11,7 @@ use Golovanov\Weft\I18n\Locale;
 use Golovanov\Weft\Kernel;
 use Golovanov\Weft\Observability\Alert;
 use Golovanov\Weft\Observability\ErrorHandler;
+use Golovanov\Weft\Security\RateLimiter;
 use Golovanov\Weft\Seo\Seo;
 use Golovanov\Weft\View\View;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -311,14 +312,11 @@ final class KernelTest extends TestCase
         Config::set('app.alertloop', ['enabled' => true, 'base_url' => 'https://alerts.example', 'api_key' => 'k']);
         $alerts = [];
         $sentBeforeAlert = [];
-        (new \ReflectionProperty(Alert::class, 'transport'))->setValue(
-            null,
-            static function (string $url, string $key, array $payload) use (&$alerts, &$sentBeforeAlert): array {
-                $alerts[] = $payload;
-                $sentBeforeAlert[] = (string) ob_get_contents();
-                return ['status' => 202, 'error' => ''];
-            },
-        );
+        self::fakeHttp(static function (array $request) use (&$alerts, &$sentBeforeAlert): array {
+            $alerts[] = json_decode((string) $request['body'], true);
+            $sentBeforeAlert[] = (string) ob_get_contents();
+            return ['status' => 202];
+        });
         $_SERVER['REQUEST_URI'] = '/broken';
         $_SERVER['REQUEST_METHOD'] = 'GET';
 
@@ -333,7 +331,9 @@ final class KernelTest extends TestCase
         // The 500 went out before the alert waited for AlertLoop.
         $this->assertStringContainsString('<h1>500</h1>', $sentBeforeAlert[0] ?? '');
 
-        // The alert is the one the exception handler raises for the same throw site.
+        // The alert is the one the exception handler raises for the same throw site. Drop the
+        // "already reported" window, or the second send of that dedupe key is held back.
+        RateLimiter::release('alert:' . $alerts[0]['dedupe_key']);
         try {
             View::render(APP_ROOT . '/pages/broken.php');
         } catch (\RuntimeException $e) {
@@ -350,13 +350,10 @@ final class KernelTest extends TestCase
     {
         Config::set('app.alertloop', ['enabled' => true, 'base_url' => 'https://alerts.example', 'api_key' => 'k']);
         $statuses = [];
-        (new \ReflectionProperty(Alert::class, 'transport'))->setValue(
-            null,
-            static function () use (&$statuses): array {
-                $statuses[] = session_status();
-                return ['status' => 202, 'error' => ''];
-            },
-        );
+        self::fakeHttp(static function () use (&$statuses): array {
+            $statuses[] = session_status();
+            return ['status' => 202];
+        });
         $_SERVER['REQUEST_URI'] = '/broken';
         $_SERVER['REQUEST_METHOD'] = 'GET';
         $sessions = $this->makeTempDir();

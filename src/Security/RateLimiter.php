@@ -22,6 +22,8 @@ use Golovanov\Weft\Observability\ErrorHandler;
  * is enabled. Each increment is atomic and the window starts at the first hit; later hits never
  * extend it. If the counter cannot be written, the request is allowed (fail-open) and the failure
  * is logged.
+ *
+ * Alert keeps its "already reported" window in the same store (claim()).
  */
 final class RateLimiter
 {
@@ -112,19 +114,51 @@ final class RateLimiter
         ];
     }
 
+    /**
+     * True the first time $key is claimed within $seconds, and when the store is unavailable
+     * (fail-open, logged). Not per client: one claim for the whole site.
+     *
+     * @internal Used by Alert for its "already reported" window.
+     */
+    public static function claim(string $key, int $seconds): bool
+    {
+        $count = self::increment('claim:' . $key, $seconds, 'Claim failed open');
+        return $count === null || $count <= 1;
+    }
+
+    /**
+     * Drop a claim, so the next claim() of $key succeeds. Best-effort: a store error is ignored.
+     *
+     * @internal Used by Alert.
+     */
+    public static function release(string $key): void
+    {
+        try {
+            self::store()->forget('claim:' . $key);
+        } catch (\Throwable) {
+            // The claim then simply expires with its window.
+        }
+    }
+
     /** Count one hit for the current client; null when the counter is unavailable. */
     private static function hit(string $prefix, int $window): ?int
     {
         $ip = RequestContext::request()?->clientIp ?? ($_SERVER['REMOTE_ADDR'] ?? 'cli');
+        return self::increment($prefix . ':' . $ip, $window, 'Rate limit failed open');
+    }
+
+    /** Increment a counter; null, with a line in the error log, when it is unavailable. */
+    private static function increment(string $key, int $window, string $failure): ?int
+    {
         try {
-            $count = self::store()->increment($prefix . ':' . $ip, $window);
+            $count = self::store()->increment($key, $window);
             $error = 'counter not writable';
         } catch (\Throwable $e) {
             $count = null;
             $error = $e->getMessage();
         }
         if ($count === null) {
-            ErrorHandler::log('rate_limit', 500, 'Rate limit failed open: ' . $error, __FILE__, __LINE__);
+            ErrorHandler::log('rate_limit', 500, $failure . ': ' . $error, __FILE__, __LINE__);
         }
         return $count;
     }

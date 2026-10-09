@@ -7,6 +7,7 @@ namespace Golovanov\Weft\Tests;
 use Golovanov\Weft\Assets\Vite;
 use Golovanov\Weft\Cache\Cache;
 use Golovanov\Weft\Config\Config;
+use Golovanov\Weft\Http\HttpClient;
 use Golovanov\Weft\Http\RequestContext;
 use Golovanov\Weft\I18n\I18n;
 use Golovanov\Weft\I18n\Locale;
@@ -25,15 +26,21 @@ use PHPUnit\Framework\TestCase as BaseTestCase;
  */
 abstract class TestCase extends BaseTestCase
 {
+    /** Rate-limit counters and alert windows of the running test, created on first use. */
+    private string $countersDir = '';
+
     protected function setUp(): void
     {
         parent::setUp();
         self::resetEngineState();
+        $this->countersDir = sys_get_temp_dir() . '/weft-test-counters-' . bin2hex(random_bytes(6));
+        Config::set('app.rate_limit.path', $this->countersDir);
     }
 
     protected function tearDown(): void
     {
         self::resetEngineState();
+        $this->removeDir($this->countersDir);
         parent::tearDown();
     }
 
@@ -48,7 +55,8 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(RateLimiter::class, ['store' => null, 'redisError' => null]);
         self::setStatics(View::class, ['shared' => []]);
         self::setStatics(Vite::class, ['manifest' => null]);
-        self::setStatics(Alert::class, ['transport' => null, 'reporting' => false, 'misconfiguredLogged' => false]);
+        self::setStatics(Alert::class, ['reporting' => false, 'misconfiguredLogged' => false]);
+        self::setStatics(HttpClient::class, ['transport' => null]);
         self::setStatics(Trace::class, ['tracer' => null, 'trace' => null, 'id' => '', 'booted' => false]);
         self::setStatics(RequestContext::class, [
             'request' => null,
@@ -96,6 +104,21 @@ abstract class TestCase extends BaseTestCase
             }
         }
         return $events;
+    }
+
+    /**
+     * Answer every HttpClient request with $respond instead of curl.
+     *
+     * @param \Closure(array<string, mixed>): array<string, mixed> $respond gets the transport request
+     *   (method, url, headers, body, timeout, ...); returns any of status, headers, body (false: no
+     *   response), error, defaulting to an empty 200
+     */
+    protected static function fakeHttp(\Closure $respond): void
+    {
+        self::setStatics(HttpClient::class, [
+            'transport' => static fn(array $request): array => $respond($request)
+                + ['status' => 200, 'headers' => [], 'body' => '', 'error' => ''],
+        ]);
     }
 
     /** Size of today's error log (ErrorHandler::log() without LOGS_PATH), to read what a test adds. */

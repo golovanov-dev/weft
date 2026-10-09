@@ -16,13 +16,31 @@ use Golovanov\Weft\Observability\Trace;
  * body is traced as Trace::body() describes (contents unless app.trace.log_body is off); the
  * response body is never traced.
  *
+ * `ok` is true only when a response arrived, its status is below 400 and, with decodeJson, its
+ * body is valid JSON. `status` and the (decoded) `body` are returned either way.
+ *
  * @phpstan-type Options array{
  *   method?: string, headers?: array<int, string>, timeout?: int, connectTimeout?: int,
  *   sslVerify?: bool, body?: mixed, json?: bool, decodeJson?: bool, log?: bool
  * }
+ * @phpstan-type TransportRequest array{
+ *   method: string, url: string, headers: list<string>, body: ?string,
+ *   timeout: int, connectTimeout: int, sslVerify: bool
+ * }
+ * @phpstan-type TransportResponse array{
+ *   status: int, headers: array<string, string>, body: string|false, error: string, info?: array<string, mixed>
+ * }
  */
 final class HttpClient
 {
+    /**
+     * Transport seam: null means curl. Tests replace it (through reflection) to answer requests
+     * without a network; `body` false means no response arrived, `error` is the transport's message.
+     *
+     * @var null|\Closure(TransportRequest): TransportResponse
+     */
+    private static ?\Closure $transport = null;
+
     public function __construct(
         private int $timeout = 8,
         private int $connectTimeout = 5,
@@ -55,35 +73,6 @@ final class HttpClient
         $method = strtoupper((string) $opt['method']);
         $json = (bool) $opt['json'];
         $log = (bool) $opt['log'];
-        $debug = ErrorHandler::debug();
-
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, (int) $opt['timeout']);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, (int) $opt['connectTimeout']);
-
-        if (!$opt['sslVerify']) {
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-        }
-
-        if ($method === 'POST') {
-            curl_setopt($ch, CURLOPT_POST, true);
-        } else {
-            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
-        }
-
-        // Capture response headers.
-        $respHeaders = [];
-        curl_setopt($ch, CURLOPT_HEADERFUNCTION, static function ($_ch, string $line) use (&$respHeaders): int {
-            $len = strlen($line);
-            $line = trim($line);
-            $pos = strpos($line, ':');
-            if ($pos !== false) {
-                $respHeaders[trim(substr($line, 0, $pos))] = trim(substr($line, $pos + 1));
-            }
-            return $len;
-        });
 
         // Headers: strip any caller Content-Type, then set ours.
         $headers = array_filter(
@@ -92,16 +81,13 @@ final class HttpClient
         );
         $contentType = $json ? 'application/json' : 'application/x-www-form-urlencoded';
         $headers[] = 'Content-Type: ' . $contentType;
-        curl_setopt($ch, CURLOPT_HTTPHEADER, array_values($headers));
 
-        // Body.
         $postData = null;
         if ($opt['body'] !== null) {
             $body = $opt['body'];
             $postData = $json
                 ? (is_array($body) ? (string) json_encode($body) : (string) $body)
                 : (is_array($body) ? http_build_query($body) : (string) $body);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
         }
 
         // The trace gets the URL without its query string and the query parsed, masked by key.
@@ -122,44 +108,55 @@ final class HttpClient
             ]);
         }
 
-        $response = curl_exec($ch);
-        $error = curl_error($ch);
-        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $info = $debug ? (curl_getinfo($ch) ?: []) : null;
-        curl_close($ch);
+        $response = (self::$transport ?? self::curl(...))([
+            'method' => $method,
+            'url' => $url,
+            'headers' => array_values($headers),
+            'body' => $postData,
+            'timeout' => (int) $opt['timeout'],
+            'connectTimeout' => (int) $opt['connectTimeout'],
+            'sslVerify' => (bool) $opt['sslVerify'],
+        ]);
 
-        $ok = $response !== false && $error === '';
-        $bodyStr = $response === false ? '' : (string) $response;
-        $bodyOut = $bodyStr;
+        $status = $response['status'];
+        $received = $response['body'] !== false && $response['error'] === '';
+        $bodyOut = $response['body'] === false ? '' : $response['body'];
+        $invalidJson = false;
 
-        if ($ok && (bool) $opt['decodeJson'] && $bodyStr !== '') {
-            $decoded = json_decode($bodyStr, true);
+        if ($received && (bool) $opt['decodeJson'] && $bodyOut !== '') {
+            $decoded = json_decode($bodyOut, true);
             if (json_last_error() === JSON_ERROR_NONE) {
                 $bodyOut = $decoded;
             } else {
-                $ok = false;
-                $error = $error !== '' ? $error : 'Invalid JSON in response';
+                $invalidJson = true;
             }
         }
 
+        $error = match (true) {
+            !$received => $response['error'] !== '' ? $response['error'] : 'HTTP request failed',
+            $status >= 400 => 'HTTP ' . $status,
+            $invalidJson => 'Invalid JSON in response',
+            default => null,
+        };
+
         $out = [
-            'ok' => $ok,
+            'ok' => $error === null,
             'status' => $status,
-            'headers' => $respHeaders,
-            'error' => $ok ? null : ($error !== '' ? $error : 'HTTP request failed'),
+            'headers' => $response['headers'],
+            'error' => $error,
             'body' => $bodyOut,
         ];
-        if ($debug && is_array($info)) {
-            $out['info'] = $info;
+        if (ErrorHandler::debug()) {
+            $out['info'] = $response['info'] ?? [];
         }
 
         if ($log) {
             Trace::event('http_out_response', [
                 'url' => $traceUrl,
                 ...$traceQuery,
-                'ok' => $ok,
+                'ok' => $out['ok'],
                 'status' => $status,
-                'error' => $out['error'],
+                'error' => $error,
             ]);
         }
 
@@ -178,5 +175,54 @@ final class HttpClient
     public function post(string $url, mixed $body, array $options = []): array
     {
         return $this->request($url, ['method' => 'POST', 'body' => $body] + $options);
+    }
+
+    /**
+     * @param TransportRequest $request
+     * @return TransportResponse
+     */
+    private static function curl(array $request): array
+    {
+        $ch = curl_init($request['url']);
+        if ($ch === false) {
+            return ['status' => 0, 'headers' => [], 'body' => false, 'error' => 'curl_init() failed'];
+        }
+
+        $headers = [];
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => $request['timeout'],
+            CURLOPT_CONNECTTIMEOUT => $request['connectTimeout'],
+            CURLOPT_HTTPHEADER => $request['headers'],
+            CURLOPT_HEADERFUNCTION => static function ($_ch, string $line) use (&$headers): int {
+                $pos = strpos($line, ':');
+                if ($pos !== false) {
+                    $headers[trim(substr($line, 0, $pos))] = trim(substr($line, $pos + 1));
+                }
+                return strlen($line);
+            },
+        ]);
+        if (!$request['sslVerify']) {
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+        }
+        if ($request['method'] === 'POST') {
+            curl_setopt($ch, CURLOPT_POST, true);
+        } else {
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $request['method']);
+        }
+        if ($request['body'] !== null) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $request['body']);
+        }
+
+        $body = curl_exec($ch);
+
+        return [
+            'status' => (int) curl_getinfo($ch, CURLINFO_HTTP_CODE),
+            'headers' => $headers,
+            'body' => is_string($body) ? $body : false,
+            'error' => curl_error($ch),
+            'info' => curl_getinfo($ch) ?: [],
+        ];
     }
 }

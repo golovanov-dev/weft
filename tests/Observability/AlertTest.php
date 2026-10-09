@@ -10,8 +10,9 @@ use Golovanov\Weft\Observability\Trace;
 use Golovanov\Weft\Tests\TestCase;
 
 /**
- * Alert delivery: the shape of the event sent to AlertLoop and what happens when delivery
- * fails. The HTTP transport is replaced with a closure, so no network is involved.
+ * Alert delivery: the shape of the event sent to AlertLoop, what happens when delivery fails, and
+ * the window that drops repeats of a dedupe key. HttpClient's transport is replaced with a
+ * closure, so no network is involved.
  */
 final class AlertTest extends TestCase
 {
@@ -42,20 +43,21 @@ final class AlertTest extends TestCase
      * Install a fake transport.
      *
      * @param array{status: int, error: string}|\Throwable $result
-     * @param array<string, mixed>|null $captured filled with the payload the transport received
+     * @param array<string, mixed>|null $captured filled with the payload of the last request
+     * @param array<string, mixed>|null $request filled with the last transport request
      */
-    private function fakeTransport(array|\Throwable $result, ?array &$captured = null, ?string &$url = null): void
+    private function fakeTransport(array|\Throwable $result, ?array &$captured = null, ?array &$request = null, ?int &$calls = null): void
     {
-        $transport = static function (string $u, string $key, array $payload) use ($result, &$captured, &$url): array {
-            $captured = $payload;
-            $url = $u;
+        $calls = 0;
+        self::fakeHttp(static function (array $r) use ($result, &$captured, &$request, &$calls): array {
+            $calls++;
+            $request = $r;
+            $captured = json_decode((string) $r['body'], true);
             if ($result instanceof \Throwable) {
                 throw $result;
             }
-            return $result;
-        };
-
-        (new \ReflectionClass(Alert::class))->getProperty('transport')->setValue(null, $transport);
+            return $result + ['body' => $result['error'] === '' ? '{"id":1}' : false];
+        });
     }
 
     /** @param list<array<string, mixed>> $events */
@@ -89,8 +91,7 @@ final class AlertTest extends TestCase
 
         $log = self::errorLogSince($logOffset);
         $this->assertStringContainsString('ALERT ERRNO:500 | AlertLoop is enabled without api_key, alerts are not sent', $log);
-        $this->assertSame(1, substr_count($log, "
-"));
+        $this->assertSame(1, substr_count($log, "\n"));
     }
 
     public function testMissingKeysAreReportedOnlyWhileAlertingIsOn(): void
@@ -104,7 +105,8 @@ final class AlertTest extends TestCase
 
     public function testPayloadUsesOnlyFieldsFromTheAlertLoopSchema(): void
     {
-        $this->fakeTransport(['status' => 202, 'error' => ''], $captured, $url);
+        Config::set('app.alertloop.timeout', 2);
+        $this->fakeTransport(['status' => 202, 'error' => ''], $captured, $request);
 
         $ok = Alert::send(
             'Payment failed',
@@ -116,7 +118,10 @@ final class AlertTest extends TestCase
         );
 
         $this->assertTrue($ok);
-        $this->assertSame('https://alerts.example/v1/events', $url);
+        $this->assertSame('POST', $request['method']);
+        $this->assertSame('https://alerts.example/v1/events', $request['url']);
+        $this->assertContains('X-API-Key: test-key', $request['headers']);
+        $this->assertSame(2, $request['timeout']);
         $this->assertSame([], array_diff(array_keys((array) $captured), self::SCHEMA_FIELDS));
         $this->assertSame('incident', $captured['type']);
         $this->assertSame('critical', $captured['severity']);
@@ -168,7 +173,7 @@ final class AlertTest extends TestCase
     public function testNotifierSendsACriticalDatabaseAlertWithTheTraceId(): void
     {
         $traceId = Trace::boot();
-        $this->fakeTransport(['status' => 200, 'error' => ''], $captured);
+        $this->fakeTransport(['status' => 200, 'error' => ''], $captured, calls: $calls);
 
         $notifier = Alert::notifier();
         $this->assertTrue($notifier('Query failed'));
@@ -176,6 +181,59 @@ final class AlertTest extends TestCase
         $this->assertSame('database', $captured['category']);
         $this->assertSame($traceId, $captured['trace_id']);
         $this->assertArrayNotHasKey('payload', (array) $captured);
+
+        // The same database error on the next request is the same incident.
+        $this->assertFalse($notifier('Query failed'));
+        $this->assertSame(1, $calls);
+    }
+
+    public function testRepeatOfADedupeKeyWithinTheWindowIsNotSent(): void
+    {
+        $this->fakeTransport(['status' => 202, 'error' => ''], calls: $calls);
+
+        $this->assertTrue(Alert::critical('boom', [], 'exception:1'));
+        $this->assertFalse(Alert::critical('boom', [], 'exception:1'));
+        $this->assertTrue(Alert::critical('other', [], 'exception:2'));
+        $this->assertSame(2, $calls);
+    }
+
+    public function testAlertWithoutADedupeKeyIsAlwaysSent(): void
+    {
+        $this->fakeTransport(['status' => 202, 'error' => ''], calls: $calls);
+
+        $this->assertTrue(Alert::send('New lead', Alert::INFO, 'business_event'));
+        $this->assertTrue(Alert::send('New lead', Alert::INFO, 'business_event'));
+        $this->assertSame(2, $calls);
+    }
+
+    public function testFailedDeliveryDoesNotHoldBackTheNextAttempt(): void
+    {
+        Trace::boot();
+        $this->fakeTransport(['status' => 503, 'error' => ''], calls: $calls);
+        $this->assertFalse(Alert::critical('boom', [], 'exception:1'));
+
+        $this->fakeTransport(['status' => 202, 'error' => ''], calls: $calls);
+        $this->assertTrue(Alert::critical('boom', [], 'exception:1'));
+        $this->assertSame(1, $calls);
+    }
+
+    public function testAlertIsSentWhenTheWindowCannotBeStored(): void
+    {
+        $dir = $this->makeTempDir();
+        file_put_contents($dir . '/not-a-directory', '');
+        Config::set('app.rate_limit.path', $dir . '/not-a-directory');
+        $this->fakeTransport(['status' => 202, 'error' => ''], calls: $calls);
+        $logOffset = self::errorLogSize();
+
+        try {
+            $this->assertTrue(Alert::critical('boom', [], 'exception:1'));
+            $this->assertTrue(Alert::critical('boom', [], 'exception:1'));
+        } finally {
+            $this->removeDir($dir);
+        }
+
+        $this->assertSame(2, $calls);
+        $this->assertStringContainsString('Claim failed open', self::errorLogSince($logOffset));
     }
 
     public function testSuccessfulDeliveryRecordsNoFailure(): void
@@ -199,6 +257,7 @@ final class AlertTest extends TestCase
         $data = $failures[0]['data'];
         $this->assertTrue($data['transport_error']);
         $this->assertSame(0, $data['status']);
+        $this->assertSame('Could not resolve host', $data['error']);
         $this->assertSame('incident', $data['event_type']);
         $this->assertSame('critical', $data['severity']);
         $this->assertSame('payments', $data['category']);
@@ -217,30 +276,34 @@ final class AlertTest extends TestCase
         $this->assertFalse($failures[0]['data']['transport_error']);
     }
 
-    public function testFailureRecordNeverCarriesTheAlertBody(): void
+    /** Nothing of the request reaches the trace but the alert.failed metadata: no body, no API key. */
+    public function testTraceNeverCarriesTheAlertBodyOrTheApiKey(): void
     {
         $traceId = Trace::boot();
         $this->fakeTransport(['status' => 503, 'error' => '']);
 
         Alert::send('Card declined for user@example.com', context: ['card' => '4111111111111111']);
 
-        $failures = $this->failureEvents($this->traceEvents($traceId));
-        $this->assertCount(1, $failures);
-        $encoded = (string) json_encode($failures[0]);
+        $events = $this->traceEvents($traceId);
+        $this->assertCount(1, $this->failureEvents($events));
+        $encoded = (string) json_encode($events);
         $this->assertStringNotContainsString('4111111111111111', $encoded);
         $this->assertStringNotContainsString('user@example.com', $encoded);
+        $this->assertStringNotContainsString('test-key', $encoded);
     }
 
     public function testAThrowingTransportNeverEscapesAndIsRecorded(): void
     {
         $traceId = Trace::boot();
-        $this->fakeTransport(new \RuntimeException('transport exploded'));
+        $this->fakeTransport(new \RuntimeException('transport exploded'), calls: $calls);
 
         $this->assertFalse(Alert::send('lost'));
 
         $failures = $this->failureEvents($this->traceEvents($traceId));
         $this->assertCount(1, $failures);
         $this->assertTrue($failures[0]['data']['transport_error']);
+        // Reporting the failure sends nothing.
+        $this->assertSame(1, $calls);
     }
 
     public function testFailureWithoutAnActiveTraceFallsBackToTheErrorLog(): void
