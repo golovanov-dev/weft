@@ -131,7 +131,8 @@ deployment guide, "Updating".
 
 - **Action.** The health check moved from the example's `scripts/health.php` into the engine:
   `vendor/bin/weft-health`, run in the site root. Delete your copy of `scripts/health.php` and call
-  `vendor/bin/weft-health` from deploy scripts, CI and cron (`--dev` on a development machine). The
+  `vendor/bin/weft-health` from deploy scripts, CI and cron (`--dev` on a development machine); in
+  `composer.json`, change the `health` script to `weft-health`. The
   report no longer has the `traceloom` field, which was always `true`, nor `alertloop_enabled`: if you
   parse the output, stop reading them (alerts are in `alert_channels`). `ok` is now false on a server with development settings: fix what `production` names.
 - **Action.** Weft requires `golovanov/traceloom` `^0.5`. If your site's `composer.json` requires traceloom
@@ -175,9 +176,10 @@ deployment guide, "Updating".
   delete the file. A listed channel without its settings sends nothing and says so in the error log,
   once per request. `Alert::send()` returns `true` only when a channel that reaches a person took the
   alert.
-- Console scripts (`cli` and `phpdbg` SAPIs: `scripts/*.php`, cron jobs) write traces to
+- **Action.** Console scripts (`cli` and `phpdbg` SAPIs: `scripts/*.php`, cron jobs) write traces to
   `LOGS_PATH/cli/`, not `LOGS_PATH/requests/`, which is now the site's alone (PHP's built-in server
-  counts as the site); `app.trace.retention_days` applies to both. To read a script's trace, use
+  counts as the site); `app.trace.retention_days` applies to both. If a log collector or a script of
+  yours reads the traces of console scripts, point it at `LOGS_PATH/cli/`. To read a script's trace, use
   `vendor/bin/eventtrace show <trace_id> --dir=storage/logs/cli`.
 - **Action.** Weft sets no permissions on the error log, cache entries, rate-limit counters and their
   directories (it created the directories at most `0770`): they get the mode the process umask
@@ -195,8 +197,9 @@ deployment guide, "Updating".
   cache starts empty, with your own `app.cache.prefix` too. If your `app/Configs/app.php` came from
   the example, delete its `'prefix' => 'weft:docs:'` line. Old keys with a TTL expire on their own.
   To delete the old `weft:` keys at once — only if no other Weft site uses this Redis database,
-  since `weft:` was every site's default — run once after the upgrade, on a Linux shell (with a
-  password, `export REDISCLI_AUTH='<REDIS_PASSWORD>'` first):
+  since `weft:` was every site's default, and your `app.cache.prefix` does not start with `weft:` —
+  run once after the upgrade, on a Linux shell (with a password, first
+  `read -rs REDISCLI_AUTH && export REDISCLI_AUTH` and type it, so it stays out of the shell history):
   `redis-cli -h <REDIS_HOST> -p <REDIS_PORT> -n <REDIS_DB> --scan --pattern 'weft:*' | grep '^weft:' | xargs -r -d '\n' -n 500 redis-cli -h <REDIS_HOST> -p <REDIS_PORT> -n <REDIS_DB> unlink`.
   It deletes in batches of 500 without blocking Redis; a key with a line break in its name is left
   as it is.
@@ -218,16 +221,21 @@ deployment guide, "Updating".
   the rate limit counts after validation, and a form posted without JavaScript is redirected (303)
   to the contact page with `?status=`. If your site copied the form, copy `api/contact.php`,
   `app/Services/ContactService.php`, `pages/contact.php`, `frontend/src/contact.js`, the
-  `status` strings of `lang/en/contact.php` and, for `weft-health`, the `contact_form` check of
-  `app/Bootstrap.php` (`Health::check()` and `contactForm()`), and set `MAIL_TO` or an alert
-  channel, or every submission answers 503.
+  `status` strings of `lang/en/contact.php` and, for `weft-health`, the `contact_form` check:
+  `app/Bootstrap.php` whole, or, if yours has code of its own, the `Health::check()` line of `init()`,
+  the methods `contactForm()`, `recipients()` and `mailAvailable()` and the four `use` lines. Set
+  `MAIL_TO` or an alert channel, or every submission answers 503.
 - **Action.** The example's environment constants: `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` are now
   `CAPTCHA_SITE_KEY` and `CAPTCHA_SECRET_KEY`; new are `MAIL_DRIVER` and `SMTP_*` (email) and
-  `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ALERT_MAIL_TO` (alert channels); the sender moved from
-  `app.contact.mail_from` to `app.mail.from` (still `MAIL_FROM`). If your `config/config.php` came
-  from the template, rename the two captcha constants and add the new ones from
-  `config/config.example.php`; with the old names and the new `app.php` the captcha is off. If your
-  site copied `app.php`, take its `'captcha'`, `'mail'`, `'alerts'` and `'contact'` blocks.
+  `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ALERT_MAIL_TO` (alert channels) and `INDEXNOW_KEY`;
+  the sender moved from `app.contact.mail_from` to `app.mail.from` (still `MAIL_FROM`). If your
+  `config/config.php` came from the template, rename the two captcha constants in every copy of it
+  (yours and the server's), keeping their values, and add the new ones from
+  `config/config.example.php`; with the old names and the new `app.php`, or with the new names added
+  empty from the template, the captcha is off: `vendor/bin/weft-health` shows
+  `captcha_enabled: false`. If your site copied `app.php`, take its `'captcha'`, `'mail'`, `'alerts'`
+  and `'contact'` blocks, and `'indexnow'` with `INDEXNOW_KEY`: without that block the key does nothing
+  and `/<key>.txt` is a 404.
   `MAIL_TO` takes plain addresses, several separated by commas; `Name <owner@site>`, which `mail()`
   accepted, now fails every contact email and `weft-health` (`MAIL_TO is not an email address`,
   alert channels or not): write the bare address.

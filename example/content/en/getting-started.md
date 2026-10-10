@@ -39,7 +39,8 @@ cd my-site
 composer install
 ```
 
-In `my-site/.gitignore`, delete the line `/composer.lock` and commit the lock file with your site:
+In `my-site/.gitignore`, delete the line `/composer.lock`, then make `my-site` a repository
+(`git init`) and commit the lock file with your site:
 deploys install the versions you tested, and rolling back an update relies on it
 ([Deployment](/docs/deployment), "Updating").
 

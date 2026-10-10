@@ -22,7 +22,9 @@ build. Without SSH or Node on the server, see "Shared hosting without SSH or Nod
 # 1. Code on the server (git pull / rsync)
 #    rsync runs on your machine, after step 4 there: it ships public/dist/, not frontend/.
 #    --delete removes what you deleted locally (a deleted page stops answering); the excludes keep
-#    what the server owns: storage/, its config files and the static sitemap of step 7:
+#    what the server owns: storage/, its config files and the static sitemap of step 7. Any other
+#    file put straight into public/ on the server (a search engine's verification file) is deleted:
+#    keep such files in the site's repository.
 #    rsync -a --delete --exclude=/storage/ --exclude=/config/config.php --exclude=/config/config.dev.php \
 #      --exclude=/public/sitemap.xml --exclude=/.git/ --exclude=/node_modules/ --exclude=/frontend/ \
 #      ./ deploy@example.com:/var/www/site/
@@ -268,6 +270,36 @@ server {
     location ^~ /.well-known/acme-challenge/ { try_files $uri =404; }   # certificate renewal (certbot --webroot)
     location ~ /\. { deny all; }    # .htaccess, .git and other dotfiles
 }
+```
+
+**The first certificate.** nginx refuses this block until the certificate files exist. Get them
+first: on the server, put this block alone in the site's nginx config (your domain and site root),
+then run as a user with `sudo`:
+
+```nginx
+server {
+    listen 80;
+    server_name example.com www.example.com;
+    root /var/www/site/public;
+    location ^~ /.well-known/acme-challenge/ { try_files $uri =404; }
+}
+```
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot certonly --webroot -w /var/www/site/public -d example.com -d www.example.com \
+  --deploy-hook 'systemctl reload nginx'
+```
+
+`-w` is the site's `public/`, the same `root` as above. Then replace the block with the one above and
+those of "Redirects: HTTPS and www", and run `sudo nginx -t && sudo systemctl reload nginx` again.
+certbot's timer renews the certificate the same way, through `/.well-known/acme-challenge/`, and
+the deploy hook reloads nginx after each renewal: without it nginx keeps serving the old certificate
+until it expires. certbot saves the hook for renewals; check both:
+
+```bash
+sudo certbot renew --dry-run      # renewal works through the webroot (a dry run skips the hook)
+sudo grep renew_hook /etc/letsencrypt/renewal/example.com.conf   # renew_hook = systemctl reload nginx
 ```
 
 ## Shared hosting without SSH or Node
@@ -584,23 +616,30 @@ With `opcache.validate_timestamps=0`, reload PHP-FPM afterwards (see "Steps").
 
 On your machine, in the site's directory:
 
-1. Read the new version's section of the
+1. Prepare the rollback. If `/composer.lock` is in your `.gitignore`, delete that line and commit
+   `.gitignore` and `composer.lock`: rolling back reinstalls the versions in the committed lock. Save
+   a copy of each `config/config.php` as it is now, the server's and yours, outside the site
+   directory (`--delete` in step 1 of "Steps" removes a copy kept in `config/`): rolling back restores these
+   copies; `app/Configs/app.php` and the rest of the code come back with `git revert`.
+2. Read the new version's section of the
    [CHANGELOG](https://github.com/golovanov-dev/weft/blob/main/CHANGELOG.md) and do what each
    entry marked **Action.** says, in every section: most say which sites they apply to. A setting
-   under an old name is not an error: its feature just turns off.
-2. Compare your config's constants with the example's template of the new version (here `v0.2.0`);
-   `config/config.php` is in no repository, so nothing updates it:
+   under an old name is not an error: its feature just turns off. Commit the changes.
+3. Compare your config's constants with the example's template of the new version (here `v0.2.0`);
+   config files are in no repository, so nothing updates them. Use the config the site runs with on
+   your machine (`config/config.php`, or `config/config.dev.php` if there is no `config.php`):
 
    ```bash
-   diff <(grep -o "^define('[A-Z_]*'" config/config.php | sort) \
-     <(curl -s https://raw.githubusercontent.com/golovanov-dev/weft/v0.2.0/example/config/config.example.php | grep -o "^define('[A-Z_]*'" | sort)
+   diff <(grep -o "^define('[A-Z_]*'" config/config.php | sort)      <(curl -s https://raw.githubusercontent.com/golovanov-dev/weft/v0.2.0/example/config/config.example.php | grep -o "^define('[A-Z_]*'" | sort)
    ```
 
-   A `>` line is a constant the template sets and your config lacks: add it. Constants the
-   template only shows commented out (`// define(...)`) are optional and not listed; add one only
-   when its comment says you need it. A `<` line is a constant of your own or one the CHANGELOG
-   renames. Make the same changes on the server.
-3. Update and check:
+   A `>` line is a constant the template sets and your config lacks: add it. A new constant works
+   only through the block of `app/Configs/app.php` that reads it; the CHANGELOG entry naming the
+   constant says which block to take. Constants the template only shows commented out
+   (`// define(...)`) are optional and not listed; add one only when its comment says you need it.
+   A `<` line is a constant of your own or one the CHANGELOG renames: rename that one in place,
+   keeping its value (the template's value is empty), and the `>` line of its new name goes away.
+4. Update and check:
 
    ```bash
    composer require golovanov/weft:^0.2 -W   # -W also updates traceloom, which 0.2 needs at ^0.5
@@ -609,13 +648,22 @@ On your machine, in the site's directory:
 
    `composer update` stays within the minor version you have: for its patch release,
    `composer update golovanov/weft` is enough. Commit `composer.json` and `composer.lock`.
-4. Deploy, then run step 8 of "Steps" on the server: exit code 0, and one request through the
-   contact form that reaches you.
+5. Make the config changes of steps 2 and 3 in the server's `config/config.php`, in the site root
+   there: first rename the constants the CHANGELOG renames, keeping the server's values
+   (`CAPTCHA_SECRET_KEY` takes the value of `RECAPTCHA_SECRETKEY`, `CAPTCHA_SITE_KEY` that of
+   `RECAPTCHA_SITEKEY`), then run the same `diff` and add each `>` constant. Deploy, then run step 8
+   of "Steps" on the server: exit code 0, `captcha_enabled: true` if your site uses the captcha (false
+   means a captcha key was added empty instead of renamed), and one request through the contact form
+   that reaches you.
 
-To roll back, revert that commit and the ones of step 1 (`git revert <commit>`), deploy again with
+To roll back, revert the commits of steps 4 and 2, newest first, in one command:
+`git revert --no-edit <commit of step 4> <commit of step 2>` (both change `app/Configs/app.php`;
+the other order stops on a conflict there). Deploy again with
 steps 1 and 2 of "Steps" (`composer install` puts back the versions in the reverted
-`composer.lock`, traceloom included), and restore the server's `config/config.php` from your copy
-(step 3).
+`composer.lock`, traceloom included), and put back the copies of `config/config.php` saved in
+step 1, on the server and on your machine. Then run the health check of the version you returned
+to on the server (from 0.1.x, `php scripts/health.php`): exit code 0, and `captcha_enabled: true`
+if your site uses the captcha.
 
 ## Logs
 

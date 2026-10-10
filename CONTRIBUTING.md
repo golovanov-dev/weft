@@ -22,8 +22,9 @@ local checkout:
 
 ```bash
 cd example
+rm -rf vendor     # a vendor/ from an earlier composer install blocks the link
 composer config repositories.weft path ../
-composer require golovanov/weft:@dev
+composer require golovanov/weft:@dev -W
 ```
 
 This writes a `repositories` block into `example/composer.json` — **do not commit it**. Revert
