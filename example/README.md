@@ -17,7 +17,8 @@ php -S localhost:8000 -t public public/index.php
 vendor/bin/weft-health --dev   # environment check; on a server, without --dev
 ```
 
-Open <http://localhost:8000>. With no `config/config.php` present, `bootstrap.php` falls back to
+On a fresh copy `weft-health` exits with 1: `contact_form` reports the template's example.com
+addresses (see Getting started). Open <http://localhost:8000>. With no `config/config.php` present, `bootstrap.php` falls back to
 `config/config.example.php` (`DEV_MODE=false`), which serves the committed assets.
 
 ### Working on the frontend (optional)

@@ -46,7 +46,9 @@ final class Bootstrap
         }
 
         $problems = [];
-        foreach (['MAIL_TO' => $recipients, 'MAIL_FROM' => [$mailFrom]] as $name => $addresses) {
+        // MAIL_FROM matters only when an email goes: to MAIL_TO or through the alert channel mail.
+        $sendsMail = $recipients !== [] || in_array('mail', $alertChannels, true);
+        foreach (['MAIL_TO' => $recipients, 'MAIL_FROM' => $sendsMail ? [$mailFrom] : []] as $name => $addresses) {
             foreach ($addresses as $address) {
                 $host = strtolower(substr((string) strrchr($address, '@'), 1));
                 if ($host === 'example.com' || str_ends_with($host, '.example.com')) {
@@ -103,7 +105,8 @@ final class Bootstrap
         if (PHP_OS_FAMILY === 'Windows') {
             return true;
         }
-        $program = strtok(trim((string) ini_get('sendmail_path')), ' ');
-        return $program !== false && is_executable($program);
+        // The program, unquoted; a name without a path is looked up by the shell, so it is not judged here.
+        $program = trim((string) strtok(trim((string) ini_get('sendmail_path')), ' '), '"\'');
+        return $program !== '' && (!str_starts_with($program, '/') || is_executable($program));
     }
 }

@@ -19,6 +19,7 @@
 !/example/storage/logs/.gitkeep
 !/example/storage/cache/.gitkeep
 /example/config/config.php
+/example/config/config.dev.php
 
 # OS / editor
 .DS_Store

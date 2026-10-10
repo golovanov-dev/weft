@@ -16,8 +16,12 @@ declare(strict_types=1);
 define('DEBUG', false);       // verbose errors, curl info, robots blocked
 define('DEV_MODE', false);    // true => Vite dev server + relaxed HTTPS
 
-// Sub-directory the app is mounted under, "" for a domain root (https://example.com).
+// Sub-directory the app is mounted under: '/docs' for https://example.com/docs, '' for a domain root.
 define('BASE_URI', '');
+
+// Only when the domain's document root is not this site's public/ (a fixed public_html/, see Deployment).
+// A wrong path serves pages without CSS and JS; weft-health names it under production.
+// define('WEB_ROOT', '/home/user/public_html');
 
 // Absolute log directory: errors/, traces in requests/ (the site) and cli/ (scripts).
 define('LOGS_PATH', dirname(__DIR__) . '/storage/logs');

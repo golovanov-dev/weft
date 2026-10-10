@@ -39,6 +39,10 @@ cd my-site
 composer install
 ```
 
+In `my-site/.gitignore`, delete the line `/composer.lock` and commit the lock file with your site:
+deploys install the versions you tested, and rolling back an update relies on it
+([Deployment](/docs/deployment), "Updating").
+
 This installs the engine itself, [traceloom](https://github.com/golovanov-dev/traceloom) for
 request tracing, `firebase/php-jwt` for token verification, and `league/commonmark`, which this
 documentation site uses to render its Markdown chapters.
@@ -126,7 +130,8 @@ check. On the server you run it without `--dev`. On a fresh copy `ok` is false a
 addresses, so a request would go to example.com even where `mail()` works. Outside Windows without
 a mail transport (sendmail, postfix, msmtp) `mail_available` is `false` as well. `contact_form`
 sends nothing: on Windows `mail_available` is `true` and the form still answers 503 here, because
-`mail()` finds no mail server only when it sends. Set your own addresses in a `config/config.php`
+`mail()` finds no mail server only when it sends. On a server, PHP-FPM reads its own `php.ini`,
+which `weft-health` does not see: there a test request through the form is the proof. Set your own addresses in a `config/config.php`
 (see [Configuration](/docs/configuration)) or leave them until you deploy; anything else that makes
 `ok` false, most often that `storage/` is not writable, needs fixing now. What each field means and how to fix it:
 [Deployment](/docs/deployment), "What `weft-health` checks".

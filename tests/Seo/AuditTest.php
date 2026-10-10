@@ -91,7 +91,6 @@ final class AuditTest extends TestCase
         $this->assertSame([2, '', "weft-seo-audit: https://site.test/sitemap.xml: no <url> entries.\n"], $this->audit(['https://site.test']));
 
         $this->assertSame([2, '', "weft-seo-audit: https://other.test/sitemap.xml: HTTP 404.\n"], $this->audit(['https://other.test']));
-        $this->assertSame([2, '', "weft-seo-audit: https://***@other.test/sitemap.xml: HTTP 404.\n"], $this->audit(['https://u:p@other.test']));
     }
 
     /** The sitemap of a staging copy names the production address: the pages are checked on staging. */
@@ -104,28 +103,53 @@ final class AuditTest extends TestCase
             . "http://staging.test:8080/  ok\n\nChecked 1 of 3 pages: 0 with problems.\n", ''], $this->audit(['--limit=1', 'http://staging.test:8080']));
     }
 
-    /** A user name and password in the address are not printed: the report ends up in CI logs. */
-    public function testCredentialsInTheAddressAreMasked(): void
+    /**
+     * An address with an @ anywhere is refused before any request and is not printed.
+     */
+    public function testAnAddressWithCredentialsIsRefusedAndNotPrinted(): void
     {
-        $this->site['https://u:p@site.test/sitemap.xml'] = ['body' => '<?xml version="1.0"?>'
-            . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc/></url><url><loc>https://site.test/</loc></url></urlset>'];
-        $this->site['https://u:p@site.test/'] = ['body' => self::GOOD];
+        $requests = 0;
+        self::fakeHttp(function () use (&$requests): array {
+            $requests++;
+            return ['status' => 404];
+        });
 
-        $this->assertSame([0, "The sitemap lists pages on https://site.test; checking them on https://***@site.test.\n\n"
-            . "https://***@site.test/  ok\n\nChecked 1 pages: 0 with problems.\n", ''], $this->audit(['https://u:p@site.test']));
+        // An @ anywhere is refused, whatever stands before it: a password of digits followed by /, or
+        // one starting with ?, leaves a valid-looking "host:port" or "host:" in front.
+        $addresses = ['https://u:s3cret@site.test', 'https://admin:2024/s3cr@site.test', 'https://u:?s3cr@site.test'];
+        foreach ($addresses as $address) {
+            [$status, $output, $errors] = $this->audit(['--pages', 'https://site.test/', $address]);
+            $this->assertSame([2, ''], [$status, $output], $address);
+            $this->assertStringStartsWith('weft-seo-audit: an address must be http(s)://host[:port]/... without @', $errors);
+            $this->assertStringNotContainsString('s3cr', $errors);
+        }
+        $this->assertSame(0, $requests);
     }
 
-    /** A password with an unencoded @ or / is not printed, neither whole nor its tail; an @ in a path is not a password. */
-    public function testAPasswordThatIsNotPercentEncodedIsMaskedToo(): void
+    /**
+     * WEFT_AUDIT_AUTH is sent as Basic auth to the given origin only: not to an address in the
+     * sitemap that the audit cannot re-point to it.
+     */
+    public function testBasicAuthFromTheEnvironmentGoesOnlyToTheGivenOrigin(): void
     {
-        $this->site['https://u:p@ss@site.test/'] = ['body' => self::GOOD];
-        $this->site['https://u:a/b=c@site.test/'] = ['status' => 0, 'error' => 'URL rejected: https://u:a/b=c@site.test/'];
-        $this->site['https://site.test/@team'] = ['body' => self::GOOD];
+        $this->site['https://site.test/sitemap.xml']['body'] = '<?xml version="1.0"?>'
+            . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://site.test/</loc></url>'
+            . '<url><loc>https://u@other.test/</loc></url></urlset>';
+        $sent = [];
+        self::fakeHttp(function (array $request) use (&$sent): array {
+            $sent[$request['url']] = array_values(preg_grep('/^Authorization:/i', $request['headers']) ?: []);
+            return $this->site[$request['url']] ?? ['status' => 404];
+        });
 
-        $this->assertSame([1, "https://***@site.test/  ok\n"
-            . "https://***@site.test/  URL rejected: https://***@site.test/\n"
-            . "https://site.test/@team  ok\n\nChecked 3 pages: 1 with problems.\n", ''],
-            $this->audit(['--pages', 'https://u:p@ss@site.test/', 'https://u:a/b=c@site.test/', 'https://site.test/@team']));
+        putenv('WEFT_AUDIT_AUTH=u:p@ss');
+        try {
+            $this->audit(['https://site.test']);
+        } finally {
+            putenv('WEFT_AUDIT_AUTH');
+        }
+
+        $basic = ['Authorization: Basic ' . base64_encode('u:p@ss')];
+        $this->assertSame(['https://site.test/sitemap.xml' => $basic, 'https://site.test/' => $basic, 'https://u@other.test/' => []], $sent);
     }
 
     /**

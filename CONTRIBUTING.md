@@ -23,8 +23,7 @@ local checkout:
 ```bash
 cd example
 composer config repositories.weft path ../
-composer require golovanov/weft:@dev --no-update
-composer update golovanov/weft
+composer require golovanov/weft:@dev
 ```
 
 This writes a `repositories` block into `example/composer.json` — **do not commit it**. Revert
@@ -40,7 +39,7 @@ with `git checkout example/composer.json` before opening a pull request.
 cd example
 composer install
 php -S localhost:8000 -t public public/index.php   # committed dist → runs without Node
-vendor/bin/weft-health --dev
+vendor/bin/weft-health --dev                        # exit 1 on a fresh copy: contact_form, example.com addresses
 
 # To work on the frontend with HMR, opt into dev mode:
 cp config/config.example.php config/config.php      # set DEV_MODE=true in it

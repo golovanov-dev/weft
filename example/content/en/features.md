@@ -153,14 +153,15 @@ endpoint does, 2 on an unknown option (`--help` prints the usage). Run it from c
 Every page must answer 200 with HTML, have a title, a meta description, a canonical link and
 exactly one `h1`, JSON-LD that parses, and no `noindex` (or `none`) for all bots or for googlebot
 in meta robots, meta googlebot or `X-Robots-Tag`. It reads a sitemap of pages, not a sitemap index:
-for a site with an index, list the pages with `--pages`. A user name and password in the address
-are printed as `***`; percent-encode their special characters (`/` as `%2F`, `@` as `%40`, `:` as
-`%3A`, `?` as `%3F`, `#` as `%23`).
+for a site with an index, list the pages with `--pages`. A site behind Basic auth gets its user
+name and password from the environment, never from the address (an address with `@` anywhere is refused; write `%40` in a path):
+`WEFT_AUDIT_AUTH=user:pass`, sent only to the address you gave.
 
 ```bash
 vendor/bin/weft-seo-audit https://example.com               # the pages in its sitemap.xml
 vendor/bin/weft-seo-audit --pages https://example.com/ https://example.com/about
 vendor/bin/weft-seo-audit --limit=50 https://example.com    # at most 50 pages (default 500)
+WEFT_AUDIT_AUTH='user:pass' vendor/bin/weft-seo-audit https://staging.example.com   # behind Basic auth
 ```
 
 It prints a line per page and exits with 1 when a page has a problem, 2 when it could not run. It
@@ -333,6 +334,16 @@ Csrf::check($body[Csrf::fieldName()] ?? null);
 $result = Captcha::verify($body['recaptcha_token'] ?? '', 'contact');
 if (!$result['ok']) { /* reject */ }
 ```
+
+The example's `api/contact.php` runs them in this order, and each one answers before the next runs:
+
+1. honeypot — a filled hidden field gets a fake success, so the bot learns nothing;
+2. CSRF — 419: the page has to be reloaded;
+3. the fields — 422 with the list, before the rate limit, so correcting a field is not throttled;
+4. rate limit — 429;
+5. captcha — 400; last, as it costs a request to Google or Yandex;
+6. record and deliver (`ContactService`) — the request goes into the trace, then out by email or an
+   alert; 503 when neither reached a person, 200 otherwise.
 
 Rate-limit counters live in Redis when `app.cache.driver` is `redis`, on the cache's connection and
 apart from its keys (in files when Redis cannot be used, as for the cache), otherwise in files under
@@ -525,7 +536,9 @@ server. A CLI script idle for longer than the server's `wait_timeout` gets the e
 first call, and the next call runs on a new connection. Inside `transaction()` a lost connection
 throws `RuntimeException('Database connection lost in a transaction')`, and so does every later
 call until `transaction()` returns, even if your callback catches the first one: the server has
-already rolled the transaction back. `transaction()` rolls back and rethrows whatever the callback
+already rolled the transaction back. A transaction you open yourself with
+`pdo()->beginTransaction()` has no such guard: after a lost connection the next call reconnects and
+writes without it; use `transaction()`. `transaction()` rolls back and rethrows whatever the callback
 throws; if the rollback fails too, you still get the callback's exception, and the rollback failure
 goes to `errors/`.
 

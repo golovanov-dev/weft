@@ -78,6 +78,8 @@ git clone https://github.com/golovanov-dev/weft.git
 cp -r weft/example my-site
 ```
 
+In `my-site/.gitignore`, delete the line `/composer.lock`: your site commits its lock file.
+
 > **Get the example by cloning, not by "Download ZIP".** The package archive is kept lean:
 > `example/`, `tests/` and CI config are `export-ignore`d, so `composer require` — and GitHub's
 > ZIP / release "Source code" downloads — contain only the engine. `git clone` gives you

@@ -9,6 +9,7 @@ use Golovanov\Weft\I18n\Locale;
 use League\CommonMark\Environment\Environment;
 use League\CommonMark\Extension\Autolink\AutolinkExtension;
 use League\CommonMark\Extension\CommonMark\CommonMarkCoreExtension;
+use League\CommonMark\Extension\HeadingPermalink\HeadingPermalinkExtension;
 use League\CommonMark\Extension\Table\TableExtension;
 use League\CommonMark\MarkdownConverter;
 
@@ -168,10 +169,13 @@ final class DocsService
         $environment = new Environment([
             'html_input' => 'escape',          // the docs are trusted, but escaping raw HTML costs nothing
             'allow_unsafe_links' => false,
+            // Every heading gets an id from its text (#monitoring), so a section can be linked.
+            'heading_permalink' => ['id_prefix' => '', 'fragment_prefix' => '', 'symbol' => '#', 'insert' => 'after'],
         ]);
         $environment->addExtension(new CommonMarkCoreExtension());
         $environment->addExtension(new TableExtension());
         $environment->addExtension(new AutolinkExtension());
+        $environment->addExtension(new HeadingPermalinkExtension());
 
         return (string) (new MarkdownConverter($environment))->convert($markdown);
     }

@@ -16,12 +16,18 @@ use Golovanov\Weft\Http\HttpClient;
  *
  * Each page must answer 200 (redirects are not followed) with HTML, a title, a meta description,
  * a canonical link, exactly one h1, JSON-LD that parses, and no noindex (or none) for every bot
- * or for googlebot in meta robots, meta googlebot or X-Robots-Tag. A sitemap index is not read. A user name and password in
- * the address are printed as ***. Needs ext-dom.
+ * or for googlebot in meta robots, meta googlebot or X-Robots-Tag. A sitemap index is not read. Needs ext-dom.
+ *
+ * An address with an @ anywhere (it may hold a user name and password) is refused: Basic auth comes from the environment,
+ * WEFT_AUDIT_AUTH=user:pass, so it is not in the command line, the shell history or a CI log, and the
+ * header goes only to the origins given on the command line.
  */
 final class Audit
 {
     private const int LIMIT = 500;
+
+    /** @var array<string, string> origin => Authorization header from WEFT_AUDIT_AUTH; set by run() */
+    private static array $auth = [];
 
     /**
      * @param list<string> $args command-line arguments, without the command name
@@ -50,6 +56,11 @@ final class Audit
             } elseif (preg_match('/^--limit=([1-9][0-9]*)$/D', $arg, $m)) {
                 $limit = (int) $m[1];
             } elseif (preg_match('~^https?://~i', $arg)) {
+                if (str_contains($arg, '@') || self::origin($arg) === '') {
+                    // Not printed: an @ anywhere, or an authority that is not a host[:port], may hide a password.
+                    fwrite($err, "weft-seo-audit: an address must be http(s)://host[:port]/... without @ (write %40); a user name and password go in WEFT_AUDIT_AUTH=user:pass.\n" . $usage);
+                    return 2;
+                }
                 $targets[] = $arg;
             } else {
                 $targets = [];
@@ -62,12 +73,17 @@ final class Audit
         }
 
         $http = new HttpClient(timeout: 15);
+        $auth = (string) getenv('WEFT_AUDIT_AUTH');
+        self::$auth = $auth === '' ? [] : array_fill_keys(
+            array_map(static fn(string $url): string => strtolower(self::origin($url)), $targets),
+            'Authorization: Basic ' . base64_encode($auth),
+        );
         if (!$pages) {
             $site = self::origin($targets[0]);
             $sitemap = rtrim($targets[0], '/') . '/sitemap.xml';
             $targets = self::sitemapPages($http, $sitemap);
             if (is_string($targets)) {
-                fwrite($err, self::masked("weft-seo-audit: {$sitemap}: {$targets}.\n"));
+                fwrite($err, "weft-seo-audit: {$sitemap}: {$targets}.\n");
                 return 2;
             }
             // The sitemap names pages by app.url.base, the production address on a staging copy:
@@ -81,7 +97,7 @@ final class Audit
                 }
             }
             if ($others !== []) {
-                fwrite($out, self::masked('The sitemap lists pages on ' . implode(', ', $others) . "; checking them on {$site}.\n\n"));
+                fwrite($out, 'The sitemap lists pages on ' . implode(', ', $others) . "; checking them on {$site}.\n\n");
             }
         }
 
@@ -90,7 +106,7 @@ final class Audit
         foreach (array_slice($targets, 0, $limit) as $url) {
             $problems = self::page($http, $url);
             $failed += $problems === [] ? 0 : 1;
-            fwrite($out, self::masked($url . '  ' . ($problems === [] ? 'ok' : implode('; ', $problems))) . "\n");
+            fwrite($out, $url . '  ' . ($problems === [] ? 'ok' : implode('; ', $problems)) . "\n");
         }
 
         $checked = min($total, $limit);
@@ -195,7 +211,8 @@ final class Audit
     private static function get(HttpClient $http, string $url): array
     {
         try {
-            return $http->get($url, null, ['decodeJson' => false, 'log' => false]);
+            $auth = self::$auth[strtolower(self::origin($url))] ?? null;
+            return $http->get($url, null, ['decodeJson' => false, 'log' => false, 'headers' => $auth === null ? [] : [$auth]]);
         } catch (\InvalidArgumentException $e) {
             return ['status' => 0, 'headers' => [], 'error' => $e->getMessage(), 'body' => null];
         }
@@ -225,26 +242,12 @@ final class Audit
     }
 
     /**
-     * $text with the user name and password of every address in it replaced by ***: the report goes
-     * to CI logs. A password with an unencoded / ? # or @ is masked up to the last @ of the address.
+     * 'scheme://host[:port]' of $url, '' when it has none or its authority is not a host[:port]
+     * (a user name or password).
      */
-    private static function masked(string $text): string
-    {
-        return (string) preg_replace_callback('~([a-z][a-z0-9+.-]*://)(\S*)~i', static function (array $m): string {
-            $authority = substr($m[2], 0, strcspn($m[2], '/?#'));
-            $at = strrpos($authority, '@');
-            if ($at === false && str_contains($authority, ':')) {
-                // u:pa/ss@host reads as the authority "u:pa": the password runs on to the last @.
-                $at = strrpos($m[2], '@');
-            }
-            return $at === false ? $m[0] : $m[1] . '***' . substr($m[2], $at);
-        }, $text);
-    }
-
-    /** 'scheme://host[:port]' of $url, '' when it has none. */
     private static function origin(string $url): string
     {
-        return preg_match('~^[a-z][a-z0-9+.-]*://[^/?#]*~i', $url, $m) ? $m[0] : '';
+        return preg_match('~^[a-z][a-z0-9+.-]*://(?:\[[0-9a-f:.]+\]|[^/?#@:\[\]]+)(?::[0-9]*)?(?=[/?#]|$)~iD', $url, $m) ? $m[0] : '';
     }
 
     /** @param array<string, string> $headers */

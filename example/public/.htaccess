@@ -1,6 +1,7 @@
 RewriteEngine On
 
-# 1) Force HTTPS (comment out for local http dev).
+# 1) Force HTTPS (comment out for local http dev). Behind a proxy or CDN that ends HTTPS this loops:
+#    see Deployment, "Redirects: HTTPS and www".
 # RewriteCond %{HTTPS} off
 # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 

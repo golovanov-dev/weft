@@ -45,7 +45,10 @@ final class ContactFormCheckTest extends TestCase
         $check = $this->contactForm('', 'noreply@site.test');
 
         $this->assertSame(['no channel: MAIL_TO is empty and no alert channel reaches a person'], $check['problems']);
-        $this->assertTrue($this->contactForm('', 'noreply@site.test', alertloop: true)['ok']);
+        // MAIL_FROM on example.com matters when an email goes: to MAIL_TO or through the alert channel mail.
+        $this->assertTrue($this->contactForm('', 'noreply@example.com', alertloop: true)['ok']);
+        $check = $this->contactForm('', 'noreply@example.com', alertMailTo: 'ops@site.test');
+        $this->assertSame(['MAIL_FROM is on example.com'], $check['problems']);
     }
 
     /** MAIL_TO takes addresses separated by commas; each must be plain, as Mail sends only to those. */
@@ -82,6 +85,10 @@ final class ContactFormCheckTest extends TestCase
         if (PHP_OS_FAMILY !== 'Windows') {
             $check = $this->contactForm('hi@site.test', 'noreply@site.test', php: '-d sendmail_path=' . escapeshellarg('/nonexistent/sendmail -t -i'));
             $this->assertFalse($check['mail_available']);
+            // A quoted program is found; one without a path is the shell's to find, not judged.
+            $quoted = '-d sendmail_path=' . escapeshellarg('"' . PHP_BINARY . '" -t -i');
+            $this->assertTrue($this->contactForm('hi@site.test', 'noreply@site.test', php: $quoted)['mail_available']);
+            $this->assertTrue($this->contactForm('hi@site.test', 'noreply@site.test', php: '-d sendmail_path=sendmail')['mail_available']);
         }
     }
 

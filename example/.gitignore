@@ -13,6 +13,7 @@
 /composer.lock
 
 /config/config.php
+/config/config.dev.php
 /storage/logs/*
 /storage/cache/*
 !/storage/logs/.gitkeep

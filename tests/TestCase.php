@@ -22,6 +22,7 @@ use Golovanov\Weft\Observability\Health;
 use Golovanov\Weft\Observability\Trace;
 use Golovanov\Weft\Security\RateLimiter;
 use Golovanov\Weft\Seo\Seo;
+use Golovanov\Weft\Seo\Audit;
 use Golovanov\Weft\Support\Clock;
 use Golovanov\Weft\View\View;
 use PHPUnit\Framework\TestCase as BaseTestCase;
@@ -68,6 +69,7 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(Health::class, ['checks' => []]);
         self::setStatics(HttpClient::class, ['transport' => null]);
         self::setStatics(Mail::class, ['transport' => null]);
+        self::setStatics(Audit::class, ['auth' => []]);
         self::setStatics(Smtp::class, ['connector' => null]);
         self::setStatics(Trace::class, ['tracer' => null, 'trace' => null, 'id' => '', 'booted' => false]);
         self::setStatics(RequestContext::class, [
