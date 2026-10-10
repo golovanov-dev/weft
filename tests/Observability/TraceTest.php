@@ -273,6 +273,7 @@ final class TraceTest extends TestCase
     {
         yield 'unset' => [null, 30];
         yield 'configured' => [7, 7];
+        yield 'kept forever' => [0, 0];
         yield 'invalid' => [-1, 30];
     }
 
@@ -291,7 +292,7 @@ final class TraceTest extends TestCase
     /** A console script and the web never write to one trace directory. */
     public function testScriptTracesGoToCliAndWebTracesToRequests(): void
     {
-        $logs = sys_get_temp_dir() . '/weft-logs';
+        $logs = Config::logsPath();
         $this->assertSame($logs . '/requests', Trace::directory('cli-server'));
         $this->assertSame($logs . '/cli', Trace::directory());
 

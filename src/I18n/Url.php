@@ -78,6 +78,23 @@ final class Url
     }
 
     /**
+     * @internal An address a page gave for its canonical or a breadcrumb. A full http(s) URL stays
+     * as it is, a protocol-relative one ('//host/x') gets the site's scheme, anything else is a site
+     * link (from url(), base URI and locale prefix already in it) and gets the scheme and host, and
+     * nothing else.
+     */
+    public static function full(string $link): string
+    {
+        if ($link === '' || preg_match('~^https?://~i', $link) === 1) {
+            return $link;
+        }
+        if (str_starts_with($link, '//')) {
+            return ((string) parse_url(self::origin(), PHP_URL_SCHEME) ?: 'https') . ':' . $link;
+        }
+        return self::origin() . '/' . ltrim($link, '/');
+    }
+
+    /**
      * @internal Called by the Kernel once it has routed the request: the locale-independent
      * path of the matched page, or null when nothing matched (404).
      */

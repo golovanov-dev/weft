@@ -197,7 +197,11 @@ final class HttpClient
             CURLOPT_HEADERFUNCTION => static function ($_ch, string $line) use (&$headers): int {
                 $pos = strpos($line, ':');
                 if ($pos !== false) {
-                    $headers[trim(substr($line, 0, $pos))] = trim(substr($line, $pos + 1));
+                    // A header sent twice (two X-Robots-Tag lines) keeps both values, comma-joined
+                    // as HTTP combines a repeated field (RFC 9110, 5.3).
+                    $name = trim(substr($line, 0, $pos));
+                    $value = trim(substr($line, $pos + 1));
+                    $headers[$name] = isset($headers[$name]) ? $headers[$name] . ', ' . $value : $value;
                 }
                 return strlen($line);
             },

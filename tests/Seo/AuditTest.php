@@ -82,9 +82,16 @@ final class AuditTest extends TestCase
     {
         $this->site['https://site.test/sitemap.xml']['body'] = '<?xml version="1.0"?>'
             . '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>https://site.test/a.xml</loc></sitemap></sitemapindex>';
+        $this->assertSame([2, '', "weft-seo-audit: https://site.test/sitemap.xml: a sitemap index, which the audit does not read;"
+            . " list the pages with --pages.\n"], $this->audit(['https://site.test']));
+
+        // Empty <loc> entries are skipped: none left is the same as none at all, exit 2 and not a crash.
+        $this->site['https://site.test/sitemap.xml']['body'] = '<?xml version="1.0"?>'
+            . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc></loc></url><url><loc> </loc></url></urlset>';
         $this->assertSame([2, '', "weft-seo-audit: https://site.test/sitemap.xml: no <url> entries.\n"], $this->audit(['https://site.test']));
 
         $this->assertSame([2, '', "weft-seo-audit: https://other.test/sitemap.xml: HTTP 404.\n"], $this->audit(['https://other.test']));
+        $this->assertSame([2, '', "weft-seo-audit: https://***@other.test/sitemap.xml: HTTP 404.\n"], $this->audit(['https://u:p@other.test']));
     }
 
     /** The sitemap of a staging copy names the production address: the pages are checked on staging. */
@@ -95,6 +102,54 @@ final class AuditTest extends TestCase
 
         $this->assertSame([0, "The sitemap lists pages on https://site.test; checking them on http://staging.test:8080.\n\n"
             . "http://staging.test:8080/  ok\n\nChecked 1 of 3 pages: 0 with problems.\n", ''], $this->audit(['--limit=1', 'http://staging.test:8080']));
+    }
+
+    /** A user name and password in the address are not printed: the report ends up in CI logs. */
+    public function testCredentialsInTheAddressAreMasked(): void
+    {
+        $this->site['https://u:p@site.test/sitemap.xml'] = ['body' => '<?xml version="1.0"?>'
+            . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc/></url><url><loc>https://site.test/</loc></url></urlset>'];
+        $this->site['https://u:p@site.test/'] = ['body' => self::GOOD];
+
+        $this->assertSame([0, "The sitemap lists pages on https://site.test; checking them on https://***@site.test.\n\n"
+            . "https://***@site.test/  ok\n\nChecked 1 pages: 0 with problems.\n", ''], $this->audit(['https://u:p@site.test']));
+    }
+
+    /** A password with an unencoded @ or / is not printed, neither whole nor its tail; an @ in a path is not a password. */
+    public function testAPasswordThatIsNotPercentEncodedIsMaskedToo(): void
+    {
+        $this->site['https://u:p@ss@site.test/'] = ['body' => self::GOOD];
+        $this->site['https://u:a/b=c@site.test/'] = ['status' => 0, 'error' => 'URL rejected: https://u:a/b=c@site.test/'];
+        $this->site['https://site.test/@team'] = ['body' => self::GOOD];
+
+        $this->assertSame([1, "https://***@site.test/  ok\n"
+            . "https://***@site.test/  URL rejected: https://***@site.test/\n"
+            . "https://site.test/@team  ok\n\nChecked 3 pages: 1 with problems.\n", ''],
+            $this->audit(['--pages', 'https://u:p@ss@site.test/', 'https://u:a/b=c@site.test/', 'https://site.test/@team']));
+    }
+
+    /**
+     * noindex as none, in meta googlebot or for googlebot in X-Robots-Tag; max-image-preview:none and
+     * a noindex for another bot are not a noindex. A page that is not HTML says so.
+     */
+    public function testOtherFormsOfNoindexAndAnswersThatAreNotHtml(): void
+    {
+        $this->site['https://site.test/none'] = ['body' => str_replace('<title>', '<meta name="robots" content="NONE"><title>', self::GOOD)];
+        $this->site['https://site.test/gbot'] = ['body' => str_replace('<title>', '<meta name="googlebot" content="noindex"><title>', self::GOOD)];
+        $this->site['https://site.test/hdr'] = ['body' => self::GOOD, 'headers' => ['X-Robots-Tag' => 'max-snippet:0, googlebot: noindex']];
+        $this->site['https://site.test/pdf'] = ['body' => '%PDF-1.7', 'headers' => ['Content-Type' => 'application/pdf']];
+        $this->site['https://site.test/ok'] = ['body' => self::GOOD,
+            'headers' => ['Content-Type' => 'text/html; charset=utf-8', 'X-Robots-Tag' => 'nonexistent, noarchive']];
+        $this->site['https://site.test/preview'] = ['body' => str_replace('<title>', '<meta name="robots" content="max-image-preview:none"><title>', self::GOOD),
+            'headers' => ['X-Robots-Tag' => 'bingbot: noindex, nofollow']];
+
+        $pages = array_map(static fn(string $p): string => 'https://site.test/' . $p, ['none', 'gbot', 'hdr', 'pdf', 'ok', 'preview']);
+        $this->assertSame([1, "https://site.test/none  noindex in meta robots\n"
+            . "https://site.test/gbot  noindex in meta googlebot\n"
+            . "https://site.test/hdr  noindex in X-Robots-Tag\n"
+            . "https://site.test/pdf  not HTML: Content-Type application/pdf\n"
+            . "https://site.test/ok  ok\n"
+            . "https://site.test/preview  ok\n\nChecked 6 pages: 4 with problems.\n", ''], $this->audit(['--pages', ...$pages]));
     }
 
     /** An unknown option (or anything but an address) prints the usage and fetches nothing; so does --help. */

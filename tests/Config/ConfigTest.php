@@ -65,15 +65,16 @@ final class ConfigTest extends TestCase
     }
 
     /**
-     * An empty APP_ROOT must not turn a relative path into one under the filesystem root. The
-     * bootstrap defines APP_ROOT for every test, so this runs in a subprocess.
+     * An empty APP_ROOT must not turn a relative path into one under the filesystem root; without
+     * LOGS_PATH logs go to the system temp directory. The bootstrap defines both for every test,
+     * so this runs in a subprocess.
      */
-    public function testPathFallsBackToTheWorkingDirectoryWhenAppRootIsEmpty(): void
+    public function testPathsFallBackWhenAppRootIsEmptyAndLogsPathUnset(): void
     {
         $script = dirname(__DIR__) . '/fixtures/cli/path.php';
         $output = [];
         exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($script) . ' ' . escapeshellarg(__DIR__) . ' 2>&1', $output);
 
-        $this->assertSame([__DIR__ . '/storage/cache'], $output);
+        $this->assertSame([__DIR__ . '/storage/cache', sys_get_temp_dir() . '/weft-logs'], $output);
     }
 }

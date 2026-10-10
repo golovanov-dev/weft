@@ -42,7 +42,7 @@ final class LlmsTxt
         }
         $llms = (array) $llms;
 
-        $lines = ['# ' . (string) ($llms['title'] ?? Config::get('app.seo.site_name', ''))];
+        $lines = ['# ' . self::line($llms['title'] ?? Config::get('app.seo.site_name', ''))];
         if ((string) ($llms['summary'] ?? '') !== '') {
             $lines[] = '';
             $lines[] = '> ' . str_replace("\n", "\n> ", trim((string) $llms['summary']));
@@ -54,20 +54,31 @@ final class LlmsTxt
 
         foreach ((array) ($llms['sections'] ?? []) as $name => $links) {
             $lines[] = '';
-            $lines[] = '## ' . $name;
+            $lines[] = '## ' . self::line($name);
             $lines[] = '';
             foreach ((array) $links as $link) {
                 $link = (array) $link;
-                $url = (string) ($link['url'] ?? '');
+                $url = self::line($link['url'] ?? '');
                 $url = preg_match('~^[a-z][a-z0-9+.-]*:~i', $url) ? $url : Url::absolute($url);
-                $line = '- [' . (string) ($link['title'] ?? $url) . '](' . $url . ')';
-                if ((string) ($link['notes'] ?? '') !== '') {
-                    $line .= ': ' . $link['notes'];
+                $line = '- [' . self::line($link['title'] ?? $url) . '](' . $url . ')';
+                $notes = self::line($link['notes'] ?? '');
+                if ($notes !== '') {
+                    $line .= ': ' . $notes;
                 }
                 $lines[] = $line;
             }
         }
 
         return implode("\n", $lines) . "\n";
+    }
+
+    /**
+     * A heading, link or note on one line: a line break from the config (or from content the
+     * callable read) would start a heading or list item of its own. summary and details are
+     * multi-line on purpose.
+     */
+    private static function line(mixed $value): string
+    {
+        return trim((string) preg_replace('/\s*[\r\n]+\s*/', ' ', (string) $value));
     }
 }

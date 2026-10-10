@@ -93,6 +93,16 @@ final class IndexNowTest extends TestCase
         $this->assertSame(['https://site.test/', 'https://site.test/new'], $this->submittedUrls(1));
     }
 
+    /** With a lastmod on every address there is no note about undated ones; no temporary file is left. */
+    public function testEveryAddressDatedPrintsNoNoteAndLeavesOnlyTheStateFile(): void
+    {
+        Config::set('app.sitemap', [['path' => '/', 'lastmod' => '2026-10-01'], ['path' => '/about', 'lastmod' => '2026-10-02']]);
+
+        $this->assertSame([0, "Submitted 2 addresses to https://api.indexnow.org/indexnow.\n", ''], $this->submit());
+        $this->assertSame([0, "Nothing to submit: 2 addresses unchanged.\n", ''], $this->submit());
+        $this->assertSame(['indexnow.json'], array_values(array_diff((array) scandir($this->dir . '/state'), ['.', '..'])));
+    }
+
     /** Only an accepted submission is remembered: a refused one goes again next time. */
     public function testARefusedSubmissionIsNotRemembered(): void
     {
@@ -138,7 +148,10 @@ final class IndexNowTest extends TestCase
     {
         Config::set('app.url.base', 'https://www.example.com');
 
-        $this->assertSame([1, '', "weft-indexnow: app.url.base is on example.com.\n"], $this->submit());
+        $this->assertSame(
+            [1, '', "weft-indexnow: app.url.base is on example.com: set it to the site's own address in app/Configs/app.php.\n"],
+            $this->submit(),
+        );
         $this->assertSame([], $this->sent);
     }
 

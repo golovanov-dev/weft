@@ -65,7 +65,7 @@ final class Pagination
         $page = 1;
         if ($values !== []) {
             $value = end($values);
-            if (preg_match('/^[1-9][0-9]{0,8}$/', $value) !== 1 || (int) $value > $pages) {
+            if (preg_match('/^[1-9][0-9]{0,8}$/D', $value) !== 1 || (int) $value > $pages) {
                 throw Abort::notFound();
             }
             $page = (int) $value;

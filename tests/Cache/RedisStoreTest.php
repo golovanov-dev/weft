@@ -222,6 +222,64 @@ final class RedisStoreTest extends TestCase
         }
     }
 
+    /**
+     * A Redis that takes 1.5 s over GET: longer than the read timeout. It prints "accept" for every
+     * connection it takes, one after another, and "quit" on QUIT, then exits.
+     */
+    private const SLOW_GET_REDIS = <<<'SERVER'
+        $server = stream_socket_server('tcp://127.0.0.1:0');
+        echo parse_url('tcp://' . stream_socket_get_name($server, false), PHP_URL_PORT), "\n";
+        while ($client = stream_socket_accept($server, 30)) {
+            echo "accept\n";
+            while (($line = fgets($client)) !== false) {
+                $args = [];
+                for ($i = (int) substr($line, 1); $i > 0; $i--) {
+                    $length = (int) substr((string) fgets($client), 1);
+                    $args[] = substr((string) stream_get_contents($client, $length + 2), 0, $length);
+                }
+                $command = strtoupper($args[0] ?? '');
+                if ($command === 'QUIT') {
+                    echo "quit\n";
+                    exit;
+                }
+                if ($command === 'GET') {
+                    usleep(1500000);
+                }
+                @fwrite($client, "+PONG\r\n");
+            }
+        }
+        SERVER;
+
+    /** phpredis drops the socket after a reply timeout; closing it must not connect again first. */
+    #[RunInSeparateProcess]
+    public function testATimedOutGetClosesWithoutConnectingAgain(): void
+    {
+        if (!extension_loaded('redis')) {
+            $this->markTestSkipped('ext-redis is not installed');
+        }
+
+        $server = proc_open([PHP_BINARY, '-r', self::SLOW_GET_REDIS], [1 => ['pipe', 'w']], $pipes);
+        $dir = $this->makeTempDir();
+        try {
+            $port = (int) fgets($pipes[1]);
+            define('REDIS_PORT', $port);
+            Config::set('app.cache', ['enabled' => true, 'driver' => 'redis', 'path' => $dir]);
+
+            $this->assertNull(Cache::get('page'));
+
+            // The server takes connections in order: this one comes after any the store made.
+            $last = stream_socket_client('tcp://127.0.0.1:' . $port);
+            fwrite($last, "*1\r\n\$4\r\nQUIT\r\n");
+            $lines = [];
+            while (($line = fgets($pipes[1])) !== false && ($lines[] = trim($line)) !== 'quit') {
+            }
+            $this->assertSame(['accept', 'accept', 'quit'], $lines);
+        } finally {
+            proc_terminate($server);
+            proc_close($server);
+            $this->removeDir($dir);
+        }
+    }
     public function testFlushTakesThePrefixLiterallyInThePattern(): void
     {
         if (!extension_loaded('redis')) {

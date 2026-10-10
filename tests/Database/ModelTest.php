@@ -30,25 +30,25 @@ final class ModelTest extends TestCase
     /** @return iterable<string, array{\Closure(Model): mixed, string, list<mixed>}> */
     public static function statements(): iterable
     {
-        yield 'find' => [static fn(Model $m): mixed => $m->find(5), 'SELECT * FROM users WHERE id = ? LIMIT 1', [5]];
+        yield 'find' => [static fn(Model $m): mixed => $m->find(5), 'SELECT * FROM users WHERE `id` = ? LIMIT 1', [5]];
         yield 'findBy' => [
             static fn(Model $m): mixed => $m->findBy(['email' => 'a@example.com', 'active' => 1]),
-            'SELECT * FROM users WHERE email = ? AND active = ? LIMIT 1',
+            'SELECT * FROM users WHERE `email` = ? AND `active` = ? LIMIT 1',
             ['a@example.com', 1],
         ];
         yield 'where without conditions' => [static fn(Model $m): mixed => $m->where([]), 'SELECT * FROM users ', []];
-        yield 'exists' => [static fn(Model $m): mixed => $m->exists(['email' => 'a@example.com']), 'SELECT 1 FROM users WHERE email = ? LIMIT 1', ['a@example.com']];
+        yield 'exists' => [static fn(Model $m): mixed => $m->exists(['email' => 'a@example.com']), 'SELECT 1 FROM users WHERE `email` = ? LIMIT 1', ['a@example.com']];
         yield 'create' => [
             static fn(Model $m): mixed => $m->create(['name' => 'Ann', 'email' => 'a@example.com']),
-            'INSERT INTO users (name, email) VALUES (?, ?)',
+            'INSERT INTO users (`name`, `email`) VALUES (?, ?)',
             ['Ann', 'a@example.com'],
         ];
         yield 'update' => [
             static fn(Model $m): mixed => $m->update(5, ['name' => 'Ann', 'active' => 0]),
-            'UPDATE users SET name = ?, active = ? WHERE id = ?',
+            'UPDATE users SET `name` = ?, `active` = ? WHERE `id` = ?',
             ['Ann', 0, 5],
         ];
-        yield 'delete' => [static fn(Model $m): mixed => $m->delete(5), 'DELETE FROM users WHERE id = ?', [5]];
+        yield 'delete' => [static fn(Model $m): mixed => $m->delete(5), 'DELETE FROM users WHERE `id` = ?', [5]];
     }
 
     /**

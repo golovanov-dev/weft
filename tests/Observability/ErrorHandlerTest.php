@@ -105,7 +105,7 @@ final class ErrorHandlerTest extends TestCase
         ErrorHandler::log('test', 0, 'make sure the file exists', __FILE__, __LINE__);
         $this->assertNull(ErrorHandler::logsError());
 
-        $file = sys_get_temp_dir() . '/weft-logs/errors/' . Clock::date('Y-m-d') . '.log';
+        $file = Config::logsPath() . '/errors/' . Clock::date('Y-m-d') . '.log';
         chmod($file, 0444);
         try {
             $error = ErrorHandler::logsError();
@@ -118,7 +118,7 @@ final class ErrorHandlerTest extends TestCase
     /** weft-health runs from the console, but the traces to check are the web's. */
     public function testLogsErrorChecksTheWebTraceDirectoryFromAScript(): void
     {
-        $dir = sys_get_temp_dir() . '/weft-logs/requests';
+        $dir = Config::logsPath() . '/requests';
         @mkdir($dir, 0777, true);
         $file = $dir . '/' . gmdate('Y-m-d') . '.jsonl';
         $existed = is_file($file);
@@ -138,7 +138,7 @@ final class ErrorHandlerTest extends TestCase
     /** A lock file in requests/ PHP cannot open stops every web trace. */
     public function testLogsErrorNamesTheTraceLockFilePhpCannotWrite(): void
     {
-        $dir = sys_get_temp_dir() . '/weft-logs/requests';
+        $dir = Config::logsPath() . '/requests';
         @mkdir($dir, 0777, true);
         $lock = $dir . '/.traceloom.lock';
         $existed = is_file($lock);
@@ -157,7 +157,7 @@ final class ErrorHandlerTest extends TestCase
 
     public function testLogsErrorNamesAFileInPlaceOfTheLogDirectory(): void
     {
-        $dir = sys_get_temp_dir() . '/weft-logs/errors';
+        $dir = Config::logsPath() . '/errors';
         $aside = $dir . '-aside-' . getmypid();
         if (is_dir($dir)) {
             rename($dir, $aside);

@@ -15,8 +15,8 @@ use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 /**
  * verify(): the three ways it answers without calling the provider (captcha off, a key missing in
  * DEBUG, the same outside DEBUG) and its decision on Google's or Yandex's answer. HttpClient's
- * transport is a closure: alerts are captured, the provider answers with $this->google. The error log is the default
- * one in the system temp directory (LOGS_PATH is not defined).
+ * transport is a closure: alerts are captured, the provider answers with $this->google. The error log is the test
+ * process's (LOGS_PATH from tests/bootstrap.php).
  */
 final class CaptchaTest extends TestCase
 {

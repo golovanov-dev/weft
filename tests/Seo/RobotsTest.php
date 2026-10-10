@@ -95,9 +95,28 @@ final class RobotsTest extends TestCase
 
         $this->assertSame(
             "User-agent: *\nAllow: /\nDisallow: /api/\n"
-            . "\nUser-agent: Bingbot\nUser-agent: Yandex\nAllow: /api/docs\nDisallow: /drafts\nDisallow: /api/\n"
+            . "\nUser-agent: Bingbot\nUser-agent: Yandex\nDisallow: /drafts\nDisallow: /api/\n"
             . "\nUser-agent: Baiduspider\nDisallow: /\nDisallow: /api/\n"
             . "\nSitemap: https://example.com/sitemap.xml\n",
+            Robots::text(),
+        );
+    }
+
+    /**
+     * A group's allow inside a path closed to every crawler is left out: it would win over the
+     * Disallow. A line break in a configured value stays inside its line, it adds no rule.
+     */
+    public function testAGroupCannotReopenACommonDisallowOrAddLines(): void
+    {
+        Config::set('app.sitemap', []);
+        Config::set('app.seo.robots_disallow', ["/api/\n"]);
+        Config::set('app.seo.robots_groups', [
+            ['agents' => ["Bot\nDisallow: /x"], 'allow' => ['/api/', '/api/docs', '/blog'], 'disallow' => ["/drafts\r\nAllow: /"]],
+        ]);
+
+        $this->assertSame(
+            "User-agent: *\nAllow: /\nDisallow: /api/\n"
+            . "\nUser-agent: Bot Disallow: /x\nAllow: /blog\nDisallow: /drafts Allow: /\nDisallow: /api/\n",
             Robots::text(),
         );
     }
@@ -117,15 +136,20 @@ final class RobotsTest extends TestCase
         $this->assertStringNotContainsString('ai-training', $text);
     }
 
-    /** A preset name with a typo is reported (health fails on it) and still written as it is. */
-    public function testAMisspelledPresetIsReportedAndWrittenAsItIs(): void
+    /** A preset name or a group key with a typo is reported (health fails on it); robots.txt is written as it is. */
+    public function testATypoInAGroupIsReportedAndWrittenAsItIs(): void
     {
         Config::set('app.seo.robots_groups', [
             ['agents' => ['AI-Training', 'ai-search', 'Aidan'], 'disallow' => ['/']],
-            ['agents' => 'ai_training'],
+            ['agents' => 'ai_training', 'dissallow' => ['/']],
         ]);
 
-        $this->assertSame(['AI-Training', 'ai_training'], Robots::unknownPresets());
+        $this->assertSame([
+            'app.seo.robots_groups: AI-Training is not a preset',
+            'app.seo.robots_groups: dissallow is not a group key (agents, allow, disallow)',
+            'app.seo.robots_groups: ai_training is not a preset',
+        ], Robots::errors());
+        $this->assertStringEndsWith("\nUser-agent: ai_training\nAllow: /\n", Robots::text());
         $this->assertStringContainsString("\nUser-agent: AI-Training\nUser-agent: OAI-SearchBot\n", Robots::text());
     }
 

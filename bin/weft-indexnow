@@ -14,11 +14,21 @@ declare(strict_types=1);
  * Exits with 0 when nothing failed, 1 when something did, 2 on an unknown option.
  */
 
+$args = array_slice($_SERVER['argv'] ?? [], 1);
 $bootstrap = getcwd() . '/bootstrap.php';
-if (!is_file($bootstrap)) {
+if (is_file($bootstrap)) {
+    require $bootstrap;
+} elseif (in_array('--help', $args, true)) {
+    // The usage needs only the autoloader, not a site.
+    foreach ([$GLOBALS['_composer_autoload_path'] ?? null, __DIR__ . '/../../../autoload.php', __DIR__ . '/../vendor/autoload.php'] as $file) {
+        if (is_string($file) && is_file($file)) {
+            require $file;
+            break;
+        }
+    }
+} else {
     fwrite(STDERR, 'weft-indexnow: no bootstrap.php in ' . getcwd() . "; run it from the site root.\n");
     exit(1);
 }
-require $bootstrap;
 
-exit(Golovanov\Weft\Seo\IndexNow::run(array_slice($_SERVER['argv'] ?? [], 1), STDOUT, STDERR));
+exit(Golovanov\Weft\Seo\IndexNow::run($args, STDOUT, STDERR));

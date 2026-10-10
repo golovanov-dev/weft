@@ -9,18 +9,11 @@ use Golovanov\Weft\Security\Headers;
 use Golovanov\Weft\Tests\TestCase;
 
 /**
- * Emitted headers cannot be observed from the CLI SAPI (header() is a no-op there): send() is only
- * checked to be safe to call, the values are read from lines(), which send() emits.
+ * The header lines send() emits. That they reach the response is checked over HTTP by the smoke test
+ * of the example site (tests/smoke/run.php): the CLI SAPI sends no headers.
  */
 final class HeadersTest extends TestCase
 {
-    public function testSendIsSafeToCallFromCli(): void
-    {
-        $this->expectNotToPerformAssertions();
-        Headers::send();
-        Headers::send(); // idempotent second call must not error either
-    }
-
     public function testHstsIsOffUntilEnabledAndThenCoversOnlyTheHost(): void
     {
         $this->assertSame([], preg_grep('/^Strict-Transport-Security:/', Headers::lines()));

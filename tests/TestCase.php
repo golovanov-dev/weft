@@ -143,7 +143,7 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(Mail::class, ['transport' => $accept]);
     }
 
-    /** Size of today's error log (ErrorHandler::log() without LOGS_PATH), to read what a test adds. */
+    /** Size of today's error log (LOGS_PATH of the test process, tests/bootstrap.php), to read what a test adds. */
     protected static function errorLogSize(): int
     {
         clearstatcache();
@@ -159,7 +159,7 @@ abstract class TestCase extends BaseTestCase
 
     private static function errorLogFile(): string
     {
-        return sys_get_temp_dir() . '/weft-logs/errors/' . Clock::date('Y-m-d') . '.log';
+        return Config::logsPath() . '/errors/' . Clock::date('Y-m-d') . '.log';
     }
 
     /** Create a scratch directory unique to the running test. */

@@ -38,6 +38,18 @@ final class LlmsTxtTest extends TestCase
         );
     }
 
+    /** A line break in a heading, link or note (config, or content a callable read) cannot start a line of its own. */
+    public function testHeadingsLinksAndNotesStayOnOneLine(): void
+    {
+        Config::set('app.url.base', 'https://example.com');
+        Config::set('app.llms', [
+            'title' => "Acme\n# Injected",
+            'sections' => ["Docs\n## More" => [['url' => "https://a.test/x\n", 'title' => "Guide\n", 'notes' => "one\r\n- two"]]],
+        ]);
+
+        $this->assertSame("# Acme # Injected\n\n## Docs ## More\n\n- [Guide](https://a.test/x): one - two\n", LlmsTxt::text());
+    }
+
     public function testTitleDefaultsToTheSiteName(): void
     {
         Config::set('app.seo.site_name', 'Acme');

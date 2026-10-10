@@ -244,7 +244,32 @@ final class SeoTest extends TestCase
             'from the route' => [null, 'https://example.com/blog?page=2'],
             'set as a site link' => ['/blog', 'https://example.com/blog?page=2'],
             'set absolute' => ['https://example.com/posts', 'https://example.com/posts?page=2'],
+            'set with its own page=' => ['/blog?page=5', 'https://example.com/blog?page=2'],
+            'set with a query' => ['/blog?sort=new', 'https://example.com/blog?sort=new&amp;page=2'],
+            'set with a fragment' => ['https://example.com/blog#list', 'https://example.com/blog?page=2#list'],
+            'set protocol-relative' => ['//example.com/blog', 'https://example.com/blog?page=2'],
         ];
+    }
+
+    /**
+     * A canonical the page set as a site link (from url(): base URI and locale prefix in it) is
+     * absolute on page 1 and outside lists too, and so is og:url.
+     */
+    public function testCanonicalSetAsASiteLinkIsAlwaysAbsolute(): void
+    {
+        $_SERVER['REQUEST_URI'] = '/blog';
+        $cases = [
+            '/sub/ru/blog' => 'https://example.com/sub/ru/blog',
+            'blog' => 'https://example.com/blog',
+            '//cdn.test/x' => 'https://cdn.test/x',
+        ];
+        foreach ($cases as $set => $expected) {
+            Seo::set(['canonical' => $set]);
+            $html = Seo::render();
+
+            $this->assertStringContainsString('<link rel="canonical" href="' . $expected . '" />', $html);
+            $this->assertStringContainsString('<meta property="og:url" content="' . $expected . '" />', $html);
+        }
     }
 
     public function testCanonicalCanBeOverriddenPerPage(): void

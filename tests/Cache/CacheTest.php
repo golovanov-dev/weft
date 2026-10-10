@@ -96,7 +96,7 @@ final class CacheTest extends TestCase
 
     public function testRelativeCachePathIsResolvedFromAppRoot(): void
     {
-        $relative = 'storage/cache-' . bin2hex(random_bytes(4));
+        $relative = 'cache-' . bin2hex(random_bytes(4));
         $this->dir = APP_ROOT . '/' . $relative;
         Config::set('app.cache.enabled', true);
         Config::set('app.cache.path', $relative);

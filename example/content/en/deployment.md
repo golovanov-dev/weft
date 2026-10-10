@@ -149,7 +149,7 @@ false when any of these is bad:
 | Field | Bad value | What to do |
 |---|---|---|
 | `production` | not empty | it names settings for a development machine: `DEBUG` or `DEV_MODE` on, `config/config.example.php` loaded (create `config/config.php`), `app.url.base` on example.com, `app.captcha.allowed_hosts` with example.com while the captcha is on, or, with `app.vite.entry` set, a `public/dist/.vite/manifest.json` without that entry (run `npm run build`). Fix each one it names |
-| `checks.<name>.ok` | `false` | a check your site added in `app/Bootstrap.php` failed; its other fields say why. This example's `contact_form` lists in `problems`: `MAIL_TO` or `MAIL_FROM` still on example.com, the template's addresses (requests would go to example.com while the visitor sees "Thanks"): set your inbox and an address of your domain; `no channel: …`, the email cannot go (`MAIL_TO` empty or with an entry that is not a plain address, such as `Name <a@b>`: several addresses are separated by commas; a mail setting missing; or `mail()` not available) and no alert channel reaches a person (`alert_channels` is empty; the channel `mail` is left out of it while `mail()` is not available, since it sends the same way): fix the email or set an alert channel. `mail_available` is `false` when, with `MAIL_DRIVER` `mail`, `mail()` is disabled (`disable_functions`) or, outside Windows, the program in `sendmail_path` does not exist: install the server's mail transport (sendmail, postfix, msmtp) or switch to `smtp`. With `no channel`, every form submission answers 503 (see "The contact form answers 503" below). `contact_form` sends nothing, so `ok: true` does not mean an email arrives: see "Monitoring" |
+| `checks.<name>.ok` | `false` | a check your site added in `app/Bootstrap.php` failed; its other fields say why. This example's `contact_form` lists in `problems`: `MAIL_TO` or `MAIL_FROM` still on example.com, the template's addresses (requests would go to example.com while the visitor sees "Thanks"): set your inbox and an address of your domain; `MAIL_TO is not an email address`, an entry is not a plain address, such as `Name <a@b>`, and its inbox would get no request even with an alert channel: write bare addresses, several separated by commas; `no channel: …`, the email cannot go (`MAIL_TO` empty, a mail setting missing, or `mail()` not available) and no alert channel reaches a person (`alert_channels` is empty; the channel `mail` is left out of it while `mail()` is not available, since it sends the same way): fix the email or set an alert channel. `mail_available` is `false` when, with `MAIL_DRIVER` `mail`, `mail()` is disabled (`disable_functions`) or, outside Windows, the program in `sendmail_path` does not exist: install the server's mail transport (sendmail, postfix, msmtp) or switch to `smtp`. With `no channel`, every form submission answers 503 (see "The contact form answers 503" below). `contact_form` sends nothing, so `ok: true` does not mean an email arrives: see "Monitoring" |
 | `logs_writable` | `false` | `logs_error` names what PHP cannot write: `errors/` or `requests/` under `LOGS_PATH`, today's file in it, or `requests/.traceloom.lock`. Run the `chgrp`, `chmod` and `find` lines of step 5 again, then find who created it: `ls -l` shows the owner. In `errors/`, a writer without `umask 002`: PHP-FPM (check step 6) or another user's cron lines (`sudo crontab -l -u <user>`), scripts, commands over ssh. In `requests/`, anyone but PHP, such as `php -S` started as another user |
 | `rate_limit_writable` | `false` | `rate_limit_error` names `rate_limit_path`, or how many files in it PHP cannot write and one of them: the same as for `logs_writable`; with Redis, see below |
 | `rate_limit_store` | `file` while `cache_driver` is `redis` | Redis is not used, the cache and counters are per server: see below |
@@ -160,7 +160,7 @@ false when any of these is bad:
 | `alert_errors` | not empty, with `DEBUG` off | a channel in `alert_channels` lacks a setting and is skipped: set it or remove the channel (below) |
 | `mail_errors` | not empty, with `DEBUG` off | `app.mail` cannot send: set what it names (below) |
 | `indexnow_error` | not `null` | `app.indexnow.key` (`INDEXNOW_KEY` in this example) is not 8–128 letters, digits and dashes, so `/<key>.txt` is a 404 and `weft-indexnow` refuses to run: generate one as in [Configuration](/docs/configuration), or set `''` to turn IndexNow off |
-| `seo_errors` | not empty | a name in `app.seo.robots_groups` that starts with `ai-` or `ai_` and is not a preset (they are lowercase: `ai-search`, `ai-user`, `ai-training`): correct it; or a `robots.txt` / `llms.txt` file in `public/` that the web server serves instead of `app.seo.robots_groups` / `app.llms`: delete the file |
+| `seo_errors` | not empty | a name in `app.seo.robots_groups` that starts with `ai-` or `ai_` and is not a preset (they are lowercase: `ai-search`, `ai-user`, `ai-training`), or a group key other than `agents`, `allow`, `disallow`: correct it; or a `robots.txt` / `llms.txt` file in `public/` that the web server serves instead of `app.seo.robots_groups` / `app.llms`: delete the file |
 
 With `DEBUG` on, `captcha_missing_keys`, `alert_errors` and `mail_errors` are still listed but do not fail
 the check. On a development machine, `vendor/bin/weft-health --dev` lists `production` without
@@ -414,10 +414,13 @@ On shared hosting without SSH, add an hourly cron task in the hosting panel inst
 panel's PHP 8.4 binary and the full path of your site root (the panel's file manager shows it):
 
 ```text
-cd /home/<user>/site && /usr/bin/php8.4 vendor/bin/weft-indexnow
+cd /home/<user>/site && out=$(/usr/bin/php8.4 vendor/bin/weft-indexnow 2>&1) || echo "$out"
 ```
 
-For the first check there, add a one-off task with `--dry-run`. What was submitted is kept in
+A panel mails (or logs) whatever a task prints; this line prints only when the command fails, so
+a message from the task means IndexNow refused or could not run. For the first check, add a
+one-off task with `--dry-run` and without the `out=…` wrapper, and read its output where the panel
+shows it (the mail to the account, or the task's log). What was submitted is kept in
 `storage/indexnow.json` (`app.indexnow.state`); delete it and the next run submits every address.
 
 An address is submitted again only when its `lastmod` in the sitemap changes. Without `lastmod` it

@@ -174,14 +174,17 @@ final class Kernel
         // Translations for this route (no-op when the lang files don't exist).
         I18n::boot(Locale::current(), $i18nRoute);
 
+        $headers = headers_list();
         try {
             return self::renderPage($request, $file, $route, $params, 200);
         } catch (Abort $abort) {
+            // A redirect keeps the headers the page set (Set-Cookie, a regenerated session).
             if ($abort->location !== null) {
                 return Response::redirect($abort->location, $abort->status);
             }
             // Abort::notFound(): the same answer as an unknown URL, without what the page had
-            // already set (title, canonical, JSON-LD).
+            // already set (headers, title, canonical, JSON-LD).
+            self::restoreHeaders($headers);
             Seo::reset();
             return self::notFoundPage($request);
         }
@@ -268,7 +271,7 @@ final class Kernel
     /**
      * The site's pages/404.php (or a built-in page) with status 404, and no canonical or hreflang.
      * An Abort thrown while the 404 page or its layout renders is not followed: the answer is the
-     * built-in 404, not an error.
+     * built-in 404, not a 500 and no alert, with a line in the error log.
      */
     private static function notFoundPage(Request $request): Response
     {
@@ -280,9 +283,12 @@ final class Kernel
         if (!is_file($file)) {
             return $builtIn;
         }
+        $headers = headers_list();
         try {
             return self::renderPage($request, $file, '404', [], 404);
-        } catch (Abort) {
+        } catch (Abort $abort) {
+            self::restoreHeaders($headers);
+            ErrorHandler::log('kernel', 0, 'Abort thrown while the 404 page rendered: sent the built-in 404 page instead', $abort->getFile(), $abort->getLine());
             return $builtIn;
         }
     }
@@ -330,14 +336,20 @@ final class Kernel
             require $__file;
         };
 
+        $headers = headers_list();
         $level = ob_get_level();
         ob_start();
         try {
             $run($file, $request);
             $body = (string) ob_get_clean();
         } catch (Abort $abort) {
-            // Abort::notFound() is the standard JSON 404, Abort::redirect() the same 3xx as for a page.
-            return $abort->location !== null ? Response::redirect($abort->location, $abort->status) : self::apiNotFound($route);
+            // Abort::redirect() is the same 3xx as for a page, with the headers the endpoint set;
+            // Abort::notFound() is the standard JSON 404 without them.
+            if ($abort->location !== null) {
+                return Response::redirect($abort->location, $abort->status);
+            }
+            self::restoreHeaders($headers);
+            return self::apiNotFound($route);
         } finally {
             // An endpoint that threw leaves its half-written output (and any buffer it opened)
             // behind; drop it so only the error response is sent.
@@ -348,6 +360,23 @@ final class Kernel
         $status = http_response_code();
 
         return new Response(is_int($status) ? $status : 200, $body, ['Content-Type' => 'application/json; charset=utf-8']);
+    }
+
+    /**
+     * Headers a page or endpoint set with header() before it threw Abort (Cache-Control,
+     * Set-Cookie, ...) do not go out with the 404: back to the ones set before it ran.
+     *
+     * @param list<string> $headers headers_list() from before the page or endpoint ran
+     */
+    private static function restoreHeaders(array $headers): void
+    {
+        if (headers_sent()) {
+            return;
+        }
+        header_remove();
+        foreach ($headers as $header) {
+            header($header, false);
+        }
     }
 
     private static function apiNotFound(string $route): Response

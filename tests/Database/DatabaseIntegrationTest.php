@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Golovanov\Weft\Tests\Database;
 
 use Golovanov\Weft\Database\Database;
+use Golovanov\Weft\Database\Model;
 use Golovanov\Weft\Tests\TestCase;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -39,7 +40,7 @@ final class DatabaseIntegrationTest extends TestCase
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         ]);
         $this->admin->exec('DROP TABLE IF EXISTS weft_items');
-        $this->admin->exec('CREATE TABLE weft_items (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(20)) ENGINE=InnoDB');
+        $this->admin->exec('CREATE TABLE weft_items (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(20), `order` INT NULL) ENGINE=InnoDB');
     }
 
     protected function tearDown(): void
@@ -127,6 +128,21 @@ final class DatabaseIntegrationTest extends TestCase
         $known = $this->admin->query("SELECT CONVERT_TZ('2026-01-01 00:00:00', 'UTC', 'UTC')")->fetchColumn() !== null;
 
         $this->assertSame($known ? 'UTC' : '+00:00', Database::connect()->value('SELECT @@session.time_zone'));
+    }
+
+    /** A column named after a reserved word works in every statement Model builds. */
+    public function testModelQuotesAColumnNamedOrder(): void
+    {
+        $items = new class extends Model {
+            protected string $table = 'weft_items';
+        };
+
+        $id = (string) $items->create(['name' => 'first', 'order' => 2]);
+        $this->assertSame(1, $items->update($id, ['order' => 3]));
+        $this->assertSame('first', $items->findBy(['order' => 3])['name'] ?? null);
+        $this->assertCount(1, $items->where(['order' => 3]));
+        $this->assertTrue($items->exists(['order' => 3]));
+        $this->assertSame(1, $items->delete($id));
     }
 
     /** Kill the connection $db uses and return its id. */

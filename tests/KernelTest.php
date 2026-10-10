@@ -20,7 +20,8 @@ use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 /**
  * Routing tests drive Kernel::route() directly (via reflection — it is private on purpose)
  * against the fixture site in tests/fixtures/site, without a web server. Kernel::handle()
- * itself (tracing, header emission, output) is exercised through the example site, not here.
+ * itself (tracing, header emission, output) is exercised through the example site by the smoke test
+ * (tests/smoke/run.php), not here.
  */
 final class KernelTest extends TestCase
 {
@@ -136,7 +137,9 @@ final class KernelTest extends TestCase
     #[DataProvider('abortsWhileTheNotFoundPageRenders')]
     public function testAbortWhileTheNotFoundPageRendersGivesTheBuiltIn404(string $uri): void
     {
+        $offset = self::errorLogSize();
         $response = $this->route($uri);
+        $this->assertStringContainsString('Abort thrown while the 404 page rendered', self::errorLogSince($offset));
         $this->assertSame(404, $response->status);
         $this->assertStringContainsString('<h1>404 Not Found</h1>', $response->body);
         $this->assertStringNotContainsString('custom-404', $response->body);

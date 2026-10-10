@@ -108,8 +108,9 @@ pre-1.0 the API may change between minor versions.
   it robots.txt is unchanged.
 - `/llms.txt` in the llmstxt.org format from `app.llms`, an array or a callable returning one;
   without the key it stays a 404. `weft-health` fails (`seo_errors`) on an `ai-…` agent name in
-  `robots_groups` that is not a preset, and on a `public/robots.txt` or `public/llms.txt` the web
-  server serves instead of the configured one: delete the file.
+  `robots_groups` that is not a preset or a group key other than `agents`, `allow`, `disallow`, and
+  on a `public/robots.txt` or `public/llms.txt` the web server serves instead of the configured
+  one: delete the file.
 - IndexNow: with `app.indexnow.key` set, the key is served at `/<key>.txt`, and
   `vendor/bin/weft-indexnow` (for cron) submits the sitemap addresses that are new or have a new
   `lastmod`, remembering only what the endpoint accepted; `--dry-run` lists them. `weft-health`
@@ -216,8 +217,8 @@ pre-1.0 the API may change between minor versions.
   `config/config.example.php`; with the old names and the new `app.php` the captcha is off. If your
   site copied `app.php`, take its `'captcha'`, `'mail'`, `'alerts'` and `'contact'` blocks.
   `MAIL_TO` takes plain addresses, several separated by commas; `Name <owner@site>`, which `mail()`
-  accepted, now fails every contact email (and `weft-health`, when no alert channel reaches a
-  person): write the bare address.
+  accepted, now fails every contact email and `weft-health` (`MAIL_TO is not an email address`,
+  alert channels or not): write the bare address.
 - `Database` sends no alert, and `Database::setErrorNotifier()` and `Alert::notifier()` are removed:
   a database error nobody catches alerts as any unhandled exception does, once per five minutes, with
   the MySQL message only in `errors/`. Remove
@@ -266,7 +267,7 @@ pre-1.0 the API may change between minor versions.
   and images; before, every asset request returned 404. If your site copied
   `example/public/index.php` and you develop with `php -S`, copy the new `cli-server` block at its
   top.
-- 26 smaller fixes: 3 security, 12 reliability, 11 docs.
+- 50 smaller fixes: 4 security, 28 reliability, 18 docs.
 
 ### Removed
 

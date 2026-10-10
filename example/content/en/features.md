@@ -65,7 +65,9 @@ Seo::jsonLd(['@type' => 'TechArticle', 'headline' => '…']);
 
 Rendered for you: title, description, robots, canonical, full Open Graph, Twitter card, hreflang
 alternates and every JSON-LD block. Canonical, `og:url` and hreflang are built from the page the
-engine matched, never from the URL as requested. A 404 gets none of the three — the engine's own and
+engine matched, never from the URL as requested. A canonical the page sets with
+`Seo::set(['canonical' => …])` is a full URL or a link from `url()`; both are rendered absolute, in
+the canonical and in `og:url`. A 404 gets none of the three — the engine's own and
 a page that answers 404 itself (`Abort::notFound()` or `http_response_code(404)`), like an unknown
 slug on a dynamic page. JSON-LD
 is written with `<` and `>` escaped, so no value can end its `<script>` element. `/sitemap.xml` and
@@ -96,10 +98,11 @@ a preset — and the paths they may or may not fetch:
 
 `ai-search` crawlers put your pages into an assistant's search answers, `ai-user` fetch a page a
 user asked about, `ai-training` collect training data. A crawler obeys only the group that names it,
-so each group also gets `robots_disallow`. Operators say their user-triggered fetchers may ignore
+so each group also gets `robots_disallow`, and a group's `allow` inside one of those paths is left
+out: it would reopen it. Operators say their user-triggered fetchers may ignore
 robots.txt. In `DEBUG` or with `robots_allow` off, groups are left out and everything is closed.
-Preset names are lowercase; a name starting with `ai-` or `ai_` that is not a preset fails
-`weft-health` (`seo_errors`).
+Preset names are lowercase; a name starting with `ai-` or `ai_` that is not a preset, or a group key
+other than `agents`, `allow` and `disallow`, fails `weft-health` (`seo_errors`).
 
 A `robots.txt` or `llms.txt` file in `public/` is served by the web server instead of the engine's,
 and the settings here do nothing: delete it. With `robots_groups` or `llms` set, `weft-health` fails
@@ -147,8 +150,12 @@ endpoint does, 2 on an unknown option (`--help` prints the usage). Run it from c
 ### SEO audit
 
 `vendor/bin/weft-seo-audit` checks a live site over HTTP, so it runs anywhere: your machine or CI.
-Every page must answer 200, have a title, a meta description, a canonical link and exactly one
-`h1`, JSON-LD that parses, and no `noindex` in meta robots or `X-Robots-Tag`.
+Every page must answer 200 with HTML, have a title, a meta description, a canonical link and
+exactly one `h1`, JSON-LD that parses, and no `noindex` (or `none`) for all bots or for googlebot
+in meta robots, meta googlebot or `X-Robots-Tag`. It reads a sitemap of pages, not a sitemap index:
+for a site with an index, list the pages with `--pages`. A user name and password in the address
+are printed as `***`; percent-encode their special characters (`/` as `%2F`, `@` as `%40`, `:` as
+`%3A`, `?` as `%3F`, `#` as `%23`).
 
 ```bash
 vendor/bin/weft-seo-audit https://example.com               # the pages in its sitemap.xml
@@ -179,13 +186,15 @@ You get `page`, `pages` (at least 1), `total`, `offset`, `limit`, and `prev`, `n
 no `?page` for page 1). The engine keeps one address per page: `?page=1` is a 301 to the address
 without it, and a value other than `2`, `3`, … (`0`, `abc`, `02`) or past the last page shows the
 404 page. An empty list has page 1. Page 2 and later get their own canonical, `og:url` and hreflang
-with `?page=N` and no other parameters. The number goes onto the canonical the page set with
-`Seo::set(['canonical' => …])` (a full URL, or a link from `url()` that gets the scheme and host) or,
-without one, onto the page's own address; it does not matter whether `Seo::set()` comes before or
-after `Pagination`.
+with `?page=N`. Without a canonical of its own the page's address is used, with no other
+parameters. A canonical the page set with `Seo::set(['canonical' => …])` keeps its own query: the
+number replaces a `page=` it had and goes before a `#fragment`. hreflang always uses the page's own
+address with `?page=N`, not the canonical the page set. It does not matter whether `Seo::set()`
+comes before or after `Pagination`.
 
 Page 2 and later also get a title suffix: `app.seo.page_suffix`, by default ` — Page %d`, so
-"Blog — Page 2 — Weft". `%d` is the page number; a suffix without it gets the number after a space.
+"Blog — Page 2 — Weft". `%d` is the page number; a suffix without it gets the number after a space,
+an empty one too ("Blog 2 — Weft"): pages of a list never share a title.
 A multilingual site translates it: put the key in `lang/<locale>/common.php` of every locale,
 the default one included (a locale without the key falls back to the default locale's text, and
 without that `t()` returns the key itself), and set it on the page:
@@ -226,7 +235,8 @@ Schema::breadcrumbs(['Home' => url('/'), 'Blog' => url('/blog'), $post->title =>
 `faq()` and `breadcrumbs()` also take a list of pairs (`[['Home', url('/')], …]`). A breadcrumb URL
 is a full URL or the link `url()` returned — the same one your HTML trail uses; the builder adds the
 scheme and host from `app.url.base` and nothing else, so the base URI and locale prefix are not
-doubled. The breadcrumb trail on the page is your HTML. A missing required field (`null`, `''`, `[]`) throws in
+doubled. That also means a path written by hand (`'/blog'`) loses them: under a base URI or in a
+second locale it points at the wrong page, with no error. Always pass `url()`. The breadcrumb trail on the page is your HTML. A missing required field (`null`, `''`, `[]`) throws in
 `DEBUG`; in production the block is left out, a line goes to `errors/`, and the builder returns
 `false`. Any other schema still goes through `Seo::jsonLd()`.
 
@@ -238,7 +248,8 @@ link. The engine runs the file with `$request` in scope and turns what it prints
 - the body is what the file echoes; its `return` value is ignored;
 - the status is the one it set (`http_response_code()`, or a `Response` it `send()`s), otherwise 200;
 - `Content-Type` is always `application/json; charset=utf-8`, whatever the file set; its other
-  headers (`Location`) are sent as set;
+  headers (`Location`) are sent as set. A redirect (`Abort::redirect()`) has no body and is not
+  JSON;
 - an uncaught throwable discards the printed output and becomes a JSON 500, logged and alerted like
   any other;
 - `exit` or `die` bypasses the engine: the output goes out with PHP's default `Content-Type`, and the
@@ -528,7 +539,9 @@ the first `Database::connect()`; a longer query is cut off and throws, as a lost
 not an ORM, and that is the point.
 
 Array keys become column names, so each must be a plain identifier (`[A-Za-z_][A-Za-z0-9_]*`);
-anything else throws `InvalidArgumentException` before a query runs. Values are always bound.
+anything else throws `InvalidArgumentException` before a query runs. Column names and the primary
+key go into the SQL in backticks, so a column named like a MySQL keyword (`order`, `key`) works;
+the table name is written as you gave it (it may be `db.table`). Values are always bound.
 A valid key is still written, so pass `create()` only the fields you expect, not the whole
 request body.
 

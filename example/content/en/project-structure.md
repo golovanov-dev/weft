@@ -94,8 +94,10 @@ throw Abort::redirect(url('/new-place'));   // 301; a second argument picks anot
 `http_response_code(404)` in the template works too, but then the template renders the not-found
 content itself. In an `api/` endpoint `Abort::notFound()` is the standard JSON 404 and
 `Abort::redirect()` the same redirect. `pages/404.php` (and the layout while it renders the 404
-page) cannot use `Abort`: the visitor gets the engine's built-in 404 page instead, so redirect old
-addresses from a page template (a catch-all, for example), not from the 404 page.
+page) cannot use `Abort`: the visitor gets the engine's built-in 404 page instead and a line goes
+to `errors/`, so redirect old addresses from a page template (a catch-all, for example), not from
+the 404 page. Headers a template or endpoint set with `header()` before `Abort::notFound()` are
+not sent with the 404; a redirect keeps them, so a cookie set before `Abort::redirect()` goes out.
 
 ## Two entry points
 

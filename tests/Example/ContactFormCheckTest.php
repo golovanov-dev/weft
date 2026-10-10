@@ -54,7 +54,9 @@ final class ContactFormCheckTest extends TestCase
         $this->assertTrue($this->contactForm('hi@site.test, sales@site.test', 'noreply@site.test')['ok']);
 
         $check = $this->contactForm('hi@site.test, Sales <sales@site.test>', 'noreply@site.test');
-        $this->assertSame(['no channel: MAIL_TO is not an email address and no alert channel reaches a person'], $check['problems']);
+        $this->assertSame(['MAIL_TO is not an email address'], $check['problems']);
+        // An alert channel does not make up for it: the MAIL_TO inbox would get nothing.
+        $this->assertFalse($this->contactForm('Sales <sales@site.test>', 'noreply@site.test', alertloop: true)['ok']);
 
         $this->assertSame(['MAIL_TO is on example.com'], $this->contactForm('hi@site.test, hello@example.com', 'noreply@site.test')['problems']);
     }

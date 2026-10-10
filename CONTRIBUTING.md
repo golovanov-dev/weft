@@ -75,14 +75,46 @@ cd example && php -S localhost:8000 -t public public/index.php
 New engine behaviour should come with a test in `tests/` — see `tests/TestCase.php` for the
 static-state reset the suite relies on.
 
-Tests in the `integration` group run `Database` against a real MySQL server and are skipped unless
-`WEFT_TEST_DB_HOST` is set. They create and drop the table `weft_items` and kill their own
-connections, so give them a database of their own; the server must listen on port 3306.
+### Integration tests
+
+Tests in the `integration` group run `Database` against a real MySQL server and the Redis cache and
+rate limiter against a real Redis. Without `WEFT_TEST_DB_HOST` and `WEFT_TEST_REDIS_HOST` they are
+skipped, so `composer test` passes without either. The MySQL tests create and drop the table
+`weft_items` and kill their own connections: give them a database of their own. MySQL listens on
+port 3306, Redis on 6379, without a password; Redis keys are `weft-test[…]:*` and are removed. CI
+runs the group on MySQL 5.7 and 8.0.
 
 ```bash
-# MySQL host; WEFT_TEST_DB_NAME (default weft_test), WEFT_TEST_DB_USER (default root),
-# WEFT_TEST_DB_PASSWORD (default empty) are optional
-WEFT_TEST_DB_HOST=127.0.0.1 vendor/bin/phpunit --group integration
+# from the repository root; any Docker host works
+docker run -d --name weft-mysql -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=weft_test -p 3306:3306 mysql:8.0
+docker run -d --name weft-redis -p 6379:6379 redis:7-alpine
+
+# wait until both answer: a fresh MySQL takes 10-30 s to start
+until docker exec weft-mysql mysqladmin ping -h 127.0.0.1 --silent; do sleep 1; done
+until docker exec weft-redis redis-cli ping; do sleep 1; done
+
+# WEFT_TEST_DB_NAME (default weft_test) and WEFT_TEST_DB_USER (default root) are optional
+WEFT_TEST_DB_HOST=127.0.0.1 WEFT_TEST_DB_PASSWORD=root WEFT_TEST_REDIS_HOST=127.0.0.1 \
+  vendor/bin/phpunit --group integration --fail-on-skipped
+
+docker rm -f weft-mysql weft-redis
+```
+
+### Smoke test of the example
+
+`tests/smoke/run.php` copies `example/` to a temporary directory, adds the pages of
+`tests/smoke/site/`, installs the engine from your working tree, writes a production-like
+`config/config.php` and checks the site through `php -S`: `vendor/bin/weft-health` exits with 0,
+pages, 404, security headers, the contact form (the email must reach a mail catcher), catch-all
+and paginated pages, `robots.txt`, `llms.txt` and the IndexNow key file. Your `example/` is not
+changed. It needs Composer, access to Packagist and a mail catcher with Mailpit's API.
+
+```bash
+# from the repository root
+docker run -d --name weft-mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit
+until curl -sf http://127.0.0.1:8025/readyz; do sleep 1; done
+php tests/smoke/run.php   # SMOKE_SMTP_PORT (1025) and SMOKE_MAILPIT_URL (http://127.0.0.1:8025) override
+docker rm -f weft-mailpit
 ```
 
 Please describe *which real site problem* the change solves. "It would be nice to have" is not

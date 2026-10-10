@@ -147,17 +147,14 @@ final class Health
     }
 
     /**
-     * robots and llms.txt settings that have no effect: a preset name with a typo, or a static file
+     * robots and llms.txt settings that have no effect: a typo in a robots group, or a static file
      * in the web root that the web server serves instead of the generated one.
      *
      * @return list<string>
      */
     private static function seoErrors(): array
     {
-        $errors = [];
-        foreach (Robots::unknownPresets() as $name) {
-            $errors[] = "app.seo.robots_groups: {$name} is not a preset";
-        }
+        $errors = Robots::errors();
         $root = rtrim((string) Config::env('WEB_ROOT', Config::root() . '/public'), '/\\');
         $set = [
             'robots.txt' => ['app.seo.robots_groups', (array) Config::get('app.seo.robots_groups', []) !== []],

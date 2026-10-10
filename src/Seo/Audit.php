@@ -14,9 +14,10 @@ use Golovanov\Weft\Http\HttpClient;
  *   weft-seo-audit --pages https://example.com/ ...     these pages
  *   --limit=N                                           at most N pages (default 500)
  *
- * Each page must answer 200 (redirects are not followed) with a title, a meta description, a
- * canonical link, exactly one h1, JSON-LD that parses, and no noindex in meta robots or
- * X-Robots-Tag. Needs ext-dom.
+ * Each page must answer 200 (redirects are not followed) with HTML, a title, a meta description,
+ * a canonical link, exactly one h1, JSON-LD that parses, and no noindex (or none) for every bot
+ * or for googlebot in meta robots, meta googlebot or X-Robots-Tag. A sitemap index is not read. A user name and password in
+ * the address are printed as ***. Needs ext-dom.
  */
 final class Audit
 {
@@ -66,7 +67,7 @@ final class Audit
             $sitemap = rtrim($targets[0], '/') . '/sitemap.xml';
             $targets = self::sitemapPages($http, $sitemap);
             if (is_string($targets)) {
-                fwrite($err, "weft-seo-audit: {$sitemap}: {$targets}.\n");
+                fwrite($err, self::masked("weft-seo-audit: {$sitemap}: {$targets}.\n"));
                 return 2;
             }
             // The sitemap names pages by app.url.base, the production address on a staging copy:
@@ -80,7 +81,7 @@ final class Audit
                 }
             }
             if ($others !== []) {
-                fwrite($out, 'The sitemap lists pages on ' . implode(', ', $others) . "; checking them on {$site}.\n\n");
+                fwrite($out, self::masked('The sitemap lists pages on ' . implode(', ', $others) . "; checking them on {$site}.\n\n"));
             }
         }
 
@@ -89,7 +90,7 @@ final class Audit
         foreach (array_slice($targets, 0, $limit) as $url) {
             $problems = self::page($http, $url);
             $failed += $problems === [] ? 0 : 1;
-            fwrite($out, $url . '  ' . ($problems === [] ? 'ok' : implode('; ', $problems)) . "\n");
+            fwrite($out, self::masked($url . '  ' . ($problems === [] ? 'ok' : implode('; ', $problems))) . "\n");
         }
 
         $checked = min($total, $limit);
@@ -109,8 +110,13 @@ final class Audit
             return [$response['error'] ?? 'HTTP ' . $response['status']];
         }
 
+        $type = self::header($response['headers'], 'Content-Type');
+        if ($type !== '' && !str_contains(strtolower($type), 'html')) {
+            return ['not HTML: Content-Type ' . $type];
+        }
+
         $problems = [];
-        if (str_contains(strtolower(self::header($response['headers'], 'X-Robots-Tag')), 'noindex')) {
+        if (self::noindex(self::header($response['headers'], 'X-Robots-Tag'))) {
             $problems[] = 'noindex in X-Robots-Tag';
         }
 
@@ -125,8 +131,8 @@ final class Audit
             $content = trim((string) $meta->getAttribute('content'));
             if ($name === 'description') {
                 $description ??= $content;
-            } elseif ($name === 'robots' && str_contains(strtolower($content), 'noindex')) {
-                $problems[] = 'noindex in meta robots';
+            } elseif (in_array($name, ['robots', 'googlebot'], true) && self::noindex($content)) {
+                $problems[] = 'noindex in meta ' . $name;
             }
         }
         if ((string) $description === '') {
@@ -171,10 +177,15 @@ final class Audit
         if (!@$doc->loadXML((string) $response['body'], LIBXML_NONET)) {
             return 'not XML';
         }
+        if ($doc->documentElement?->localName === 'sitemapindex') {
+            return 'a sitemap index, which the audit does not read; list the pages with --pages';
+        }
         $pages = [];
         foreach ($doc->getElementsByTagNameNS('http://www.sitemaps.org/schemas/sitemap/0.9', 'url') as $url) {
             foreach ($url->getElementsByTagNameNS('http://www.sitemaps.org/schemas/sitemap/0.9', 'loc') as $loc) {
-                $pages[] = trim($loc->textContent);
+                if (trim($loc->textContent) !== '') {
+                    $pages[] = trim($loc->textContent);
+                }
             }
         }
         return $pages !== [] ? $pages : 'no <url> entries';
@@ -183,7 +194,51 @@ final class Audit
     /** @return array{status: int, headers: array<string, string>, error: string|null, body: mixed} */
     private static function get(HttpClient $http, string $url): array
     {
-        return $http->get($url, null, ['decodeJson' => false, 'log' => false]);
+        try {
+            return $http->get($url, null, ['decodeJson' => false, 'log' => false]);
+        } catch (\InvalidArgumentException $e) {
+            return ['status' => 0, 'headers' => [], 'error' => $e->getMessage(), 'body' => null];
+        }
+    }
+
+    /**
+     * Whether a robots meta or X-Robots-Tag value closes the page to Google: a noindex or none
+     * directive for every bot or for googlebot ("bingbot: noindex" and "max-image-preview:none" do not).
+     */
+    private static function noindex(string $value): bool
+    {
+        $bot = '';
+        foreach (explode(',', strtolower($value)) as $item) {
+            // "<bot>: directives" names the bot of what follows; "max-snippet:0" and the like are directives.
+            if (preg_match('/^\s*([a-z0-9_.-]+)\s*:(.*)$/s', $item, $m)) {
+                if (in_array($m[1], ['max-snippet', 'max-image-preview', 'max-video-preview', 'unavailable_after'], true)) {
+                    continue;
+                }
+                [$bot, $item] = [$m[1], $m[2]];
+            }
+            $words = preg_split('/\s+/', trim($item)) ?: [];
+            if (in_array($bot, ['', 'googlebot'], true) && array_intersect($words, ['noindex', 'none']) !== []) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * $text with the user name and password of every address in it replaced by ***: the report goes
+     * to CI logs. A password with an unencoded / ? # or @ is masked up to the last @ of the address.
+     */
+    private static function masked(string $text): string
+    {
+        return (string) preg_replace_callback('~([a-z][a-z0-9+.-]*://)(\S*)~i', static function (array $m): string {
+            $authority = substr($m[2], 0, strcspn($m[2], '/?#'));
+            $at = strrpos($authority, '@');
+            if ($at === false && str_contains($authority, ':')) {
+                // u:pa/ss@host reads as the authority "u:pa": the password runs on to the last @.
+                $at = strrpos($m[2], '@');
+            }
+            return $at === false ? $m[0] : $m[1] . '***' . substr($m[2], $at);
+        }, $text);
     }
 
     /** 'scheme://host[:port]' of $url, '' when it has none. */

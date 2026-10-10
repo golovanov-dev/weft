@@ -24,7 +24,8 @@ final class Bootstrap
 
     /**
      * The contact form needs a channel: an email to a real MAIL_TO (one plain address, or several
-     * separated by commas), or an alert channel that reaches a person; with the mail driver, the
+     * separated by commas), or an alert channel that reaches a person. A MAIL_TO that is set but is
+     * not plain addresses fails either way: its owner would get no request; with the mail driver, the
      * alert channel `mail` counts only while mail() is available. It checks the settings and, with the mail driver,
      * whether PHP can hand mail() a message, not that an email arrives: send a test request for that.
      *
@@ -54,9 +55,11 @@ final class Bootstrap
                 }
             }
         }
+        if (array_filter($recipients, static fn(string $a): bool => !Mail::isAddress($a)) !== []) {
+            $problems[] = 'MAIL_TO is not an email address';
+        }
         $mailProblem = match (true) {
             $recipients === [] => 'MAIL_TO is empty',
-            array_filter($recipients, static fn(string $a): bool => !Mail::isAddress($a)) !== [] => 'MAIL_TO is not an email address',
             $mailErrors !== [] => implode('; ', $mailErrors),
             !$mailAvailable => 'mail() is not available',
             default => null,

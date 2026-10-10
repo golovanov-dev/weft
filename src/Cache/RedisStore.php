@@ -117,7 +117,11 @@ final class RedisStore implements Store
             if ($this->onSharedConnection) {
                 self::$sharedFailure = $e;
             }
-            $this->redis->close();
+            // After a reply timeout phpredis has dropped the socket itself; close() on it would
+            // connect (and AUTH) again only to close.
+            if ($this->redis->isConnected()) {
+                $this->redis->close();
+            }
             throw $e;
         }
     }

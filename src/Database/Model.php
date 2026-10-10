@@ -10,7 +10,9 @@ namespace Golovanov\Weft\Database;
  *
  * Array keys passed to create(), update() and the condition methods become column names in the
  * SQL, so each must match [A-Za-z_][A-Za-z0-9_]*; anything else throws InvalidArgumentException
- * before a query runs. Values are always bound as parameters.
+ * before a query runs. Column names, the primary key included, are quoted with backticks (MySQL), so
+ * a reserved word such as `order` works; the table name is used as written. Values are always bound
+ * as parameters.
  */
 abstract class Model
 {
@@ -26,7 +28,7 @@ abstract class Model
     public function find(int|string $id): ?array
     {
         return $this->db()->row(
-            "SELECT * FROM {$this->table} WHERE {$this->primaryKey} = ? LIMIT 1",
+            "SELECT * FROM {$this->table} WHERE `{$this->primaryKey}` = ? LIMIT 1",
             [$id]
         );
     }
@@ -62,7 +64,7 @@ abstract class Model
     {
         $columns = self::columns($data);
         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
-        $sql = "INSERT INTO {$this->table} (" . implode(', ', $columns) . ") VALUES ($placeholders)";
+        $sql = "INSERT INTO {$this->table} (`" . implode('`, `', $columns) . "`) VALUES ($placeholders)";
         $this->db()->execute($sql, array_values($data));
         return $this->db()->lastInsertId();
     }
@@ -73,11 +75,11 @@ abstract class Model
      */
     public function update(int|string $id, array $data): int
     {
-        $set = implode(', ', array_map(static fn(string $c): string => "$c = ?", self::columns($data)));
+        $set = implode(', ', array_map(static fn(string $c): string => "`$c` = ?", self::columns($data)));
         $params = array_values($data);
         $params[] = $id;
         return $this->db()->execute(
-            "UPDATE {$this->table} SET $set WHERE {$this->primaryKey} = ?",
+            "UPDATE {$this->table} SET $set WHERE `{$this->primaryKey}` = ?",
             $params
         );
     }
@@ -86,7 +88,7 @@ abstract class Model
     public function delete(int|string $id): int
     {
         return $this->db()->execute(
-            "DELETE FROM {$this->table} WHERE {$this->primaryKey} = ?",
+            "DELETE FROM {$this->table} WHERE `{$this->primaryKey}` = ?",
             [$id]
         );
     }
@@ -100,7 +102,7 @@ abstract class Model
         if ($conditions === []) {
             return ['', []];
         }
-        $clauses = array_map(static fn(string $c): string => "$c = ?", self::columns($conditions));
+        $clauses = array_map(static fn(string $c): string => "`$c` = ?", self::columns($conditions));
         return ['WHERE ' . implode(' AND ', $clauses), array_values($conditions)];
     }
 

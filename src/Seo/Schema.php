@@ -117,7 +117,7 @@ final class Schema
             $item = ['@type' => 'ListItem', 'position' => $i + 1, 'name' => $name];
             if (!self::blank($url)) {
                 $url = (string) $url;
-                $item['item'] = preg_match('~^https?://~i', $url) === 1 ? $url : Url::origin() . '/' . ltrim($url, '/');
+                $item['item'] = Url::full($url);
             }
             $items[] = $item;
         }

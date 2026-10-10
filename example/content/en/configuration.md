@@ -123,7 +123,7 @@ The file returns an array. Read it anywhere with `config('app.<path>')`.
     'site_name'      => 'Weft',
     'default_title'  => 'Weft — a lightweight PHP engine',  // used when a page sets no title
     'title_template' => '%s — Weft',    // Seo::set(['title' => 'About']) → "About — Weft"
-    'page_suffix'    => ' — Page %d',   // page 2+ of a Pagination list: "Blog — Page 2 — Weft"
+    'page_suffix'    => ' — Page %d',   // page 2+ of a Pagination list: "Blog — Page 2 — Weft"; '' gives "Blog 2 — Weft"
     'description'    => '…',
     'og_image'       => '/img/og.png',  // under public/ (BASE_URI is added) or a full URL
     'og_image_alt'   => 'Weft social card',  // describes og_image; a page setting its own

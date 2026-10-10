@@ -31,30 +31,34 @@ final class Robots
     ];
 
     /**
-     * Names in the groups' `agents` that look like a preset (`ai-…`, `ai_…`, any case) and are not
-     * one: a typo would become a user-agent no crawler has. robots.txt lists them as they are.
+     * Typos in app.seo.robots_groups, for health: a key other than agents/allow/disallow (its rules
+     * would be dropped), and a name in `agents` that looks like a preset (`ai-…`, `ai_…`, any case)
+     * and is not one (it would become a user-agent no crawler has). robots.txt is written as is.
      *
      * @return list<string>
      */
-    public static function unknownPresets(): array
+    public static function errors(): array
     {
-        $unknown = [];
+        $errors = [];
         foreach ((array) Config::get('app.seo.robots_groups', []) as $group) {
+            foreach (array_diff_key((array) $group, array_flip(['agents', 'allow', 'disallow'])) as $key => $_) {
+                $errors[] = "app.seo.robots_groups: {$key} is not a group key (agents, allow, disallow)";
+            }
             foreach ((array) (((array) $group)['agents'] ?? []) as $agent) {
                 $agent = (string) $agent;
                 if (preg_match('/^ai[-_]/i', $agent) && !isset(self::PRESETS[$agent])) {
-                    $unknown[] = $agent;
+                    $errors[] = "app.seo.robots_groups: {$agent} is not a preset";
                 }
             }
         }
-        return array_values(array_unique($unknown));
+        return array_values(array_unique($errors));
     }
 
     public static function text(): string
     {
         $debug = (bool) Config::env('DEBUG', false);
         $allow = !$debug && (bool) Config::get('app.seo.robots_allow', true);
-        $disallow = array_map('strval', (array) Config::get('app.seo.robots_disallow', []));
+        $disallow = array_map(self::line(...), (array) Config::get('app.seo.robots_disallow', []));
 
         $lines = ['User-agent: *'];
         $lines[] = $allow ? 'Allow: /' : 'Disallow: /';
@@ -87,7 +91,7 @@ final class Robots
     {
         $agents = [];
         foreach ((array) ($group['agents'] ?? []) as $agent) {
-            $agents = [...$agents, ...(self::PRESETS[(string) $agent] ?? [(string) $agent])];
+            $agents = [...$agents, ...(self::PRESETS[(string) $agent] ?? [self::line($agent)])];
         }
         if ($agents === []) {
             return [];
@@ -98,13 +102,24 @@ final class Robots
             $lines[] = 'User-agent: ' . $agent;
         }
         $rules = [];
-        foreach ((array) ($group['allow'] ?? []) as $path) {
-            $rules[] = 'Allow: ' . $path;
+        // An allow inside a path closed to every crawler is left out: a longer Allow (or an equal
+        // one) wins over the Disallow (RFC 9309), and would reopen it for this group.
+        foreach (array_map(self::line(...), (array) ($group['allow'] ?? [])) as $path) {
+            $closed = array_filter($disallow, static fn(string $d): bool => $d !== '' && str_starts_with($path, $d));
+            if ($closed === []) {
+                $rules[] = 'Allow: ' . $path;
+            }
         }
-        foreach ([...(array) ($group['disallow'] ?? []), ...$disallow] as $path) {
+        foreach ([...array_map(self::line(...), (array) ($group['disallow'] ?? [])), ...$disallow] as $path) {
             $rules[] = 'Disallow: ' . $path;
         }
         // A group without rules would end at the next User-agent line and merge into that group.
         return [...$lines, ...($rules === [] ? ['Allow: /'] : array_unique($rules))];
+    }
+
+    /** A value from the config on one line: a line break in it would add a rule of its own. */
+    private static function line(mixed $value): string
+    {
+        return trim((string) preg_replace('/\s*[\r\n]+\s*/', ' ', (string) $value));
     }
 }

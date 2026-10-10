@@ -71,7 +71,8 @@ final class IndexNow
             self::key() === '' => 'app.indexnow.key is not set',
             self::keyError() !== null => self::keyError(),
             Url::origin() === '' => 'app.url.base is not set',
-            Health::isExampleHost((string) parse_url(Url::origin(), PHP_URL_HOST)) => 'app.url.base is on example.com',
+            Health::isExampleHost((string) parse_url(Url::origin(), PHP_URL_HOST))
+                => "app.url.base is on example.com: set it to the site's own address in app/Configs/app.php",
             default => null,
         };
         if ($problem !== null) {
@@ -156,8 +157,14 @@ final class IndexNow
         if (!is_dir($dir)) {
             @mkdir($dir, 0775, true);
         }
-        $tmp = $file . '.tmp';
-        return @file_put_contents($tmp, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) !== false
-            && @rename($tmp, $file);
+        // A temporary file of its own: two runs at once (cron over a manual one) never write into
+        // one file, so the state file is always one run's whole JSON.
+        $tmp = $file . '.' . bin2hex(random_bytes(6)) . '.tmp';
+        $json = json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (@file_put_contents($tmp, $json) !== false && @rename($tmp, $file)) {
+            return true;
+        }
+        @unlink($tmp);
+        return false;
     }
 }

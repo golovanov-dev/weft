@@ -161,7 +161,7 @@ final class RateLimiterTest extends TestCase
 
     public function testRelativeCounterPathIsResolvedFromAppRoot(): void
     {
-        $relative = 'storage/ratelimit-' . bin2hex(random_bytes(4));
+        $relative = 'ratelimit-' . bin2hex(random_bytes(4));
         Config::set('app.rate_limit.path', $relative);
 
         try {

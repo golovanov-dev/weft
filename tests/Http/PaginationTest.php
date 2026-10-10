@@ -73,6 +73,7 @@ final class PaginationTest extends TestCase
         return [
             'zero' => ['page=0', 25],
             'not a number' => ['page=abc', 25],
+            'a line break after the number' => ['page=2%0A', 25],
             'past the end' => ['page=4', 25],
         ];
     }

@@ -139,16 +139,16 @@ final class Seo
         // the raw request URI; a 404 has no route and gets none of them unless the page sets one.
         // A page that answers 404 itself (a dynamic page with an unknown slug) counts as a 404.
         $path = http_response_code() === 404 ? null : Url::routePath();
-        $canonical = (string) (self::$data['canonical'] ?: ($path !== null ? Url::absolute($path) : ''));
-        // Page 2 and later of a list is its own canonical page: ?page=N, without other parameters,
-        // added to the canonical the page set (made absolute: a site link gets the scheme and host)
-        // or to the route; hreflang carries the same ?page=N.
+        // The canonical a page set is always absolute, as og:url must be: a link from url() gets
+        // the scheme and host (Url::full()).
+        $set = (string) self::$data['canonical'];
+        $canonical = $set !== '' ? Url::full($set) : ($path !== null ? Url::absolute($path) : '');
+        // Page 2 and later of a list is its own canonical page: page=N goes onto the canonical the
+        // page set (in place of a page= it had, before a #fragment) or onto the route, which has
+        // no other parameters; hreflang always comes from the route, with the same ?page=N.
         $page = (int) self::$data['page'];
         if ($path !== null && $page >= 2) {
-            if (preg_match('~^https?://~i', $canonical) !== 1) {
-                $canonical = Url::origin() . '/' . ltrim($canonical, '/');
-            }
-            $canonical .= (str_contains($canonical, '?') ? '&' : '?') . 'page=' . $page;
+            $canonical = self::withPage($canonical, $page);
             $path .= '?page=' . $page;
         }
         $robots = (string) self::$data['robots'];
@@ -233,6 +233,19 @@ final class Seo
         }
 
         return implode("\n  ", $out) . "\n";
+    }
+
+    /** $url with page=N in its query, in place of any page= it had, and before its #fragment. */
+    private static function withPage(string $url, int $page): string
+    {
+        [$url, $fragment] = array_pad(explode('#', $url, 2), 2, null);
+        [$base, $query] = array_pad(explode('?', $url, 2), 2, '');
+        $params = array_filter(
+            explode('&', $query),
+            static fn(string $pair): bool => $pair !== '' && urldecode(explode('=', $pair, 2)[0]) !== 'page',
+        );
+        $params[] = 'page=' . $page;
+        return $base . '?' . implode('&', $params) . ($fragment !== null ? '#' . $fragment : '');
     }
 
     private static function absoluteImage(string $image): string
