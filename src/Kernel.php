@@ -15,6 +15,8 @@ use Golovanov\Weft\I18n\Url;
 use Golovanov\Weft\Observability\ErrorHandler;
 use Golovanov\Weft\Observability\Trace;
 use Golovanov\Weft\Security\Headers;
+use Golovanov\Weft\Seo\IndexNow;
+use Golovanov\Weft\Seo\LlmsTxt;
 use Golovanov\Weft\Seo\Robots;
 use Golovanov\Weft\Seo\Seo;
 use Golovanov\Weft\Seo\Sitemap;
@@ -140,6 +142,12 @@ final class Kernel
         }
         if ($path === '/robots.txt') {
             return new Response(200, Robots::text(), ['Content-Type' => 'text/plain; charset=utf-8']);
+        }
+        if ($path === '/llms.txt' && LlmsTxt::enabled()) {
+            return new Response(200, LlmsTxt::text(), ['Content-Type' => 'text/plain; charset=utf-8']);
+        }
+        if ($path === IndexNow::keyFile()) {
+            return new Response(200, IndexNow::key(), ['Content-Type' => 'text/plain; charset=utf-8']);
         }
 
         // 5) API vs page.

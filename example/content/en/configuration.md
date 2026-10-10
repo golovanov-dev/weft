@@ -74,6 +74,9 @@ define('TELEGRAM_BOT_TOKEN', '');   // alert channel telegram: on when the token
 define('TELEGRAM_CHAT_ID', '');     // a number, below
 define('ALERT_MAIL_TO', '');        // alert channel mail: on when set; sent with the MAIL_* settings
 
+define('INDEXNOW_KEY', '');         // IndexNow: 8–128 letters, digits, dashes; '' turns it off.
+                                    // generate one: php -r 'echo bin2hex(random_bytes(16));'
+
 define('AUTH_JWT_KEY', '');         // JWT verification
 define('AUTH_JWT_ISSUER', '');
 
@@ -132,7 +135,10 @@ The file returns an array. Read it anywhere with `config('app.<path>')`.
     'robots_allow'   => true,           // robots.txt (DEBUG always blocks indexing); it lists
                                         // /sitemap.xml when app.sitemap is a non-empty list
                                         // or a callable (not called for robots.txt)
-    'robots_disallow'=> ['/api/'],
+    'robots_disallow'=> ['/api/'],      // for every crawler, in every group too
+    'robots_groups'  => [               // per-crawler rules; presets ai-search, ai-user, ai-training
+        ['agents' => ['ai-training'], 'disallow' => ['/']],   // (Features, "Crawlers and AI assistants")
+    ],
     'json_ld'        => [ /* one schema or a list */ ],
 ],
 ```
@@ -165,6 +171,22 @@ matter. Search engines ignore `changefreq` and `priority` and do read `lastmod`,
 they trust it: a date derived from a file mtime or set to today on every build teaches them to
 ignore the field, and a distrusted `lastmod` is worth less than an absent one. Mixing routes with
 and without it is valid.
+
+### llms.txt and IndexNow
+
+```php
+'llms' => [                       // /llms.txt; an array or a callable returning one; unset: 404
+    'title' => 'Acme', 'summary' => '…', 'details' => '…',
+    'sections' => ['Docs' => [['url' => '/start', 'title' => 'Start', 'notes' => '…']]],
+],
+'indexnow' => [
+    'key' => defined('INDEXNOW_KEY') ? INDEXNOW_KEY : '',   // served at /<key>.txt; '' turns it off
+    'state' => 'storage/indexnow.json',   // what weft-indexnow submitted; relative to the site root
+    'endpoint' => 'https://api.indexnow.org/indexnow',
+],
+```
+
+Both are described in [Features](/docs/features), "Crawlers and AI assistants" and "IndexNow".
 
 ### The rest
 

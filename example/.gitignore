@@ -17,6 +17,7 @@
 /storage/cache/*
 !/storage/logs/.gitkeep
 !/storage/cache/.gitkeep
+/storage/indexnow.json
 
 # Build output.
 #

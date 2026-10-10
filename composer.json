@@ -26,6 +26,7 @@
     "phpunit/phpunit": "^12.0"
   },
   "suggest": {
+    "ext-dom": "Required only by vendor/bin/weft-seo-audit.",
     "ext-redis": "Enables the Redis cache and rate-limit stores.",
     "ext-pdo": "Required only if the site uses Golovanov\\Weft\\Database."
   },
@@ -38,7 +39,9 @@
     ]
   },
   "bin": [
-    "bin/weft-health"
+    "bin/weft-health",
+    "bin/weft-indexnow",
+    "bin/weft-seo-audit"
   ],
   "autoload-dev": {
     "psr-4": {

@@ -32,7 +32,7 @@ cp config/config.example.php config/config.php
 #    DEBUG=false, DEV_MODE=false, BASE_URI='', APP_TIMEZONE, plus any keys you use;
 #    MAIL_TO (your inbox) and MAIL_FROM (an address of your domain) for the contact form;
 #    MAIL_DRIVER='smtp' and SMTP_* where PHP mail() does not work (no sendmail, shared hosting);
-#    for alerts, any of ALERTLOOP_*, TELEGRAM_* or ALERT_MAIL_TO;
+#    for alerts, any of ALERTLOOP_*, TELEGRAM_* or ALERT_MAIL_TO; INDEXNOW_KEY for IndexNow;
 #    in app/Configs/app.php set app.url.base to your https domain
 
 # 4. Frontend (here or in CI)
@@ -159,6 +159,8 @@ false when any of these is bad:
 | `captcha_missing_keys` | not empty, with `DEBUG` off | every form submission is rejected: set the keys or disable the captcha (below) |
 | `alert_errors` | not empty, with `DEBUG` off | a channel in `alert_channels` lacks a setting and is skipped: set it or remove the channel (below) |
 | `mail_errors` | not empty, with `DEBUG` off | `app.mail` cannot send: set what it names (below) |
+| `indexnow_error` | not `null` | `app.indexnow.key` (`INDEXNOW_KEY` in this example) is not 8–128 letters, digits and dashes, so `/<key>.txt` is a 404 and `weft-indexnow` refuses to run: generate one as in [Configuration](/docs/configuration), or set `''` to turn IndexNow off |
+| `seo_errors` | not empty | a name in `app.seo.robots_groups` that starts with `ai-` or `ai_` and is not a preset (they are lowercase: `ai-search`, `ai-user`, `ai-training`): correct it; or a `robots.txt` / `llms.txt` file in `public/` that the web server serves instead of `app.seo.robots_groups` / `app.llms`: delete the file |
 
 With `DEBUG` on, `captcha_missing_keys`, `alert_errors` and `mail_errors` are still listed but do not fail
 the check. On a development machine, `vendor/bin/weft-health --dev` lists `production` without
@@ -389,6 +391,51 @@ grep -h 'not delivered\|not sent' storage/logs/errors/*
 A line there is explained in "The contact form answers 503" below; no line and no email means the
 mail server took the email and did not deliver it: see its own log (for example
 `/var/log/mail.log`, or your mail provider's sent folder).
+## IndexNow
+
+With `INDEXNOW_KEY` set and your domain in `app.url.base` deployed (on example.com the command
+refuses to run), open `https://<your domain>/<key>.txt`: it must show the key. Then, on the server,
+in the site root, as the deploy user, like every script but `weft-health` (see "Who writes
+`storage/`"):
+
+```bash
+vendor/bin/weft-indexnow --dry-run   # lists what the first run submits
+vendor/bin/weft-indexnow             # submits; exit 1 if refused
+```
+
+Then run it hourly from cron, in the deploy user's crontab (`crontab -e`):
+
+```text
+MAILTO=you@example.com
+0 * * * * umask 002; cd /var/www/site && out=$(vendor/bin/weft-indexnow 2>&1) || echo "$out"
+```
+
+On shared hosting without SSH, add an hourly cron task in the hosting panel instead. Substitute the
+panel's PHP 8.4 binary and the full path of your site root (the panel's file manager shows it):
+
+```text
+cd /home/<user>/site && /usr/bin/php8.4 vendor/bin/weft-indexnow
+```
+
+For the first check there, add a one-off task with `--dry-run`. What was submitted is kept in
+`storage/indexnow.json` (`app.indexnow.state`); delete it and the next run submits every address.
+
+An address is submitted again only when its `lastmod` in the sitemap changes. Without `lastmod` it
+is submitted once, when it is new, and never after an edit; the command prints how many such
+addresses there are. To have edits submitted, give the routes a `lastmod`
+([Configuration](/docs/configuration), "Sitemap").
+
+## SEO audit
+
+On your machine (or in CI), in your site's directory after `composer install`, check the live site:
+
+```bash
+vendor/bin/weft-seo-audit https://example.com    # your domain: the pages in its sitemap.xml
+```
+
+It exits with 0 when every page passes; each other line names a page and its problems
+([Features](/docs/features), "SEO audit"). It needs PHP's `dom` extension on that machine.
+
 ## Updating
 
 - **The site** — `git pull`, `composer install --no-dev`, `npm run build` if the frontend changed.
@@ -509,6 +556,8 @@ goes over that within the form's 4,000-character limit, especially one not in La
 - [ ] `sudo -u www-data sh -c 'umask 002; vendor/bin/weft-health'` (your PHP user) → `ok: true`,
   exit code 0
 - [ ] an uptime service watches the home page, and `weft-health` runs from cron (see "Monitoring")
+- [ ] with IndexNow: `/<key>.txt` shows the key and `weft-indexnow` runs from cron (see "IndexNow")
+- [ ] `vendor/bin/weft-seo-audit https://<your domain>` on your machine exits with 0 (see "SEO audit")
 
 That is the whole engine. If something is missing from these docs, please
 [open an issue](https://github.com/golovanov-dev/weft/issues).

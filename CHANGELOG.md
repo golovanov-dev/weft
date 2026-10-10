@@ -103,6 +103,20 @@ pre-1.0 the API may change between minor versions.
 - JSON-LD builders `Schema::organization()`, `localBusiness()`, `webSite()`, `article()`,
   `product()`, `faq()` and `breadcrumbs()` check the fields search engines require; a missing one
   throws in `DEBUG` and otherwise leaves the block out with a line in `errors/`.
+- robots.txt groups per crawler: `app.seo.robots_groups` lists `agents` (user-agent tokens or the
+  presets `ai-search`, `ai-user`, `ai-training`) with their `allow` and `disallow` paths. Without
+  it robots.txt is unchanged.
+- `/llms.txt` in the llmstxt.org format from `app.llms`, an array or a callable returning one;
+  without the key it stays a 404. `weft-health` fails (`seo_errors`) on an `ai-…` agent name in
+  `robots_groups` that is not a preset, and on a `public/robots.txt` or `public/llms.txt` the web
+  server serves instead of the configured one: delete the file.
+- IndexNow: with `app.indexnow.key` set, the key is served at `/<key>.txt`, and
+  `vendor/bin/weft-indexnow` (for cron) submits the sitemap addresses that are new or have a new
+  `lastmod`, remembering only what the endpoint accepted; `--dry-run` lists them. `weft-health`
+  fails on a malformed key (`indexnow_error`).
+- `vendor/bin/weft-seo-audit <site-url>` checks the pages in a live site's sitemap over HTTP —
+  status 200, title, meta description, canonical, one `h1`, JSON-LD that parses, no `noindex` —
+  and exits with 1 when one fails, for CI. It needs `ext-dom`, now in `suggest`.
 
 ### Changed
 

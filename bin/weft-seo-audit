@@ -1,0 +1,26 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * SEO audit of a live site, over HTTP; runs anywhere, without the site's bootstrap.php:
+ *
+ *   vendor/bin/weft-seo-audit https://example.com               the pages in its sitemap.xml
+ *   vendor/bin/weft-seo-audit --pages https://example.com/ ...  these pages
+ *   vendor/bin/weft-seo-audit --limit=50 https://example.com    at most 50 pages (default 500)
+ *   vendor/bin/weft-seo-audit --help                             usage
+ *
+ * Exits with 0 when every page passes, 1 when some do not, 2 when it could not run or on an
+ * unknown option.
+ */
+
+$autoload = $GLOBALS['_composer_autoload_path'] ?? null;
+foreach ([$autoload, __DIR__ . '/../../../autoload.php', __DIR__ . '/../vendor/autoload.php'] as $file) {
+    if (is_string($file) && is_file($file)) {
+        require $file;
+        exit(Golovanov\Weft\Seo\Audit::run(array_slice($_SERVER['argv'] ?? [], 1), STDOUT, STDERR));
+    }
+}
+fwrite(STDERR, "weft-seo-audit: Composer's autoload.php not found.\n");
+exit(2);

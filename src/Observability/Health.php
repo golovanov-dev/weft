@@ -10,12 +10,16 @@ use Golovanov\Weft\Http\Request;
 use Golovanov\Weft\Mail\Mail;
 use Golovanov\Weft\Security\Captcha;
 use Golovanov\Weft\Security\RateLimiter;
+use Golovanov\Weft\Seo\IndexNow;
+use Golovanov\Weft\Seo\LlmsTxt;
+use Golovanov\Weft\Seo\Robots;
 
 /**
  * The report of `vendor/bin/weft-health`: whether the site can run in production.
  *
  * `ok` is false when logs or rate-limit counters cannot be written, PROXY_IPS is unusable, the
- * captcha, a listed alert channel or the app.mail settings lack something (outside DEBUG),
+ * captcha, a listed alert channel or the app.mail settings lack something (outside DEBUG), the
+ * IndexNow key is malformed, robots or llms.txt settings do not apply (`seo_errors`),
  * `production` lists a setting for development (unless the report is for development), or a check
  * the site registered says so.
  */
@@ -72,6 +76,8 @@ final class Health
             'mail_driver' => (string) Config::get('app.mail.driver', 'mail'),
             // Mail is in use when the site configures it; the mail alert channel checks it either way.
             'mail_errors' => Config::get('app.mail') === null ? [] : Mail::configErrors(),
+            'indexnow_error' => IndexNow::keyError(),
+            'seo_errors' => self::seoErrors(),
             'checks' => self::runChecks(),
         ];
 
@@ -84,6 +90,8 @@ final class Health
             && ($report['captcha_missing_keys'] === [] || $debug)
             && ($report['alert_errors'] === [] || $debug)
             && ($report['mail_errors'] === [] || $debug)
+            && $report['indexnow_error'] === null
+            && $report['seo_errors'] === []
             && ($report['production'] === [] || $dev)
             && !in_array(false, array_column($report['checks'], 'ok'), true);
 
@@ -138,7 +146,33 @@ final class Health
         return $problems;
     }
 
-    private static function isExampleHost(string $host): bool
+    /**
+     * robots and llms.txt settings that have no effect: a preset name with a typo, or a static file
+     * in the web root that the web server serves instead of the generated one.
+     *
+     * @return list<string>
+     */
+    private static function seoErrors(): array
+    {
+        $errors = [];
+        foreach (Robots::unknownPresets() as $name) {
+            $errors[] = "app.seo.robots_groups: {$name} is not a preset";
+        }
+        $root = rtrim((string) Config::env('WEB_ROOT', Config::root() . '/public'), '/\\');
+        $set = [
+            'robots.txt' => ['app.seo.robots_groups', (array) Config::get('app.seo.robots_groups', []) !== []],
+            'llms.txt' => ['app.llms', LlmsTxt::enabled()],
+        ];
+        foreach ($set as $file => [$key, $configured]) {
+            if ($configured && is_file("{$root}/{$file}")) {
+                $errors[] = "{$root}/{$file} is served instead of {$key}";
+            }
+        }
+        return $errors;
+    }
+
+    /** Whether $host is example.com or under it: the template's address, not a site's. */
+    public static function isExampleHost(string $host): bool
     {
         $host = strtolower($host);
         return $host === 'example.com' || str_ends_with($host, '.example.com');

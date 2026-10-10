@@ -1,0 +1,24 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Submit new and changed pages of a Weft site to IndexNow. Run it from the site root, the
+ * directory holding bootstrap.php, by hand or from cron:
+ *
+ *   vendor/bin/weft-indexnow            submit the sitemap addresses that are new or have a new lastmod
+ *   vendor/bin/weft-indexnow --dry-run  list them without submitting
+ *   vendor/bin/weft-indexnow --help     usage
+ *
+ * Exits with 0 when nothing failed, 1 when something did, 2 on an unknown option.
+ */
+
+$bootstrap = getcwd() . '/bootstrap.php';
+if (!is_file($bootstrap)) {
+    fwrite(STDERR, 'weft-indexnow: no bootstrap.php in ' . getcwd() . "; run it from the site root.\n");
+    exit(1);
+}
+require $bootstrap;
+
+exit(Golovanov\Weft\Seo\IndexNow::run(array_slice($_SERVER['argv'] ?? [], 1), STDOUT, STDERR));

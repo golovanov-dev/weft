@@ -65,6 +65,9 @@ define('TELEGRAM_CHAT_ID', '');     // a number: message the bot, then see chat.
 define('ALERT_MAIL_TO', '');        // alert emails, sent with the email settings above; every contact
                                     // request comes here too, so not the MAIL_TO address
 
+// --- IndexNow (optional — telling search engines about changed pages) ------------------------
+define('INDEXNOW_KEY', '');   // '' is off; generate one: php -r 'echo bin2hex(random_bytes(16));'
+
 // --- JWT (optional — verifying access tokens) --------------------------------------------
 define('AUTH_JWT_KEY', '');
 define('AUTH_JWT_ISSUER', '');

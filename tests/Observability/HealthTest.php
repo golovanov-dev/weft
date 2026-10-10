@@ -97,6 +97,29 @@ final class HealthTest extends TestCase
         $this->assertSame(['app.mail.smtp.host is empty'], $report['mail_errors']);
     }
 
+    /**
+     * A misspelled preset, and a static file in public/ that the web server serves instead of the
+     * configured robots groups; a static llms.txt without app.llms is the site's own and fine.
+     */
+    public function testRobotsSettingsThatDoNotApplyFailIt(): void
+    {
+        $this->makeSite('config.php', '', [
+            'url' => ['base' => 'https://site.test'],
+            'seo' => ['robots_groups' => [['agents' => ['ai_training'], 'disallow' => ['/']]]],
+        ]);
+        mkdir($this->site . '/public');
+        file_put_contents($this->site . '/public/robots.txt', "User-agent: *\nAllow: /\n");
+        file_put_contents($this->site . '/public/llms.txt', "# Site\n");
+
+        [$status, $report] = $this->runHealth();
+
+        $this->assertSame(1, $status);
+        $this->assertSame([
+            'app.seo.robots_groups: ai_training is not a preset',
+            str_replace('\\', '/', $this->site) . '/public/robots.txt is served instead of app.seo.robots_groups',
+        ], str_replace('\\', '/', $report['seo_errors']));
+    }
+
     public function testOutsideASiteRootItSaysWhereItLooked(): void
     {
         [$status, , $stderr] = $this->runHealth();

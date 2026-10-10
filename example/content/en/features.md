@@ -73,6 +73,94 @@ is written with `<` and `>` escaped, so no value can end its `<script>` element.
 sitemap only when `app.sitemap` is a non-empty list or a callable. robots.txt does not call the
 callable, so a sitemap generator that fails cannot turn it into an error.
 
+### Crawlers and AI assistants
+
+robots.txt allows every crawler unless you add groups. A group names crawlers — user-agent tokens or
+a preset — and the paths they may or may not fetch:
+
+```php
+'seo' => [
+    'robots_disallow' => ['/api/'],                                  // every crawler, every group
+    'robots_groups' => [
+        ['agents' => ['ai-training'], 'disallow' => ['/']],         // no training on this site
+        ['agents' => ['Yandex', 'Bingbot'], 'disallow' => ['/drafts']],
+    ],
+],
+```
+
+| Preset | Crawlers |
+|---|---|
+| `ai-search` | `OAI-SearchBot`, `Claude-SearchBot`, `PerplexityBot`, `YandexAdditional` |
+| `ai-user` | `ChatGPT-User`, `Claude-User`, `Perplexity-User` |
+| `ai-training` | `GPTBot`, `ClaudeBot`, `Google-Extended`, `Applebot-Extended`, `CCBot` |
+
+`ai-search` crawlers put your pages into an assistant's search answers, `ai-user` fetch a page a
+user asked about, `ai-training` collect training data. A crawler obeys only the group that names it,
+so each group also gets `robots_disallow`. Operators say their user-triggered fetchers may ignore
+robots.txt. In `DEBUG` or with `robots_allow` off, groups are left out and everything is closed.
+Preset names are lowercase; a name starting with `ai-` or `ai_` that is not a preset fails
+`weft-health` (`seo_errors`).
+
+A `robots.txt` or `llms.txt` file in `public/` is served by the web server instead of the engine's,
+and the settings here do nothing: delete it. With `robots_groups` or `llms` set, `weft-health` fails
+on such a file.
+
+`/llms.txt` ([llmstxt.org](https://llmstxt.org)) tells an assistant what the site is and where its
+main pages are. It is served when `app.llms` is set — an array, or a callable returning one, called
+only on that request:
+
+```php
+'llms' => [
+    'title' => 'Acme',                 // default: seo.site_name
+    'summary' => 'Garden tools, made in Leeds since 1998.',
+    'details' => 'Prices include VAT. Orders ship within two days.',
+    'sections' => [
+        'Shop' => [['url' => '/tools', 'title' => 'Tools', 'notes' => 'The full catalogue']],
+        'Optional' => [['url' => '/blog', 'title' => 'Blog']],
+    ],
+],
+```
+
+A `url` without a scheme is a path of the site and is written as a full URL. A callable that throws
+is a 500 of `/llms.txt` alone, with a line in `errors/`.
+
+### IndexNow
+
+[IndexNow](https://www.indexnow.org) tells Bing, Yandex and other participating search engines which
+pages are new or changed. Set a key of 8–128 letters, digits and dashes:
+
+```php
+'indexnow' => ['key' => defined('INDEXNOW_KEY') ? INDEXNOW_KEY : ''],   // other keys: Configuration
+```
+
+The engine serves the key at `/<key>.txt`. `vendor/bin/weft-indexnow`, run in the site root, submits
+the sitemap addresses that are new or have a new `lastmod`: the first run submits all of them. An
+address is remembered only once the endpoint accepts it, in the state file — `cache-clear` does not
+touch it. Removed pages are not submitted. A change is a new `lastmod`: an address without one is
+submitted once, when it is new, and never after an edit — the command says how many there are. To
+have edits submitted, give the routes a `lastmod` ([Configuration](/docs/configuration),
+"Sitemap"). `--dry-run` lists the addresses without submitting; in `DEBUG` nothing is submitted. It
+refuses to run while `app.url.base` is on example.com. It exits with 1 when it refuses or the
+endpoint does, 2 on an unknown option (`--help` prints the usage). Run it from cron:
+[Deployment](/docs/deployment), "IndexNow".
+
+### SEO audit
+
+`vendor/bin/weft-seo-audit` checks a live site over HTTP, so it runs anywhere: your machine or CI.
+Every page must answer 200, have a title, a meta description, a canonical link and exactly one
+`h1`, JSON-LD that parses, and no `noindex` in meta robots or `X-Robots-Tag`.
+
+```bash
+vendor/bin/weft-seo-audit https://example.com               # the pages in its sitemap.xml
+vendor/bin/weft-seo-audit --pages https://example.com/ https://example.com/about
+vendor/bin/weft-seo-audit --limit=50 https://example.com    # at most 50 pages (default 500)
+```
+
+It prints a line per page and exits with 1 when a page has a problem, 2 when it could not run. It
+needs the PHP `dom` extension. The sitemap names pages by `app.url.base`; when that is another
+address (production, for a staging copy), the audit checks the same paths on the address you gave
+and says so in the first line.
+
 ### Pagination
 
 `Pagination` turns `?page=N` into numbers and links; the page draws the navigation itself:
@@ -492,7 +580,8 @@ are left out on purpose — preloading them would undo the code split.
 
 `vendor/bin/weft-health`, run in the site root, prints a JSON report and exits with 1 when the site
 is not ready to serve: logs or rate-limit counters PHP cannot write, an unusable `PROXY_IPS`, a
-captcha, an alert channel or mail without its settings, development settings (`DEBUG`, example.com, no built assets),
+captcha, an alert channel or mail without its settings, a malformed IndexNow key, robots or
+`llms.txt` settings that do not apply, development settings (`DEBUG`, example.com, no built assets),
 or a failed check of the site. What each field means: [Deployment](/docs/deployment), "What
 `weft-health` checks".
 

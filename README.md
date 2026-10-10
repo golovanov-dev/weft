@@ -36,6 +36,9 @@ convention-driven core so a new site is mostly content.
 - **SEO under the hood** — title templates, canonical, Open Graph, Twitter cards, hreflang and
   JSON-LD rendered from config + per-page overrides; JSON-LD builders that check required fields,
   breadcrumbs and pagination with self-canonical pages. Generated `/sitemap.xml` and `/robots.txt`.
+- **Visible to search engines and AI assistants** — robots.txt rules per crawler with presets for AI
+  search, user-triggered and training bots; `/llms.txt`; IndexNow submission of new and changed
+  pages from cron; `vendor/bin/weft-seo-audit` checks a live site's pages, in CI too.
 - **Optional i18n** — off by default. Turn it on and the default locale stays prefix-free
   (`/about`), others get `/ru/about`, with automatic hreflang and canonical redirects.
 - **Optional caching** — file or Redis. `Cache::remember()` is safe even when caching is off.

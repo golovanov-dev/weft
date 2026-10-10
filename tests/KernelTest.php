@@ -439,6 +439,60 @@ final class KernelTest extends TestCase
         $this->assertStringContainsString('Sitemap: https://example.com/sitemap.xml', $response->body);
     }
 
+    public function testLlmsTxtIsServedFromACallableOnlyWhenConfigured(): void
+    {
+        $this->assertSame(404, $this->route('/llms.txt')->status);
+
+        Config::set('app.llms', static fn(): array => ['title' => 'Acme']);
+        $response = $this->route('/llms.txt');
+
+        $this->assertSame(200, $response->status);
+        $this->assertSame('text/plain; charset=utf-8', $response->headers['Content-Type']);
+        $this->assertSame("# Acme\n", $response->body);
+    }
+
+    /** A failing llms.txt generator is a 500 of that address alone, logged like any page error. */
+    public function testLlmsTxtCallableThatThrowsIsA500OfThatAddressOnly(): void
+    {
+        Config::set('app.llms', static function (): array {
+            throw new \RuntimeException('llms generator failed');
+        });
+        $logOffset = self::errorLogSize();
+        $_SERVER['REQUEST_URI'] = '/llms.txt';
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+
+        ob_start();
+        Kernel::handle();
+        $output = (string) ob_get_clean();
+
+        $this->assertStringContainsString('custom-500', $output);
+        $this->assertStringContainsString('llms generator failed', self::errorLogSince($logOffset));
+        $this->assertSame(200, $this->route('/robots.txt')->status);
+    }
+
+    public function testIndexNowKeyFileIsServedForAUsableKeyOnly(): void
+    {
+        Config::set('app.indexnow.key', 'a1B2-c3D4e5');
+        $response = $this->route('/a1B2-c3D4e5.txt');
+
+        $this->assertSame(200, $response->status);
+        $this->assertSame('text/plain; charset=utf-8', $response->headers['Content-Type']);
+        $this->assertSame('a1B2-c3D4e5', $response->body);
+        $this->assertSame(404, $this->route('/a1b2-c3d4e5.txt')->status);
+
+        Config::set('app.indexnow.key', 'short');
+        $this->assertSame(404, $this->route('/short.txt')->status);
+    }
+
+    #[RunInSeparateProcess]
+    public function testIndexNowKeyFileIsServedUnderTheBaseUri(): void
+    {
+        define('BASE_URI', '/site');
+        Config::set('app.indexnow.key', 'a1B2-c3D4e5');
+
+        $this->assertSame('a1B2-c3D4e5', $this->route('/site/a1B2-c3D4e5.txt')->body);
+    }
+
     public function testApiEndpointOutputIsCaptured(): void
     {
         $response = $this->route('/api/ping');

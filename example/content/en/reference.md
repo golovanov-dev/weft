@@ -76,7 +76,8 @@ Seo::set(['title' => …, 'description' => …, 'image' => …, 'type' => …, '
 Seo::title($t);  Seo::description($d);  Seo::noindex();  Seo::jsonLd($schema);  Seo::render();
 Schema::organization($f);  Schema::localBusiness($f);  Schema::webSite($f);  Schema::article($f);
 Schema::product($f);  Schema::faq($questions);  Schema::breadcrumbs($crumbs);   // false if a field is missing
-Sitemap::xml($routes);  Robots::text();
+Sitemap::xml($routes);  Sitemap::lastmods($routes);  Robots::text();  Robots::PRESETS;
+LlmsTxt::text();  IndexNow::keyFile();  IndexNow::keyError();
 ```
 
 ### Cache
@@ -142,6 +143,8 @@ Pages receive `$request`, `$route`, `$locale`, and on dynamic routes the params 
 
 ```bash
 vendor/bin/weft-health       # readiness report (JSON, exit code 0/1); --dev on your machine
+vendor/bin/weft-indexnow     # submit new and changed sitemap addresses to IndexNow; --dry-run lists them, --help
+vendor/bin/weft-seo-audit <site-url>  # SEO check of a live site over HTTP; --pages <url>..., --limit=N
 php scripts/sitemap.php      # write a static public/sitemap.xml
 php scripts/cache-clear.php  # delete the cache entries (rate-limit counters stay); exit 1 if the store fails
 ```

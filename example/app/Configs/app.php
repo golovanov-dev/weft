@@ -40,6 +40,8 @@ return [
         'robots' => 'index, follow',
         'robots_allow' => true,
         'robots_disallow' => ['/api/'],
+        // Per-crawler groups; presets ai-search, ai-user, ai-training (Features, "Crawlers and AI assistants").
+        // 'robots_groups' => [['agents' => ['ai-training'], 'disallow' => ['/']]],
         'json_ld' => [
             '@type' => 'SoftwareSourceCode',
             'name' => 'Weft',
@@ -54,6 +56,29 @@ return [
     // The docs URLs come from Markdown files, so the sitemap is built at request time.
     // 'app.sitemap' accepts a plain array or any callable returning one.
     'sitemap' => static fn(): array => (new DocsService())->sitemapRoutes(),
+
+    // /llms.txt for AI assistants: what the site is and where its main pages are.
+    'llms' => [
+        'summary' => 'Weft is a lightweight PHP 8.4 engine for content websites: pages are PHP files, SEO, i18n, caching, tracing and form protection are built in.',
+        'sections' => [
+            'Docs' => [
+                ['url' => '/docs/getting-started', 'title' => 'Getting started', 'notes' => 'Install and run a site'],
+                ['url' => '/docs/project-structure', 'title' => 'Project structure'],
+                ['url' => '/docs/configuration', 'title' => 'Configuration'],
+                ['url' => '/docs/features', 'title' => 'Features'],
+                ['url' => '/docs/deployment', 'title' => 'Deployment'],
+                ['url' => '/docs/reference', 'title' => 'Reference'],
+            ],
+            'Optional' => [
+                ['url' => 'https://github.com/golovanov-dev/weft', 'title' => 'Source code'],
+            ],
+        ],
+    ],
+
+    // IndexNow: the key file and vendor/bin/weft-indexnow are on when INDEXNOW_KEY is set.
+    'indexnow' => [
+        'key' => defined('INDEXNOW_KEY') ? INDEXNOW_KEY : '',
+    ],
 
     'vite' => [
         'entry' => 'src/main.js',

@@ -39,12 +39,36 @@ final class Sitemap
     }
 
     /**
+     * Every <loc> of the sitemap with its lastmod ('' when the route has none).
+     *
+     * @param array<int, string|array{path: string, lastmod?: string}> $routes
+     * @return array<string, string>
+     */
+    public static function lastmods(array $routes): array
+    {
+        $out = [];
+        foreach ($routes as $route) {
+            $path = is_array($route) ? (string) $route['path'] : (string) $route;
+            foreach (self::locales() as $locale) {
+                $out[Url::absolute($path, $locale)] = is_array($route) ? (string) ($route['lastmod'] ?? '') : '';
+            }
+        }
+        return $out;
+    }
+
+    /** @return list<string> */
+    private static function locales(): array
+    {
+        return Locale::enabled() ? Locale::supported() : [Locale::default()];
+    }
+
+    /**
      * @param array<int, string|array{path: string, lastmod?: string, changefreq?: string, priority?: string}> $routes
      */
     public static function xml(array $routes): string
     {
         $e = static fn(string $v): string => Sanitize::output($v);
-        $locales = Locale::enabled() ? Locale::supported() : [Locale::default()];
+        $locales = self::locales();
 
         $lines = [];
         $lines[] = '<?xml version="1.0" encoding="UTF-8"?>';
