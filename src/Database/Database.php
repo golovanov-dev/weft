@@ -11,17 +11,12 @@ use Golovanov\Weft\Observability\ErrorHandler;
 use Golovanov\Weft\Support\Clock;
 
 /**
- * Thin PDO (MySQL) wrapper with one connection per process.
+ * Thin PDO (MySQL) wrapper with one connection per process, configured by the DB_* constants; the
+ * session timezone is the application timezone (Clock).
  *
- * Optional: sites that don't touch a database never call it. Configuration comes from DB_*
- * constants; DB_TIMEOUT (seconds, default 5) bounds connecting. The DB session timezone is the
- * application timezone, so NOW()/TIMESTAMP agree with Clock.
- *
- * A lost connection (MySQL 2006/2013) is dropped and the call throws; the next call opens a new one,
- * except inside transaction(): there every call throws until transaction() returns, so the rest of
- * the work never runs outside the transaction. Errors are written to the error log and thrown as
- * RuntimeException with the PDOException as previous; Database sends no alert itself: an exception
- * nobody catches reaches the Kernel or the exception handler, which alert once per dedupe window.
+ * A lost connection is dropped and the call throws; the next call reconnects, except inside
+ * transaction(), where every call throws until it returns. Errors are logged and thrown as
+ * RuntimeException; the Kernel or the exception handler alerts on those nobody catches.
  */
 final class Database
 {

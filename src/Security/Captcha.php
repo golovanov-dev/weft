@@ -11,19 +11,13 @@ use Golovanov\Weft\Observability\ErrorHandler;
 use Golovanov\Weft\Observability\Trace;
 
 /**
- * Captcha verification, baked into the engine and toggled by config: Google reCAPTCHA v3
- * (app.captcha.driver `recaptcha`, the default) or Yandex SmartCaptcha (`smartcaptcha`).
+ * Captcha verification: Google reCAPTCHA v3 (app.captcha.driver `recaptcha`, the default) or Yandex
+ * SmartCaptcha (`smartcaptcha`). The provider gets only the secret and the token.
  *
- * When config('app.captcha.enabled') is false, verify() returns a passing result so forms keep
- * working in development without keys. When it is true but the site key or the secret key is
- * empty, or the driver is unknown, verify() records a `captcha.misconfigured` trace event and a line
- * in the error log either way; with DEBUG on it then passes, otherwise it fails with `misconfigured`
- * and sends a security alert (deduplicated by key). A rejection a bot does not cause — the provider
- * unreachable, the secret refused, a token for another host or action — records a `captcha.failed`
- * trace event and a line in the error log, the same for both drivers. The frontend obtains a token
- * with the site key and posts it; the backend verifies it here, sending the provider only the
- * secret and the token. reCAPTCHA is checked for score, action and host; SmartCaptcha has no score
- * or action and is checked for host.
+ * Captcha off: verify() passes. On without a key or with an unknown driver: verify() fails with
+ * `misconfigured` and sends a security alert; with DEBUG on it passes instead. A rejection a bot does
+ * not cause (the provider unreachable, the secret refused, a token for another host or action) is
+ * recorded as a `captcha.failed` trace event and an error-log line.
  */
 final class Captcha
 {
@@ -91,7 +85,7 @@ final class Captcha
         if (!self::enabled()) {
             $missing = self::missingKeys();
             if ($missing !== []) {
-                $debug = (bool) Config::env('DEBUG', false);
+                $debug = ErrorHandler::debug();
                 self::reportMisconfigured($missing, $debug);
                 if (!$debug) {
                     $result['errorCodes'] = ['misconfigured'];
@@ -159,11 +153,10 @@ final class Captcha
     }
 
     /**
-     * SmartCaptcha validate: HTTP 200 with status ok or failed, message, and host when ok. Only the
-     * status decides. A refused secret is `failed` with the message "Authentication failed…", so it
-     * becomes `invalid-input-secret`, as with reCAPTCHA (HTTP 403 is taken the same way); any other
-     * `failed` is `invalid-input-response` followed by Yandex's message, for the diagnostics. There
-     * is no score or action: a passed check scores 1.0. A string when no answer came.
+     * SmartCaptcha validate: status `ok` passes (score 1.0; there is no score or action). A refused
+     * secret (HTTP 403, or `failed` with "Authentication failed…") is `invalid-input-secret`, any
+     * other answer `invalid-input-response`; Yandex's message goes to the error log. A string when
+     * no answer came.
      *
      * @return string|array{success: bool, score: float, host: string, action: ?string, errorCodes: array<int, string>}
      */
@@ -178,19 +171,20 @@ final class Captcha
             return (string) $response['error'] !== '' ? (string) $response['error'] : 'Yandex sent no verification result';
         }
         $passed = $data['status'] === 'ok';
-        $message = trim((string) preg_replace('/[\x00-\x1F\x7F]+/', ' ', is_string($data['message'] ?? null) ? $data['message'] : ''));
-        $errorCodes = match (true) {
-            $passed => [],
-            str_starts_with($message, 'Authentication failed') => ['invalid-input-secret'],
-            $message !== '' => ['invalid-input-response', mb_substr($message, 0, 200)],
-            default => ['invalid-input-response'],
-        };
+        $message = is_string($data['message'] ?? null) ? $data['message'] : '';
+        if (!$passed) {
+            ErrorHandler::log('captcha', 0, 'SmartCaptcha did not pass a token: ' . json_encode(mb_substr($message, 0, 200), JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE), __FILE__, __LINE__);
+        }
         return [
             'success' => $passed,
             'score' => $passed ? 1.0 : 0.0,
             'host' => (string) ($data['host'] ?? ''),
             'action' => null,
-            'errorCodes' => $errorCodes,
+            'errorCodes' => match (true) {
+                $passed => [],
+                str_starts_with($message, 'Authentication failed') => ['invalid-input-secret'],
+                default => ['invalid-input-response'],
+            },
         ];
     }
 

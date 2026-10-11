@@ -91,7 +91,6 @@ final class AlertTest extends TestCase
             'app.alerts.telegram.chat_id is empty',
             'app.alerts.channels has an unknown channel "sms"',
         ], Alert::configErrors());
-        $this->assertSame([], Alert::deliveryChannels());
         $this->assertFalse(Alert::send('nope'));
         $this->assertFalse(Alert::critical('nope again'));
         $this->assertNull($captured);
@@ -186,14 +185,14 @@ final class AlertTest extends TestCase
         $this->assertSame(2, $calls);
     }
 
-    public function testFailedDeliveryDoesNotHoldBackTheNextAttempt(): void
+    /** A failing or hung channel is not waited for again by every repeat within the window. */
+    public function testFailedDeliveryHoldsTheWindowToo(): void
     {
         Trace::boot();
         $this->fakeTransport(['status' => 503, 'error' => ''], calls: $calls);
-        $this->assertFalse(Alert::critical('boom', [], 'exception:1'));
 
-        $this->fakeTransport(['status' => 202, 'error' => ''], calls: $calls);
-        $this->assertTrue(Alert::critical('boom', [], 'exception:1'));
+        $this->assertFalse(Alert::critical('boom', [], 'exception:1'));
+        $this->assertFalse(Alert::critical('boom', [], 'exception:1'));
         $this->assertSame(1, $calls);
     }
 
@@ -398,23 +397,16 @@ final class AlertTest extends TestCase
     }
 
     /** Channels go in order; one that took the alert is enough, and the others' failures are recorded. */
-    public function testOneDeliveringChannelIsEnoughAndALogNextToAFailedOneDoesNotHoldTheWindow(): void
+    public function testOneDeliveringChannelIsEnough(): void
     {
-        Config::set('app.alerts.channels', ['alertloop', 'log']);
-        $traceId = Trace::boot();
-        $this->fakeTransport(['status' => 503, 'error' => ''], calls: $calls);
-
-        $this->assertFalse(Alert::critical('boom', [], 'exception:1'));
-        $this->assertFalse(Alert::critical('boom', [], 'exception:1'));
-        $this->assertSame(2, $calls, 'the window was released: alertloop failed and log reaches nobody');
-        $this->assertSame('alertloop', $this->failureEvents($this->traceEvents($traceId))[0]['data']['channel']);
-
         $this->telegramOn();
         Config::set('app.alerts.channels', ['alertloop', 'telegram']);
+        $traceId = Trace::boot();
         self::fakeHttp(static fn(array $r): array => str_contains($r['url'], 'telegram')
             ? ['body' => '{"ok":true}']
             : ['status' => 503, 'body' => '']);
+
         $this->assertTrue(Alert::critical('boom', [], 'exception:2'));
-        $this->assertSame(['alertloop', 'telegram'], Alert::deliveryChannels());
+        $this->assertSame('alertloop', $this->failureEvents($this->traceEvents($traceId))[0]['data']['channel']);
     }
 }

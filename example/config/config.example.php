@@ -58,7 +58,7 @@ define('SMTP_USERNAME', '');                  // '' sends without AUTH
 define('SMTP_PASSWORD', '');
 
 // --- Contact form: requests are emailed to MAIL_TO; '' sends no email -------------------------
-// The form answers success only when this email was accepted or an alert reached a person.
+// The form answers success only when this email was accepted.
 define('MAIL_TO', 'hello@example.com');       // plain addresses, several separated by commas
 
 // --- Alerts (app.alerts): a channel is on when its constants are set -----------------------
@@ -66,8 +66,8 @@ define('ALERTLOOP_BASE_URL', '');   // e.g. https://alerts.example.com
 define('ALERTLOOP_API_KEY', '');
 define('TELEGRAM_BOT_TOKEN', '');   // from @BotFather
 define('TELEGRAM_CHAT_ID', '');     // a number: message the bot, then see chat.id in getUpdates (Configuration)
-define('ALERT_MAIL_TO', '');        // alert emails, sent with the email settings above; every contact
-                                    // request comes here too, so not the MAIL_TO address
+define('ALERT_MAIL_TO', '');        // alert emails, sent with the email settings above; a contact
+                                    // request alert carries no form data
 
 // --- IndexNow (optional — telling search engines about changed pages) ------------------------
 define('INDEXNOW_KEY', '');   // '' is off; generate one: php -r 'echo bin2hex(random_bytes(16));'

@@ -11,7 +11,6 @@ use Golovanov\Weft\Http\Request;
 use Golovanov\Weft\Http\RequestContext;
 use Golovanov\Weft\Security\RateLimiter;
 use Golovanov\Weft\Tests\TestCase;
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
 final class RateLimiterTest extends TestCase
@@ -134,31 +133,6 @@ final class RateLimiterTest extends TestCase
         );
     }
 
-    public function testStoreStatusReportsUnwritableCounterFiles(): void
-    {
-        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
-            $this->markTestSkipped('root can write a read-only file');
-        }
-        $this->assertTrue(RateLimiter::allow('form', 5, 60));
-        $files = glob($this->dir . '/*.cache') ?: [];
-        $this->assertCount(1, $files);
-        chmod($files[0], 0444);
-
-        try {
-            $this->assertSame(
-                [
-                    'store' => 'file',
-                    'path' => $this->dir,
-                    'writable' => false,
-                    'error' => 'PHP cannot write 1 file(s) in ' . $this->dir . ', e.g. ' . basename($files[0]),
-                ],
-                RateLimiter::storeStatus(),
-            );
-        } finally {
-            chmod($files[0], 0644);
-        }
-    }
-
     public function testRelativeCounterPathIsResolvedFromAppRoot(): void
     {
         $relative = 'ratelimit-' . bin2hex(random_bytes(4));
@@ -187,65 +161,6 @@ final class RateLimiterTest extends TestCase
         $status = RateLimiter::storeStatus();
         $this->assertSame(['store' => 'file', 'path' => $this->dir, 'writable' => true], array_slice($status, 0, 3));
         $this->assertStringStartsWith('Redis not used: ', (string) $status['error']);
-    }
-
-    /**
-     * @return array<string, array{mixed, bool}>
-     */
-    public static function redisProbeResults(): array
-    {
-        return [
-            'write accepted' => [1, true],
-            'error reply (read-only replica, OOM, NOAUTH)' => [false, false],
-            'exception' => [new \RedisException('READONLY'), false],
-        ];
-    }
-
-    #[DataProvider('redisProbeResults')]
-    public function testStoreStatusProbesRedisWithARealWrite(mixed $evalResult, bool $writable): void
-    {
-        if (!extension_loaded('redis')) {
-            $this->markTestSkipped('ext-redis is not installed');
-        }
-
-        // No Redis server in tests: the client is replaced, the store is built without connecting.
-        $redis = new class extends \Redis {
-            public mixed $evalResult = null;
-            /** @var list<string> */
-            public array $written = [];
-            /** @var list<string> */
-            public array $deleted = [];
-
-            public function eval(string $script, array $args = [], int $num_keys = 0): mixed
-            {
-                $this->written[] = $args[0] . ' ttl ' . $args[1];
-                if ($this->evalResult instanceof \Throwable) {
-                    throw $this->evalResult;
-                }
-                return $this->evalResult;
-            }
-
-            public function del(array|string $key, string ...$other_keys): \Redis|int|false
-            {
-                $this->deleted[] = (string) $key;
-                return 1;
-            }
-        };
-        $redis->evalResult = $evalResult;
-        $store = (new \ReflectionClass(RedisStore::class))->newInstanceWithoutConstructor();
-        (new \ReflectionProperty(RedisStore::class, 'redis'))->setValue($store, $redis);
-        (new \ReflectionProperty(RedisStore::class, 'prefix'))->setValue($store, 'site:');
-        (new \ReflectionProperty(RateLimiter::class, 'store'))->setValue(null, $store);
-
-        $status = RateLimiter::storeStatus();
-        $this->assertSame(['store' => 'redis', 'path' => null, 'writable' => $writable], array_slice($status, 0, 3));
-        if ($writable) {
-            $this->assertNull($status['error']);
-        } else {
-            $this->assertStringStartsWith('Redis rejected the probe write: ', (string) $status['error']);
-        }
-        $this->assertSame(['site:health:probe ttl 10'], $redis->written);
-        $this->assertSame($evalResult instanceof \Throwable ? [] : ['site:health:probe'], $redis->deleted);
     }
 
     public function testRedisStoreCountsWithItsPrefixAndTheWindow(): void

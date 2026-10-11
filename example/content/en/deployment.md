@@ -150,33 +150,35 @@ If PHP cannot write `storage/`, rate limits stop limiting: the limiter fails ope
 never locks visitors out, and the line it writes about that goes to `storage/logs/errors/`, which is
 not writable either — nothing records it but `weft-health` (`rate_limit_writable: false`).
 
+`weft-health` checks only the directories (`errors/` and `requests/` under `LOGS_PATH`, the counter
+directory), not the files in them. A file another user created without `umask 002`, such as today's
+`errors/<date>.log` or a rate-limit counter, passes it while PHP cannot write it: errors and traces of
+that day are lost, or the counter stops limiting with `Rate limit failed open: counter not writable`
+in `errors/`. Find such files with `find storage ! -perm -g+w` (and your `LOGS_PATH`, if you moved
+it) and fix them with the lines of step 5.
+
 ### What `weft-health` checks
 
 Run it in the site root. It prints a JSON report and exits with 1 when `ok` is false, 0 otherwise.
 `config` names the environment config the site loaded (`config/config.php` on a server). It runs on
-PHP's command-line `php.ini`; PHP-FPM reads its own (`/etc/php/8.4/fpm/php.ini`), so a
-`disable_functions` or `sendmail_path` set only there is not seen: `mail_available: true` does not
-prove the form can send (step 8 does). `ok` is false when any of these is bad:
+PHP's command-line `php.ini`; PHP-FPM reads its own (`/etc/php/8.4/fpm/php.ini`), so only a test
+request through the form proves it can send (step 8). `ok` is false when any of these is bad:
 
 | Field | Bad value | What to do |
 |---|---|---|
-| `production` | not empty | it names settings for a development machine: `DEBUG` or `DEV_MODE` on, `config/config.example.php` loaded (create `config/config.php`), `app.url.base` on example.com, `app.captcha.allowed_hosts` with example.com while the captcha is on, or, with `app.vite.entry` set, a `public/dist/.vite/manifest.json` without that entry (run `npm run build`). Fix each one it names |
-| `checks.<name>.ok` | `false` | a check your site added in `app/Bootstrap.php` failed; its other fields say why. This example's `contact_form` lists in `problems`: `MAIL_TO` still on example.com, or `MAIL_FROM` while an email goes (to `MAIL_TO` or through the alert channel `mail`), the template's addresses (requests would go to example.com, or be refused as sent from it, while the visitor sees "Thanks"): set your inbox and an address of your domain; `MAIL_TO is not an email address`, an entry is not a plain address, such as `Name <a@b>`, and its inbox would get no request even with an alert channel: write bare addresses, several separated by commas; `no channel: …`, the email cannot go (`MAIL_TO` empty, a mail setting missing, or `mail()` not available) and no alert channel reaches a person (`alert_channels` is empty; the channel `mail` is left out of it while `mail()` is not available, since it sends the same way): fix the email or set an alert channel. `mail_available` is `false` when, with `MAIL_DRIVER` `mail`, `mail()` is disabled (`disable_functions`) or, outside Windows, the program in `sendmail_path` does not exist: install the server's mail transport (sendmail, postfix, msmtp) or switch to `smtp`. With `no channel`, every form submission answers 503 (see "The contact form answers 503" below). `contact_form` sends nothing, so `ok: true` does not mean an email arrives: see "Monitoring" |
-| `logs_writable` | `false` | `logs_error` names what PHP cannot write: `errors/` or `requests/` under `LOGS_PATH`, today's file in it, or `requests/.traceloom.lock`. Run the `chgrp`, `chmod` and `find` lines of step 5 again, then find who created it: `ls -l` shows the owner. In `errors/`, a writer without `umask 002`: PHP-FPM (check step 6) or another user's cron lines (`sudo crontab -l -u <user>`), scripts, commands over ssh. In `requests/`, anyone but PHP, such as `php -S` started as another user |
-| `rate_limit_writable` | `false` | `rate_limit_error` names `rate_limit_path`, or how many files in it PHP cannot write and one of them: the same as for `logs_writable`; with Redis, see below |
+| `production` | not empty | it names settings for a development machine: `DEBUG` or `DEV_MODE` on, `config/config.example.php` loaded (create `config/config.php`), `app.url.base` on example.com, or, with `app.vite.entry` set, a `public/dist/.vite/manifest.json` without that entry (run `npm run build`). Fix each one it names |
+| `checks.<name>.ok` | `false` | a check your site added in `app/Bootstrap.php` failed; its other fields say why. This example delivers a request only by email, and its `contact_form` lists in `problems`: `MAIL_TO is empty`; `MAIL_TO is on example.com`, the template's address: set your inbox; `MAIL_TO is not an email address`, an entry is not a plain address, such as `Name <a@b>`: write bare addresses, several separated by commas. Set `MAIL_FROM` to an address of your domain too: mail sent from example.com is refused. `contact_form` sends nothing, so `ok: true` does not mean an email arrives: see "Monitoring" |
+| `logs_writable` | `false` | `logs_error` names what PHP cannot write: `errors/` or `requests/` under `LOGS_PATH`. Run the `chgrp`, `chmod` and `find` lines of step 5 again, then find who created it: `ls -l` shows the owner. In `errors/`, a writer without `umask 002`: PHP-FPM (check step 6) or another user's cron lines (`sudo crontab -l -u <user>`), scripts, commands over ssh. In `requests/`, anyone but PHP, such as `php -S` started as another user. Files inside are not checked: see "Who writes `storage/`" |
+| `rate_limit_writable` | `false` | `rate_limit_error` names `rate_limit_path`: the same as for `logs_writable`. Counter files inside are not checked: a line `Rate limit failed open` in `errors/` names one |
 | `rate_limit_store` | `file` while `cache_driver` is `redis` | Redis is not used, the cache and counters are per server: see below |
-| `proxy_ips_error` | not `null` | `PROXY_IPS` is not an array, so no proxy is trusted: write `define('PROXY_IPS', [...])` |
-| `proxy_ips_invalid` | not empty | these `PROXY_IPS` entries are ignored: replace them with IP addresses or CIDR ranges; for `localhost` write `'127.0.0.1'` and/or `'::1'` |
-| `proxy_ips_trust_all` | not empty | these entries are too wide for a proxy (`0.0.0.0/0`, `::/0`, an IPv4 range wider than `/8`, an IPv6 one wider than `/16`): list only your proxies (below) |
-| `captcha_missing_keys` | not empty, with `DEBUG` off | every form submission is rejected: set the keys or disable the captcha (below) |
-| `alert_errors` | not empty, with `DEBUG` off | a channel in `alert_channels` lacks a setting and is skipped: set it or remove the channel (below) |
-| `mail_errors` | not empty, with `DEBUG` off | `app.mail` cannot send: set what it names (below) |
-| `indexnow_error` | not `null` | `app.indexnow.key` (`INDEXNOW_KEY` in this example) is not 8–128 letters, digits and dashes, so `/<key>.txt` is a 404 and `weft-indexnow` refuses to run: generate one as in [Configuration](/docs/configuration), or set `''` to turn IndexNow off |
-| `seo_errors` | not empty | a name in `app.seo.robots_groups` that starts with `ai-` or `ai_` and is not a preset (they are lowercase: `ai-search`, `ai-user`, `ai-training`), or a group key other than `agents`, `allow`, `disallow`: correct it; or a `robots.txt` / `llms.txt` file in `public/` (in `WEB_ROOT`, when `config/config.php` sets it) that the web server serves instead of `app.seo.robots_groups` / `app.llms`: delete the file |
+| `proxy_ips_errors` | not empty | `PROXY_IPS` is not an array (no proxy is trusted: write `define('PROXY_IPS', [...])`), an entry is ignored (not an IP address or CIDR range; for `localhost` write `'127.0.0.1'` and/or `'::1'`), or an entry is too wide for a proxy (`0.0.0.0/0`, `::/0`, an IPv4 range wider than `/8`, an IPv6 one wider than `/16`): list only your proxies (below) |
+| `captcha_missing_keys` | not empty | every form submission is rejected: set the keys or disable the captcha (below) |
+| `alert_errors` | not empty | a channel in `alert_channels` lacks a setting and is skipped: set it or remove the channel (below) |
+| `mail_errors` | not empty | `app.mail` cannot send: set what it names (below) |
+| `seo_errors` | not empty | a `robots.txt` / `llms.txt` file in `public/` (in `WEB_ROOT`, when `config/config.php` sets it) that the web server serves instead of `app.seo.robots_groups` / `app.llms`: delete the file |
 
-With `DEBUG` on, `captcha_missing_keys`, `alert_errors` and `mail_errors` are still listed but do not fail
-the check. On a development machine, `vendor/bin/weft-health --dev` lists `production` without
-failing on it; every other field counts as on a server.
+On a development machine, `vendor/bin/weft-health --dev` lists `production` without failing on it;
+every other field counts as on a server.
 
 `captcha_missing_keys` names keys of `app.captcha`: `site_key`, `secret_key`, and `driver` when it is
 not `recaptcha` or `smartcaptcha`. In this example the keys come from `CAPTCHA_SITE_KEY` and
@@ -195,12 +197,10 @@ or `smtp`), and, with `smtp`, `app.mail.smtp.host` or `encryption`. In this exam
 `MAIL_FROM`, `MAIL_DRIVER` and `SMTP_*`. `mail_driver` shows the driver in use.
 `rate_limit_path` is `app.rate_limit.path`, else `ratelimit/` in `app.cache.path`
 (`storage/cache/ratelimit` by default); a relative one is taken from the site root (`APP_ROOT`), so
-`weft-health` and the site use the same directory whatever their working directory. A counter file in
-it that PHP cannot overwrite (created by a script without `umask 002`) also makes
-`rate_limit_writable` false; `rate_limit_error` names one of them.
+`weft-health` and the site use the same directory whatever their working directory.
 
-With `app.cache.driver` set to `redis`, the engine sends `PING` after connecting, and `weft-health`
-writes a probe counter to Redis (ten-second TTL, deleted at once).
+With `app.cache.driver` set to `redis`, the engine sends `PING` after connecting; when Redis fails,
+the request goes on with files.
 
 | `rate_limit_store` | `rate_limit_error` contains | Cause |
 |---|---|---|
@@ -212,13 +212,14 @@ writes a probe counter to Redis (ten-second TTL, deleted at once).
 | `file` | `Redis AUTH failed` (Redis 5 and older) | `REDIS_PASSWORD` is wrong, or Redis has no password: then set it to `''` |
 | `file` | `socket error on read socket` or `read error on connection` | Redis accepted the connection and did not answer within a second: overloaded, or a firewall drops the traffic |
 | `file` | `DB index is out of range` | `REDIS_DB` is higher than Redis allows (16 databases by default) |
-| `redis` | `Redis rejected the probe write` | a read-only replica, `maxmemory` reached under the `noeviction` policy, or a Redis user not allowed to run `EVAL` |
 
 When Redis is not used, the cache falls back to files as well. The cache and the counters share one
 connection per request. If Redis does not answer, every request that uses the cache, a rate limit or
 an alert with a dedupe key waits for it once, up to 2 seconds to connect and 1 second for a reply,
-until Redis is back; so does `weft-health`. In the `redis` row pages are still served: a cache read or
-write Redis rejects is skipped, and a form submission whose counter it rejects is allowed.
+until Redis is back; so does `weft-health`. A Redis that takes the connection but rejects commands
+(a read-only replica, `maxmemory` under `noeviction`) still serves pages: a cache read or write it
+rejects is skipped, and a form submission whose counter it rejects is allowed. `weft-health` does not
+see that (`rate_limit_store: redis`); only the `Rate limit failed open` lines below do.
 
 The site logs the reason to `errors/<date>.log` under `LOGS_PATH`, in lines like these (time in
 `APP_TIMEZONE`):
@@ -231,7 +232,7 @@ The site logs the reason to `errors/<date>.log` under `LOGS_PATH`, in lines like
 ```
 
 The first line comes from form submissions and `weft-health`, the second from page views; both mean
-Redis is not used. The last two mean Redis rejects commands, as in the `redis` row.
+Redis is not used. The last two mean Redis rejects commands, as described above.
 
 ## Document root is `public/`
 
@@ -439,8 +440,8 @@ define('PROXY_IPS', ['203.0.113.10', '173.245.48.0/20', '2400:cb00::/32']);
 
 Each entry is an IP address or a CIDR range. A host name is ignored: write the address — for
 `localhost`, `'127.0.0.1'` and/or `'::1'`; for a Docker service name such as `nginx`, its address
-(below). `weft-health` lists such entries under `proxy_ips_invalid`. It also fails on `0.0.0.0/0` and
-`::/0` (`proxy_ips_trust_all`): every address then counts as a proxy, the client IP is always the
+(below). `weft-health` lists such entries under `proxy_ips_errors`. It also fails on `0.0.0.0/0` and
+`::/0`: every address then counts as a proxy, the client IP is always the
 proxy's, and the whole site shares one rate limit. Ranges wider than `/8` (IPv4) or `/16` (IPv6)
 fail too: visitors from them share that limit or, with a forged `X-Forwarded-For`, pick their own
 IP. Cloudflare's ranges and a Docker network (`/16`) pass.
@@ -532,11 +533,11 @@ When it fails, fix what the report names ("What `weft-health` checks" above), th
 until it exits with 0.
 
 Neither of them sees whether the contact form's email arrives. `weft-health` checks the addresses and
-the mail settings, and with the `mail` driver that PHP can hand `mail()` a message; the mail server
-can still refuse it or the email can bounce later (on Windows, `mail()` is only tried when a message
-is sent; an SMTP server is only reached when a message is sent). So after each deploy and after any
-change to `MAIL_TO`, `MAIL_FROM`, `MAIL_DRIVER`, `SMTP_*` or the server's mail setup, send one request
-through the form yourself and check that it reached your inbox (or your alert channel). If the form
+the mail settings only; `mail()` is only tried and an SMTP server only reached when a message is
+sent, and the mail server can still refuse the email or it can bounce later. So after each deploy and
+after any change to `MAIL_TO`, `MAIL_FROM`, `MAIL_DRIVER`, `SMTP_*` or the server's mail setup, send
+one request through the form yourself and check that it reached your inbox. An alert comes either way
+(`Contact request not delivered` when the email was not accepted), so it proves nothing. If the form
 answered 503, or the email did not come, look in the error log:
 
 ```bash
@@ -708,7 +709,7 @@ need them.
 
 ### The contact form answers 503
 
-`503` means the email was not accepted and no alert reached a person. Each such request leaves
+`503` means the email was not accepted: an alert does not deliver a request. Each such request leaves
 `Contact request not delivered` in `storage/logs/errors/`, ending with `trace:<id>`. A line with the
 same trace id, `Mail not sent (<driver>): <reason>`, says why the email did not go: `mail() failed`
 (PHP could not hand it to the server's mail transport: `sendmail_path` in `php.ini`, or your host's
@@ -721,7 +722,10 @@ mail setup), `mail() is not available` (with `MAIL_DRIVER` `mail`, PHP-FPM's `ph
 `certificate verify failed` after `SMTP connection to ssl://…` or `SMTP STARTTLS handshake failed`
 (the certificate is for another name than `SMTP_HOST`, or PHP has no CA bundle to check it: set
 `openssl.cafile` in `php.ini`), or a mail setting that is missing. With
-`MAIL_TO` empty there is no such line. Why an alert channel did not take it is in the `alert.failed`
+`MAIL_TO` empty there is no such line.
+
+Alert channels have nothing to do with the 503: fixing one does not deliver a request. If the alert
+itself did not come, why a channel did not take it is in the `alert.failed`
 events of that trace, one per channel (`channel`): for `alertloop`, `status` `401` is a key AlertLoop
 refuses, `403` a key it accepts but that may not send this alert (check the key's scope and sources
 in AlertLoop), `0` with `transport_error: true` is AlertLoop not reached; for `telegram`, `error` is
@@ -733,10 +737,8 @@ fields, so read the raw line:
 grep -h '<trace_id>' storage/logs/requests/*.jsonl | grep alert.failed
 ```
 
-No `alert.failed` event means no alert channel reaching a person is set up: see `alert_channels` and
-`alert_errors` in `vendor/bin/weft-health`. To fix it, make the email work (`MAIL_TO` and, where
-`mail()` does not work, `MAIL_DRIVER` `smtp` with `SMTP_*`) or set an alert channel (see
-[Configuration](/docs/configuration)). The visitor's message stays in the `request_start` event of
+To fix a 503, make the email work: `MAIL_TO` and, where `mail()` does not work, `MAIL_DRIVER`
+`smtp` with `SMTP_*` (see [Configuration](/docs/configuration)). The visitor's message stays in the `request_start` event of
 the same trace, among the form fields, for `app.trace.retention_days`, and only while the request
 body is at most 8 KB. A message not in Latin script goes over that within the form's
 4,000-character limit: from about 3,600 Cyrillic characters, or about 1,300 when the form is sent
@@ -763,13 +765,12 @@ without JavaScript (URL-encoded, six bytes a character). Then, as with `app.trac
 - [ ] HTTPS on for every page; HSTS (`app.security.hsts`) only after reading "HTTPS and HSTS" above,
   and `hsts_subdomains` only if every subdomain serves HTTPS
 - [ ] keys set for whichever of captcha / alerts / mail you use; a captcha enabled with a key missing
-  passes forms while `DEBUG` is on and rejects every submission with it off, an alert channel without
+  rejects every submission (it passes them only while `DEBUG` is on), an alert channel without
   its settings is skipped — `weft-health` lists them under `captcha_missing_keys`, `alert_errors`
   and `mail_errors`
 - [ ] `app.captcha.allowed_hosts` lists your real domain, if the captcha is on
-- [ ] the contact form has a channel: `MAIL_TO` (your inbox, not example.com) with working mail
-  (`mail()`, or `MAIL_DRIVER` `smtp` with `SMTP_*`), or an alert channel that reaches a person;
-  otherwise every submission answers 503 and leaves `Contact request not delivered` in
+- [ ] the contact form can email: `MAIL_TO` (your inbox, not example.com) with working mail
+  (`mail()`, or `MAIL_DRIVER` `smtp` with `SMTP_*`); otherwise every submission answers 503 and leaves `Contact request not delivered` in
   `storage/logs/errors/` (see "The contact form answers 503" above)
 - [ ] a test request sent through the contact form reached you, after this deploy and after every
   change of the mail settings: `weft-health` does not check delivery (see "Monitoring")

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Golovanov\Weft\Observability;
 
-use Golovanov\Traceloom\Writer\JsonlFileWriter;
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\RequestContext;
 use Golovanov\Weft\Support\Clock;
@@ -161,47 +160,27 @@ final class ErrorHandler
     }
 
     /**
-     * What PHP cannot write among the logs, for health checks: the error log directory and today's
-     * file in it, and the web's traces (LOGS_PATH/requests, whatever SAPI calls this), as traceloom
-     * itself checks them; null when everything is writable. A missing directory counts as writable
-     * when PHP can create it. Only checks: creates nothing and changes nothing.
+     * What PHP cannot write among the logs, for health checks: the error log directory and the web's
+     * traces (LOGS_PATH/requests); null when both are writable. Only checks: creates nothing.
      */
     public static function logsError(): ?string
     {
-        $problems = [];
-        $errors = self::unwritable(self::directory(), [Clock::date('Y-m-d') . '.log']);
-        if ($errors !== []) {
-            $problems[] = 'PHP cannot write ' . implode(', ', $errors);
-        }
-        $traces = JsonlFileWriter::writeProblem(Trace::configuration('fpm-fcgi'));
-        if ($traces !== null) {
-            $problems[] = $traces;
-        }
-        return $problems !== [] ? implode('; ', $problems) : null;
+        $unwritable = array_filter([self::directory(), Config::logsPath() . '/requests'], static fn(string $dir): bool => !self::writable($dir));
+        return $unwritable !== [] ? 'PHP cannot write ' . implode(', ', $unwritable) : null;
     }
 
     /**
-     * The directory, or those of the named files in it that exist, PHP cannot write. A directory
-     * that does not exist yet is writable when its nearest existing parent is.
+     * Whether PHP can write in $dir, or create it when it does not exist yet (its nearest existing
+     * parent is a writable directory).
      *
      * @internal Also used by RateLimiter::storeStatus().
-     * @param list<string> $files
-     * @return list<string>
      */
-    public static function unwritable(string $dir, array $files): array
+    public static function writable(string $dir): bool
     {
-        if (!file_exists($dir)) {
-            $parent = dirname($dir);
-            while (!file_exists($parent) && dirname($parent) !== $parent) {
-                $parent = dirname($parent);
-            }
-            return is_dir($parent) && is_writable($parent) ? [] : [$dir];
+        while (!file_exists($dir) && dirname($dir) !== $dir) {
+            $dir = dirname($dir);
         }
-        if (!is_dir($dir) || !is_writable($dir)) {
-            return [$dir];
-        }
-        $paths = array_map(fn (string $file) => $dir . '/' . $file, $files);
-        return array_values(array_filter($paths, fn (string $path) => is_file($path) && !is_writable($path)));
+        return is_dir($dir) && is_writable($dir);
     }
 
     private static function directory(): string

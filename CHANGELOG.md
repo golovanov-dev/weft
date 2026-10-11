@@ -62,34 +62,32 @@ deployment guide, "Updating".
 - Alert channels: `app.alerts.channels` lists any of `alertloop`, `telegram` (a bot message,
   `app.alerts.telegram.bot_token` and `chat_id`), `mail` (an email to `app.alerts.mail_to` through
   `Mail`) and `log` (a line in `errors/`), tried in order. `alert.failed` trace events name the
-  `channel`. `Alert::channels()`, `Alert::deliveryChannels()` and `Alert::configErrors()` tell what is
-  set up.
+  `channel`. `Alert::channels()` and `Alert::configErrors()` tell what is set up.
 - Yandex SmartCaptcha: `app.captcha.driver` `smartcaptcha` verifies its tokens with the same keys and
   the same diagnostics as reCAPTCHA (`recaptcha`, the default); only the secret and the token are
   sent to Yandex, and the host is checked against `allowed_hosts`. The page loads Yandex's widget
   itself: in the example that means changing three files, listed in the features guide.
 - `vendor/bin/weft-health`, run in the site root, prints the health report of the site it boots
   (through the site's `bootstrap.php`) and exits with 1 (`ok: false`) when logs or rate-limit
-  counters cannot be written (`errors/` and the site's `requests/` under `LOGS_PATH`, though the
-  command runs from the console, with today's files and traceloom's lock file; the counter directory
-  or a file in it; with Redis, a probe write), when counters went to files while `app.cache.driver`
-  is `redis`, when `PROXY_IPS` is not an array or has an entry that is invalid or too wide for a
-  proxy (`/0`, IPv4 wider than `/8`, IPv6 wider than `/16`), outside `DEBUG` when the captcha, a
-  listed alert channel or `app.mail` lacks a setting, when `production` names a development setting (`DEBUG`,
-  `DEV_MODE`, `config/config.example.php` loaded, `app.url.base` or, with the captcha on,
-  `app.captcha.allowed_hosts` on example.com, no built `app.vite.entry` in the Vite manifest) unless
-  run with `--dev`, and when a check of the site fails. New fields: `config` (the environment config
-  loaded), `production`, `checks`, `cache_driver`, `rate_limit_store`, `rate_limit_path`,
-  `rate_limit_writable`, `rate_limit_error`, `proxy_ips_error`, `proxy_ips_invalid`,
-  `proxy_ips_trust_all`, `captcha_missing_keys`, `alert_channels`, `alert_errors`, `mail_driver`,
-  `mail_errors`, `logs_error`. Engine side: `Captcha::missingKeys()`, `Alert::configErrors()`, `ErrorHandler::logsError()`,
-  `RateLimiter::storeStatus()`, `Request::invalidProxyIps()`, `Request::trustAllProxyIps()`,
-  `Request::proxyIpsError()`, `Vite::manifestError()`.
+  counters cannot be written (the directories `errors/` and the site's `requests/` under
+  `LOGS_PATH`, though the command runs from the console; the counter directory), when counters went
+  to files while `app.cache.driver` is `redis`, when `PROXY_IPS` is not an array or has an entry
+  that is invalid or too wide for a proxy (`/0`, IPv4 wider than `/8`, IPv6 wider than `/16`), when
+  the captcha, a listed alert channel or `app.mail` lacks a setting, when a static `robots.txt` or
+  `llms.txt` hides the generated one (`seo_errors`), when `production` names a development setting
+  (`DEBUG`, `DEV_MODE`, `config/config.example.php` loaded, `app.url.base` on example.com, no built
+  `app.vite.entry` in the Vite manifest) unless run with `--dev`, and when a check of the site
+  fails. New fields: `config` (the environment config loaded), `production`, `checks`,
+  `cache_driver`, `rate_limit_store`, `rate_limit_path`, `rate_limit_writable`, `rate_limit_error`,
+  `proxy_ips_errors`, `captcha_missing_keys`, `alert_channels`, `alert_errors`, `mail_driver`,
+  `mail_errors`, `seo_errors`, `logs_error`. Engine side: `Captcha::missingKeys()`,
+  `Alert::configErrors()`, `ErrorHandler::logsError()`, `RateLimiter::storeStatus()`,
+  `Request::proxyIpsErrors()`, `Vite::manifestError()`.
 - `Health::check($name, $check)` adds a check of the site to `weft-health`: register it in
   `app/Bootstrap.php`; the callable returns the fields to show and `ok`, reported under
   `checks.<name>`, and anything but `ok => true`, or an exception, fails the report. The example
-  checks that its contact form has a channel and shows where requests go
-  (`checks.contact_form.mail_to`).
+  checks that `MAIL_TO`, where its contact form sends requests, holds real plain addresses
+  (`checks.contact_form`).
 - **Action.** `Request::isHttps()`: a request from a proxy in `PROXY_IPS` came over HTTPS when the last value of
   its `X-Forwarded-Proto` is `https`; from any other address, or without the header, when
   `$_SERVER['HTTPS']` is set and not `off`. `example/public/index.php` uses it for the `Secure` flag
@@ -113,14 +111,12 @@ deployment guide, "Updating".
   presets `ai-search`, `ai-user`, `ai-training`) with their `allow` and `disallow` paths. Without
   it robots.txt is unchanged.
 - `/llms.txt` in the llmstxt.org format from `app.llms`, an array or a callable returning one;
-  without the key it stays a 404. `weft-health` fails (`seo_errors`) on an `ai-…` agent name in
-  `robots_groups` that is not a preset or a group key other than `agents`, `allow`, `disallow`, and
-  on a `public/robots.txt` or `public/llms.txt` the web server serves instead of the configured
-  one: delete the file.
+  without the key it stays a 404. `weft-health` fails (`seo_errors`) on a `public/robots.txt` or
+  `public/llms.txt` the web server serves instead of the configured one: delete the file.
 - IndexNow: with `app.indexnow.key` set, the key is served at `/<key>.txt`, and
   `vendor/bin/weft-indexnow` (for cron) submits the sitemap addresses that are new or have a new
-  `lastmod`, remembering only what the endpoint accepted; `--dry-run` lists them. `weft-health`
-  fails on a malformed key (`indexnow_error`).
+  `lastmod`, remembering only what the endpoint accepted; `--dry-run` lists them; it refuses to
+  run with a malformed key.
 - `vendor/bin/weft-seo-audit <site-url>` checks the pages in a live site's sitemap over HTTP —
   status 200, title, meta description, canonical, one `h1`, JSON-LD that parses, no `noindex` —
   and exits with 1 when one fails, for CI. It needs `ext-dom`, now in `suggest`. A site behind
@@ -211,11 +207,12 @@ deployment guide, "Updating".
   arrived was `ok`, so a 503 `{"error":"maintenance"}` counted as success. Where your code reads an
   error response's body, branch on `status`, not on `ok`.
 - **Action.** An alert with a dedupe key is sent at most once per five minutes: a repeat within that window is
-  not sent and `Alert::send()` returns `false`; a failed delivery does not open the window. The
+  not sent and `Alert::send()` returns `false`, whether the first send was delivered or not. The
   window is kept with the rate-limit counters, and if that store fails the alert is sent. Where
   every occurrence must arrive, send the alert without a dedupe key.
 - **Action.** The example's contact form answers success only when the request was delivered: the email to
-  `MAIL_TO` was accepted or the alert reached a person. Otherwise it answers 503 with a
+  `MAIL_TO` was accepted (the alert it also sends carries no form data and is no delivery).
+  Otherwise it answers 503 with a
   message for the visitor and writes `Contact request not delivered` to `errors/`; a failed
   `mail()` writes a line too. A 422 lists the fields as `errors: [{name, text}]` (was `fields`),
   the rate limit counts after validation, and a form posted without JavaScript is redirected (303)
@@ -223,8 +220,8 @@ deployment guide, "Updating".
   `app/Services/ContactService.php`, `pages/contact.php`, `frontend/src/contact.js`, the
   `status` strings of `lang/en/contact.php` and, for `weft-health`, the `contact_form` check:
   `app/Bootstrap.php` whole, or, if yours has code of its own, the `Health::check()` line of `init()`,
-  the methods `contactForm()`, `recipients()` and `mailAvailable()` and the four `use` lines. Set
-  `MAIL_TO` or an alert channel, or every submission answers 503.
+  the method `contactForm()` and the three `use` lines. Set `MAIL_TO`, or every submission answers
+  503.
 - **Action.** The example's environment constants: `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` are now
   `CAPTCHA_SITE_KEY` and `CAPTCHA_SECRET_KEY`; new are `MAIL_DRIVER` and `SMTP_*` (email) and
   `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ALERT_MAIL_TO` (alert channels) and `INDEXNOW_KEY`;
@@ -282,8 +279,10 @@ deployment guide, "Updating".
   out of range, which used to select database 0) or rejects commands (a read-only replica,
   `maxmemory` under `noeviction`) no longer makes cached pages fail with 500. On a rejected
   connection the cache and rate limits fall back to files, as with an unreachable Redis; a rejected
-  read is a miss, a write is skipped, and the error log gets one `Cache store failed` line per
-  request. If `weft-health` reports `rate_limit_store: file`, `rate_limit_error` says why.
+  read is a miss and a write is skipped. When phpredis throws on the rejection, the rest of the
+  request uses files and the error log gets one `Cache store failed` line per request; a cache
+  write it answers with `false` instead is skipped without a line (a rejected counter is always
+  logged as `Rate limit failed open`). If `weft-health` reports `rate_limit_store: file`, `rate_limit_error` says why.
 - **Action.** The example under PHP's built-in server (`php -S … -t public public/index.php`) serves its CSS, JS
   and images; before, every asset request returned 404. If your site copied
   `example/public/index.php` and you develop with `php -S`, copy the new `cli-server` block at its
@@ -296,6 +295,8 @@ deployment guide, "Updating".
   `RequestContext::hasRequest()`, `logPath()` and `setLogPath()`, and reading the manifest from
   `public/dist/manifest.json`, where Vite before 5 wrote it. Use `locale()` instead of `LOCALE` and
   `RequestContext::request() !== null` instead of `hasRequest()`; build assets with Vite 5 or later.
+- **Action.** `RedisStore::client()` is removed: if your code read the store's `Redis` connection, open your own
+  `new \Redis()` with the `REDIS_*` settings.
 
 ## 0.1.3 - 2026-08-24
 

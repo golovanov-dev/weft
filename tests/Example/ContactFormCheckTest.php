@@ -4,120 +4,47 @@ declare(strict_types=1);
 
 namespace Golovanov\Weft\Tests\Example;
 
+use App\Bootstrap;
+use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Tests\TestCase;
 
 /**
- * The example's `contact_form` health check (App\Bootstrap::contactForm()), run in a separate PHP
- * whose mail() is switched on or off with -d: disable_functions=mail, or sendmail_path pointing at
- * a program that exists or not (Windows does not look at sendmail_path).
+ * The example's `contact_form` health check (App\Bootstrap::contactForm()): a request is delivered
+ * only by email, so MAIL_TO must hold real plain addresses.
  */
 final class ContactFormCheckTest extends TestCase
 {
-    public function testARealAddressWithWorkingMailIsOk(): void
+    public static function setUpBeforeClass(): void
     {
-        $check = $this->contactForm('hi@site.test', 'noreply@site.test');
-
-        $this->assertSame([
-            'ok' => true,
-            'mail_to' => 'hi@site.test',
-            'mail_from' => 'noreply@site.test',
-            'mail_driver' => 'mail',
-            'mail_available' => true,
-            'alert_channels' => [],
-            'problems' => [],
-        ], $check);
+        require_once __DIR__ . '/../../example/app/Bootstrap.php';
     }
 
-    public function testTemplateAddressesFailItEvenWithAnAlertChannel(): void
+    public function testRealAddressesAreOk(): void
     {
-        $check = $this->contactForm('hello@example.com', 'noreply@example.com');
+        Config::set('app.contact.mail_to', 'hi@site.test, sales@site.test');
 
-        $this->assertFalse($check['ok']);
-        $this->assertSame(['MAIL_TO is on example.com', 'MAIL_FROM is on example.com'], $check['problems']);
-
-        $check = $this->contactForm('hi@site.test', 'noreply@Mail.Example.COM', alertloop: true);
-        $this->assertSame(['MAIL_FROM is on example.com'], $check['problems']);
-        $this->assertSame(['alertloop'], $check['alert_channels']);
+        $this->assertSame(
+            ['ok' => true, 'mail_to' => 'hi@site.test, sales@site.test', 'problems' => []],
+            Bootstrap::contactForm(),
+        );
     }
 
-    public function testNoChannelFailsIt(): void
+    public function testEmptyMailToFailsItWhateverTheAlertChannels(): void
     {
-        $check = $this->contactForm('', 'noreply@site.test');
+        Config::set('app.contact.mail_to', '');
+        Config::set('app.alerts.channels', ['alertloop']);
+        Config::set('app.alertloop', ['base_url' => 'https://alerts.site.test', 'api_key' => 'k']);
 
-        $this->assertSame(['no channel: MAIL_TO is empty and no alert channel reaches a person'], $check['problems']);
-        // MAIL_FROM on example.com matters when an email goes: to MAIL_TO or through the alert channel mail.
-        $this->assertTrue($this->contactForm('', 'noreply@example.com', alertloop: true)['ok']);
-        $check = $this->contactForm('', 'noreply@example.com', alertMailTo: 'ops@site.test');
-        $this->assertSame(['MAIL_FROM is on example.com'], $check['problems']);
+        $this->assertSame(['MAIL_TO is empty'], Bootstrap::contactForm()['problems']);
     }
 
-    /** MAIL_TO takes addresses separated by commas; each must be plain, as Mail sends only to those. */
-    public function testMailToIsOneOrSeveralPlainAddresses(): void
+    /** Mail sends only to plain addresses, and the template's address reaches nobody. */
+    public function testAnAddressThatIsNotPlainOrOnExampleComFailsIt(): void
     {
-        $this->assertTrue($this->contactForm('hi@site.test, sales@site.test', 'noreply@site.test')['ok']);
+        Config::set('app.contact.mail_to', 'hi@site.test, Sales <sales@site.test>');
+        $this->assertSame(['MAIL_TO is not an email address'], Bootstrap::contactForm()['problems']);
 
-        $check = $this->contactForm('hi@site.test, Sales <sales@site.test>', 'noreply@site.test');
-        $this->assertSame(['MAIL_TO is not an email address'], $check['problems']);
-        // An alert channel does not make up for it: the MAIL_TO inbox would get nothing.
-        $this->assertFalse($this->contactForm('Sales <sales@site.test>', 'noreply@site.test', alertloop: true)['ok']);
-
-        $this->assertSame(['MAIL_TO is on example.com'], $this->contactForm('hi@site.test, hello@example.com', 'noreply@site.test')['problems']);
-    }
-
-    public function testMailSettingsThatCannotSendFailItWhenMailIsTheOnlyChannel(): void
-    {
-        $check = $this->contactForm('hi@site.test', 'noreply@site.test', driver: 'smtp');
-        $this->assertSame(['no channel: app.mail.smtp.host is empty and no alert channel reaches a person'], $check['problems']);
-
-        $check = $this->contactForm('hi@site.test', 'noreply@site.test', php: '-d disable_functions=mail');
-        $this->assertFalse($check['mail_available']);
-        $this->assertSame(['no channel: mail() is not available and no alert channel reaches a person'], $check['problems']);
-
-        $check = $this->contactForm('hi@site.test', 'noreply@site.test', alertloop: true, php: '-d disable_functions=mail');
-        $this->assertTrue($check['ok']);
-
-        // The alert channel mail goes through the same mail(), so it is no channel either.
-        $check = $this->contactForm('', 'noreply@site.test', alertMailTo: 'ops@site.test', php: '-d disable_functions=mail');
-        $this->assertSame([], $check['alert_channels']);
-        $this->assertSame(['no channel: MAIL_TO is empty and no alert channel reaches a person'], $check['problems']);
-        $this->assertSame(['mail'], $this->contactForm('', 'noreply@site.test', alertMailTo: 'ops@site.test')['alert_channels']);
-
-        if (PHP_OS_FAMILY !== 'Windows') {
-            $check = $this->contactForm('hi@site.test', 'noreply@site.test', php: '-d sendmail_path=' . escapeshellarg('/nonexistent/sendmail -t -i'));
-            $this->assertFalse($check['mail_available']);
-            // A quoted program is found; one without a path is the shell's to find, not judged.
-            $quoted = '-d sendmail_path=' . escapeshellarg('"' . PHP_BINARY . '" -t -i');
-            $this->assertTrue($this->contactForm('hi@site.test', 'noreply@site.test', php: $quoted)['mail_available']);
-            $this->assertTrue($this->contactForm('hi@site.test', 'noreply@site.test', php: '-d sendmail_path=sendmail')['mail_available']);
-        }
-    }
-
-    /**
-     * @param string|null $php php -d options; null: a sendmail_path to a program that exists
-     * @param string $alertMailTo '' or the address of the alert channel mail
-     * @return array<string, mixed>
-     */
-    private function contactForm(string $mailTo, string $mailFrom, string $driver = 'mail', bool $alertloop = false, ?string $php = null, string $alertMailTo = ''): array
-    {
-        $root = dirname(__DIR__, 2);
-        $app = [
-            'contact' => ['mail_to' => $mailTo],
-            'mail' => ['driver' => $driver, 'from' => $mailFrom],
-            'alerts' => ['channels' => [...($alertloop ? ['alertloop'] : []), ...($alertMailTo !== '' ? ['mail'] : [])], 'mail_to' => $alertMailTo],
-            'alertloop' => ['base_url' => 'https://alerts.site.test', 'api_key' => 'k'],
-        ];
-        $dir = $this->makeTempDir('weft-contact-check-');
-        file_put_contents($dir . '/check.php', '<?php'
-            . "\nrequire " . var_export($root . '/vendor/autoload.php', true) . ';'
-            . "\nrequire " . var_export($root . '/example/app/Bootstrap.php', true) . ';'
-            . "\nGolovanov\Weft\Config\Config::set('app', " . var_export($app, true) . ');'
-            . "\necho json_encode(App\Bootstrap::contactForm());\n");
-        $php ??= '-d sendmail_path=' . escapeshellarg(PHP_BINARY);
-
-        $output = shell_exec(escapeshellarg(PHP_BINARY) . ' ' . $php . ' ' . escapeshellarg($dir . '/check.php'));
-        $this->removeDir($dir);
-        $check = json_decode((string) $output, true);
-        $this->assertIsArray($check, (string) $output);
-        return $check;
+        Config::set('app.contact.mail_to', 'hi@site.test, hello@Mail.Example.COM');
+        $this->assertSame(['MAIL_TO is on example.com'], Bootstrap::contactForm()['problems']);
     }
 }

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Golovanov\Weft\Tests\Seo;
 
 use Golovanov\Weft\Config\Config;
-use Golovanov\Weft\Observability\Health;
 use Golovanov\Weft\Seo\IndexNow;
 use Golovanov\Weft\Tests\TestCase;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
@@ -164,7 +163,7 @@ final class IndexNowTest extends TestCase
         $this->assertSame([], $this->sent);
     }
 
-    /** A key outside the protocol's format: the command refuses and health fails. */
+    /** A key outside the protocol's format: the command refuses. */
     public function testAMalformedKeyIsRefused(): void
     {
         // The key the guide's command generates is accepted.
@@ -177,8 +176,5 @@ final class IndexNowTest extends TestCase
             [1, '', "weft-indexnow: app.indexnow.key must be 8 to 128 characters: letters, digits, dashes.\n"],
             $this->submit(),
         );
-        $report = Health::report(dev: true);
-        $this->assertFalse($report['ok']);
-        $this->assertSame('app.indexnow.key must be 8 to 128 characters: letters, digits, dashes', $report['indexnow_error']);
     }
 }

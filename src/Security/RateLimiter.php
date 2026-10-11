@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Golovanov\Weft\Security;
 
+use Golovanov\Weft\Cache\Cache;
 use Golovanov\Weft\Cache\FileStore;
 use Golovanov\Weft\Cache\RedisStore;
 use Golovanov\Weft\Config\Config;
@@ -17,15 +18,12 @@ use Golovanov\Weft\Observability\ErrorHandler;
  *   - throttle(): at most one request per interval for a bucket + client IP.
  *   - honeypot(): treat a filled hidden field as a bot.
  *
- * Counters live in Redis when app.cache.driver is 'redis' (on the cache's connection, under the
- * site prefix but outside the cache's keys), otherwise in files under app.rate_limit.path
- * (relative to APP_ROOT; default: ratelimit/ in the cache directory) — whether or not caching is
- * enabled. Cache::flush() leaves them. Each increment is atomic and the window starts at the first
- * hit; later hits never extend it. One file increment in PRUNE_CHANCE deletes the expired counter
- * files. If the counter cannot be written, the request is allowed (fail-open) and the failure is
- * logged.
- *
- * Alert keeps its "already reported" window in the same store (claim()).
+ * Counters live in Redis when app.cache.driver is 'redis', otherwise in files under
+ * app.rate_limit.path (default: ratelimit/ in the cache directory), whether or not caching is
+ * enabled; Cache::flush() leaves them. The window starts at the first hit and is never extended.
+ * When a counter cannot be written, the request is allowed and the failure is logged; when Redis
+ * fails, the rest of the request counts in files. Alert keeps its "already reported" window here
+ * too (claim()).
  */
 final class RateLimiter
 {
@@ -80,47 +78,28 @@ final class RateLimiter
     }
 
     /**
-     * Where counters are kept and whether they can be written, for health checks: the store
-     * allow() and throttle() use, with the same fallback from Redis to files. `path` is the
-     * counter directory, null for Redis; `writable` is false when PHP cannot write the store. For
-     * Redis it is a real write: a probe counter with a short TTL, deleted afterwards. For files it
-     * only checks, creating nothing: existing files in the directory must be writable too, and a
-     * missing directory counts as writable when PHP can create it. `error` says what is wrong: why
-     * Redis was not used or rejected the probe, or what PHP cannot write.
+     * Where counters are kept and whether they can be written, for health checks: the store allow()
+     * and throttle() use. Redis is in use only when it answered PING on connecting; the counter
+     * directory must be writable, or creatable when missing. `error` says why Redis was not used,
+     * or what PHP cannot write.
      *
      * @return array{store: 'redis'|'file', path: ?string, writable: bool, error: ?string}
      */
     public static function storeStatus(): array
     {
-        $store = self::store();
-        if ($store instanceof RedisStore) {
-            try {
-                $error = $store->increment('health:probe', 10) === null
-                    ? 'Redis rejected the probe write: ' . ($store->client()->getLastError() ?? 'no reason given')
-                    : null;
-                $store->forget('health:probe');
-            } catch (\Throwable $e) {
-                $error = 'Redis rejected the probe write: ' . $e->getMessage();
-            }
-            return ['store' => 'redis', 'path' => null, 'writable' => $error === null, 'error' => $error];
+        if (self::store() instanceof RedisStore) {
+            return ['store' => 'redis', 'path' => null, 'writable' => true, 'error' => null];
         }
-
         $dir = self::directory();
-        // A counter file PHP cannot overwrite fails open just like an unwritable directory.
-        $unwritable = ErrorHandler::unwritable($dir, array_map('basename', glob($dir . '/*.cache') ?: []));
+        $writable = ErrorHandler::writable($dir);
         $errors = array_filter([
             self::$redisError !== null ? 'Redis not used: ' . self::$redisError : null,
-            match (true) {
-                $unwritable === [] => null,
-                $unwritable === [$dir] => 'PHP cannot write ' . $dir,
-                default => 'PHP cannot write ' . count($unwritable) . ' file(s) in ' . $dir
-                    . ', e.g. ' . basename($unwritable[0]),
-            },
+            $writable ? null : 'PHP cannot write ' . $dir,
         ]);
         return [
             'store' => 'file',
             'path' => $dir,
-            'writable' => $unwritable === [],
+            'writable' => $writable,
             'error' => $errors !== [] ? implode('; ', $errors) : null,
         ];
     }
@@ -135,20 +114,6 @@ final class RateLimiter
     {
         $count = self::increment('claim:' . $key, $seconds, 'Claim failed open');
         return $count === null || $count <= 1;
-    }
-
-    /**
-     * Drop a claim, so the next claim() of $key succeeds. Best-effort: a store error is ignored.
-     *
-     * @internal Used by Alert.
-     */
-    public static function release(string $key): void
-    {
-        try {
-            self::store()->forget('claim:' . $key);
-        } catch (\Throwable) {
-            // The claim then simply expires with its window.
-        }
     }
 
     /** Count one hit for the current client; null when the counter is unavailable. */
@@ -187,6 +152,9 @@ final class RateLimiter
         } catch (\Throwable $e) {
             $count = null;
             $error = $e->getMessage();
+            if (self::$store instanceof RedisStore) {
+                self::$store = new FileStore(self::directory());
+            }
         }
         if ($count === null) {
             ErrorHandler::log('rate_limit', 500, $failure . ': ' . $error, __FILE__, __LINE__);
@@ -196,8 +164,7 @@ final class RateLimiter
 
     private static function store(): FileStore|RedisStore
     {
-        // After a failed Redis command the request goes on with files (RedisStore::failed()).
-        if (self::$store !== null && !(self::$store instanceof RedisStore && self::$store->failed())) {
+        if (self::$store !== null) {
             return self::$store;
         }
 
@@ -213,17 +180,10 @@ final class RateLimiter
         return self::$store = new FileStore(self::directory());
     }
 
-    /**
-     * Counter directory: app.rate_limit.path, else ratelimit/ in the cache directory (app.cache.path,
-     * else storage/cache; see Config::path()), where Cache::flush() does not reach.
-     */
+    /** Counter directory: app.rate_limit.path, else ratelimit/ in the cache directory, where Cache::flush() does not reach. */
     private static function directory(): string
     {
         $dir = (string) Config::get('app.rate_limit.path', '');
-        if ($dir !== '') {
-            return Config::path($dir);
-        }
-        $cache = (string) Config::get('app.cache.path', '');
-        return rtrim(Config::path($cache !== '' ? $cache : 'storage/cache'), '/\\') . '/ratelimit';
+        return $dir !== '' ? Config::path($dir) : rtrim(Cache::directory(), '/\\') . '/ratelimit';
     }
 }

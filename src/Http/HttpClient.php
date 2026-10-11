@@ -8,13 +8,9 @@ use Golovanov\Weft\Observability\ErrorHandler;
 use Golovanov\Weft\Observability\Trace;
 
 /**
- * Simple cURL-based HTTP client for outbound requests to external services.
- *
- * Safe defaults: SSL verification on, short timeouts, JSON body/decoding, and outbound
- * request/response events written to the current request's trace timeline (log => true).
- * The traced URL has no query string; the query goes in as a parsed `query` array. The request
- * body is traced as Trace::body() describes (contents unless app.trace.log_body is off); the
- * response body is never traced.
+ * cURL HTTP client for outbound requests: SSL verification on, short timeouts, JSON body and
+ * decoding, and request/response events on the trace (log => true; the response body is never
+ * traced).
  *
  * `ok` is true only when a response arrived, its status is below 400 and, with decodeJson, its
  * body is valid JSON. `status` and the (decoded) `body` are returned either way.

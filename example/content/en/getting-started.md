@@ -71,7 +71,7 @@ php -S localhost:8000 -t public public/index.php
 ```
 
 Open <http://localhost:8000>. The contact form answers 503 here unless PHP `mail()` works on your
-machine (on Windows or without sendmail it usually does not), SMTP is set up or an alert channel is: see
+machine (on Windows or without sendmail it usually does not) or SMTP is set up: see
 [Deployment](/docs/deployment), "The contact form answers 503". Then check the environment:
 
 ```bash
@@ -97,9 +97,7 @@ vendor/bin/weft-health --dev
   "rate_limit_path": "/path/to/site/storage/cache/ratelimit",
   "rate_limit_writable": true,
   "rate_limit_error": null,
-  "proxy_ips_error": null,
-  "proxy_ips_invalid": [],
-  "proxy_ips_trust_all": [],
+  "proxy_ips_errors": [],
   "multilingual": false,
   "cache_enabled": true,
   "captcha_enabled": false,
@@ -112,13 +110,8 @@ vendor/bin/weft-health --dev
     "contact_form": {
       "ok": false,
       "mail_to": "hello@example.com",
-      "mail_from": "noreply@example.com",
-      "mail_driver": "mail",
-      "mail_available": true,
-      "alert_channels": [],
       "problems": [
-        "MAIL_TO is on example.com",
-        "MAIL_FROM is on example.com"
+        "MAIL_TO is on example.com"
       ]
     }
   }
@@ -127,12 +120,10 @@ vendor/bin/weft-health --dev
 
 `--dev` is for your machine: `production` lists what a server must not have, without failing the
 check. On the server you run it without `--dev`. On a fresh copy `ok` is false and the exit code is
-1 because of `contact_form`: `MAIL_TO` and `MAIL_FROM` are still the template's example.com
-addresses, so a request would go to example.com even where `mail()` works. Outside Windows without
-a mail transport (sendmail, postfix, msmtp) `mail_available` is `false` as well. `contact_form`
-sends nothing: on Windows `mail_available` is `true` and the form still answers 503 here, because
-`mail()` finds no mail server only when it sends. On a server, PHP-FPM reads its own `php.ini`,
-which `weft-health` does not see: there a test request through the form is the proof. Set your own addresses in a `config/config.php`
+1 because of `contact_form`: `MAIL_TO` is still the template's example.com address, so a request
+would go to example.com. `contact_form` checks the address, not that an email goes out: without a
+mail transport the form answers 503, and a test request through the form is the proof. Set your
+own `MAIL_TO` and `MAIL_FROM` in a `config/config.php`
 (see [Configuration](/docs/configuration)) or leave them until you deploy; anything else that makes
 `ok` false, most often that `storage/` is not writable, needs fixing now. What each field means and how to fix it:
 [Deployment](/docs/deployment), "What `weft-health` checks".

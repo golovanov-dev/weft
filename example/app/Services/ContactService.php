@@ -14,16 +14,16 @@ use Golovanov\Weft\Observability\Trace;
  * Contact request handling — business logic kept out of the API endpoint and the view.
  *
  * A request is delivered by an email to app.contact.mail_to (one address or several separated by
- * commas; Mail, app.mail.*) and by an alert to the channels in app.alerts.channels (a "sensitive
- * spot": a real person is trying to reach the owner). It counts as delivered when the email was accepted or the alert reached a person; an
- * undelivered request leaves a line in the error log, as does a failed email. Swap the delivery
- * for a CRM without touching the endpoint or the template.
+ * commas; Mail, app.mail.*), and only by it: an undelivered request leaves a line in the error log.
+ * The alert channels in app.alerts.channels are told that a request came and whether the email was
+ * accepted, with no form data in the alert (a channel such as Telegram is no place for a visitor's
+ * details). Swap the delivery for a CRM without touching the endpoint or the template.
  */
 final class ContactService
 {
     /**
      * @param array<string, mixed> $data validated, sanitised fields
-     * @return bool true when the email was accepted or the alert reached a person
+     * @return bool true when the email was accepted
      */
     public function submit(array $data): bool
     {
@@ -33,22 +33,16 @@ final class ContactService
             'has_repo' => !empty($data['project_url']),
         ]);
 
-        // No dedupe key: every request must arrive, and a repeated key would be held back.
-        $alerted = Alert::send(
-            message: sprintf(
-                "New contact request (%s) from %s <%s>",
-                $data['type'] ?? 'other',
-                $data['name'] ?? '',
-                $data['email'] ?? '',
-            ),
-            severity: Alert::INFO,
-            type: 'business_event',
-            context: $data,
-        );
         $mailed = $this->email($data);
+        // No dedupe key: every request is announced. The trace id finds it in the logs.
+        Alert::send(
+            message: $mailed ? 'New contact request' : 'Contact request not delivered',
+            severity: $mailed ? Alert::INFO : Alert::CRITICAL,
+            type: 'business_event',
+        );
 
-        if (!$alerted && !$mailed) {
-            ErrorHandler::log('contact', 503, 'Contact request not delivered: no email was accepted and no alert reached a person', __FILE__, __LINE__);
+        if (!$mailed) {
+            ErrorHandler::log('contact', 503, 'Contact request not delivered: the email was not accepted', __FILE__, __LINE__);
             return false;
         }
         return true;

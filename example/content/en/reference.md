@@ -44,9 +44,7 @@ Arr::get($arr, 'a.b.c', $def);  Str::slug($s);  Str::limit($s, 160);  Json::deco
 ```php
 $request->method;  $request->path;  $request->clientIp;  $request->post;  $request->rawBody;
 $request->isPost();  $request->wantsJson();  $request->header('authorization');  $request->body();
-Request::invalidProxyIps();   // PROXY_IPS entries that are neither an IP nor a CIDR range
-Request::trustAllProxyIps();  // PROXY_IPS entries too wide for a proxy (IPv4 wider than /8, IPv6 than /16)
-Request::proxyIpsError();     // why PROXY_IPS is unusable (not an array), or null
+Request::proxyIpsErrors();    // what is wrong with PROXY_IPS: not an array, an entry ignored or too wide
 Request::isHttps();           // came over HTTPS: X-Forwarded-Proto from PROXY_IPS, else $_SERVER['HTTPS']
 
 Pagination::fromRequest($request, $total, $perPage);  // ->page ->pages ->offset ->limit ->prev ->next ->url($n)
@@ -115,7 +113,7 @@ Headers::send();
 ```php
 Trace::event($name, $data);  Trace::id();  Trace::isActive();   // LOGS_PATH/requests on the web, LOGS_PATH/cli in scripts
 Alert::send($msg, $severity, $type, $dedupeKey, $context, $category);  Alert::critical($msg, $ctx);
-Alert::channels();  Alert::deliveryChannels();  Alert::configErrors();   // app.alerts.channels, the set-up ones reaching a person, what is missing
+Alert::channels();  Alert::configErrors();   // app.alerts.channels, what is missing
 ErrorHandler::log($type, $code, $msg, $file, $line);  ErrorHandler::debug();
 Health::check($name, fn() => ['ok' => true, ...]);   // a site check in vendor/bin/weft-health
 ```

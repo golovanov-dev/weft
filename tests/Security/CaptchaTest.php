@@ -306,7 +306,7 @@ final class CaptchaTest extends TestCase
      */
     public static function smartCaptchaRejections(): iterable
     {
-        yield 'token failed' => [['body' => ['status' => 'failed', 'message' => 'Token invalid or expired.', 'host' => '']], ['invalid-input-response', 'Token invalid or expired.'], ''];
+        yield 'token failed' => [['body' => ['status' => 'failed', 'message' => 'Token invalid or expired.', 'host' => '']], ['invalid-input-response'], ''];
         yield 'foreign host' => [['body' => ['status' => 'ok', 'host' => 'evil.example']], [], 'host "evil.example" is not in app.captcha.allowed_hosts'];
         // How Yandex answers a wrong secret: HTTP 200, status failed (its validation docs).
         yield 'secret refused' => [['body' => ['status' => 'failed', 'message' => 'Authentication failed. Secret has not provided.']], ['invalid-input-secret'], 'Yandex refused the secret key'];

@@ -6,8 +6,8 @@ namespace Golovanov\Weft\Tests\Observability;
 
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Observability\ErrorHandler;
-use Golovanov\Weft\Support\Clock;
 use Golovanov\Weft\Tests\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 final class ErrorHandlerTest extends TestCase
 {
@@ -100,64 +100,12 @@ final class ErrorHandlerTest extends TestCase
         $this->assertSame('', self::errorLogSince($logOffset));
     }
 
-    public function testLogsErrorNamesTodaysLogFilePhpCannotWrite(): void
+    /** weft-health runs from the console, but the traces it checks are the web's, in requests/. */
+    #[DataProvider('logDirectories')]
+    public function testLogsErrorNamesAFileInPlaceOfALogDirectory(string $name): void
     {
-        ErrorHandler::log('test', 0, 'make sure the file exists', __FILE__, __LINE__);
         $this->assertNull(ErrorHandler::logsError());
-
-        $file = Config::logsPath() . '/errors/' . Clock::date('Y-m-d') . '.log';
-        chmod($file, 0444);
-        try {
-            $error = ErrorHandler::logsError();
-        } finally {
-            chmod($file, 0644);
-        }
-        $this->assertSame('PHP cannot write ' . $file, $error);
-    }
-
-    /** weft-health runs from the console, but the traces to check are the web's. */
-    public function testLogsErrorChecksTheWebTraceDirectoryFromAScript(): void
-    {
-        $dir = Config::logsPath() . '/requests';
-        @mkdir($dir, 0777, true);
-        $file = $dir . '/' . gmdate('Y-m-d') . '.jsonl';
-        $existed = is_file($file);
-        touch($file);
-        chmod($file, 0444);
-        try {
-            $error = ErrorHandler::logsError();
-        } finally {
-            chmod($file, 0644);
-            if (!$existed) {
-                unlink($file);
-            }
-        }
-        $this->assertStringContainsString($dir . DIRECTORY_SEPARATOR . basename($file), (string) $error);
-    }
-
-    /** A lock file in requests/ PHP cannot open stops every web trace. */
-    public function testLogsErrorNamesTheTraceLockFilePhpCannotWrite(): void
-    {
-        $dir = Config::logsPath() . '/requests';
-        @mkdir($dir, 0777, true);
-        $lock = $dir . '/.traceloom.lock';
-        $existed = is_file($lock);
-        touch($lock);
-        chmod($lock, 0444);
-        try {
-            $error = ErrorHandler::logsError();
-        } finally {
-            chmod($lock, 0644);
-            if (!$existed) {
-                unlink($lock);
-            }
-        }
-        $this->assertStringContainsString($dir . DIRECTORY_SEPARATOR . '.traceloom.lock', (string) $error);
-    }
-
-    public function testLogsErrorNamesAFileInPlaceOfTheLogDirectory(): void
-    {
-        $dir = Config::logsPath() . '/errors';
+        $dir = Config::logsPath() . '/' . $name;
         $aside = $dir . '-aside-' . getmypid();
         if (is_dir($dir)) {
             rename($dir, $aside);
@@ -174,5 +122,11 @@ final class ErrorHandlerTest extends TestCase
             }
         }
         $this->assertSame('PHP cannot write ' . $dir, $error);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function logDirectories(): array
+    {
+        return ['error log' => ['errors'], 'web traces' => ['requests']];
     }
 }

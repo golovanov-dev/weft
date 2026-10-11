@@ -179,29 +179,20 @@ final class Trace
     }
 
     /**
-     * Where a process of the given SAPI writes its traces: LOGS_PATH/cli for console scripts
-     * (`cli`, `phpdbg`), LOGS_PATH/requests for the web, PHP's built-in server included. A web
-     * request and a script never share a trace file, and each directory has one writer.
-     *
-     * @internal $sapi is for configuration(), through which ErrorHandler::logsError() checks the
-     *   web's directory from a console script, and for tests.
+     * Where this process writes its traces: LOGS_PATH/cli for console scripts (`cli`, `phpdbg`),
+     * LOGS_PATH/requests for the web, PHP's built-in server included. A web request and a script
+     * never share a trace file, and each directory has one writer.
      */
-    public static function directory(string $sapi = PHP_SAPI): string
+    public static function directory(): string
     {
-        return Config::logsPath() . (in_array($sapi, ['cli', 'phpdbg'], true) ? '/cli' : '/requests');
+        return Config::logsPath() . (in_array(PHP_SAPI, ['cli', 'phpdbg'], true) ? '/cli' : '/requests');
     }
 
-    /**
-     * The traceloom configuration of a process of the given SAPI: its directory() and the
-     * app.trace settings. boot() writes with it; ErrorHandler::logsError() checks with it whether
-     * the web can write its traces.
-     *
-     * @internal $sapi is for ErrorHandler::logsError() and tests.
-     */
-    public static function configuration(string $sapi = PHP_SAPI): Configuration
+    /** The traceloom configuration boot() writes with: directory() and the app.trace settings. */
+    private static function configuration(): Configuration
     {
         return Configuration::create(
-            logDirectory: self::directory($sapi),
+            logDirectory: self::directory(),
             sensitiveKeys: self::sensitiveKeys(),
             retentionDays: self::retentionDays(),
             trustIncomingTraceId: (bool) (defined('TRACE_TRUST_INCOMING') ? TRACE_TRUST_INCOMING : false),

@@ -45,7 +45,6 @@ final class HealthTest extends TestCase
     {
         $this->makeSite('config.example.php', "define('DEBUG', true);\ndefine('DEV_MODE', true);", [
             'url' => ['base' => 'https://example.com'],
-            'captcha' => ['enabled' => true, 'allowed_hosts' => ['www.example.com']],
             'vite' => ['entry' => 'src/main.js'],
         ]);
 
@@ -57,9 +56,8 @@ final class HealthTest extends TestCase
             'DEV_MODE is on',
             'config/config.example.php is loaded',
             'app.url.base is on example.com',
-            'app.captcha.allowed_hosts lists example.com',
-        ], array_slice($report['production'], 0, 5));
-        $this->assertStringEndsWith('manifest.json not found', $report['production'][5]);
+        ], array_slice($report['production'], 0, 4));
+        $this->assertStringEndsWith('manifest.json not found', $report['production'][4]);
 
         [$status, $report] = $this->runHealth('--dev');
         $this->assertSame(0, $status, json_encode($report) ?: '');
@@ -98,14 +96,14 @@ final class HealthTest extends TestCase
     }
 
     /**
-     * A misspelled preset or group key, and a static file in public/ that the web server serves instead
-     * of the configured robots groups; a static llms.txt without app.llms is the site's own and fine.
+     * A static file in public/ that the web server serves instead of the configured robots groups; a
+     * static llms.txt without app.llms is the site's own and fine.
      */
     public function testRobotsSettingsThatDoNotApplyFailIt(): void
     {
         $this->makeSite('config.php', '', [
             'url' => ['base' => 'https://site.test'],
-            'seo' => ['robots_groups' => [['agents' => ['ai_training'], 'dissallow' => ['/']]]],
+            'seo' => ['robots_groups' => [['agents' => ['ai-training'], 'disallow' => ['/']]]],
         ]);
         mkdir($this->site . '/public');
         file_put_contents($this->site . '/public/robots.txt', "User-agent: *\nAllow: /\n");
@@ -115,8 +113,6 @@ final class HealthTest extends TestCase
 
         $this->assertSame(1, $status);
         $this->assertSame([
-            'app.seo.robots_groups: dissallow is not a group key (agents, allow, disallow)',
-            'app.seo.robots_groups: ai_training is not a preset',
             str_replace('\\', '/', $this->site) . '/public/robots.txt is served instead of app.seo.robots_groups',
         ], str_replace('\\', '/', $report['seo_errors']));
     }

@@ -289,11 +289,10 @@ final class TraceTest extends TestCase
         $this->assertSame($expected, $this->configuration()->retentionDays);
     }
 
-    /** A console script and the web never write to one trace directory. */
-    public function testScriptTracesGoToCliAndWebTracesToRequests(): void
+    /** A console script writes its traces to cli/, never to the web's requests/. */
+    public function testScriptTracesGoToCli(): void
     {
         $logs = Config::logsPath();
-        $this->assertSame($logs . '/requests', Trace::directory('cli-server'));
         $this->assertSame($logs . '/cli', Trace::directory());
 
         $id = Trace::boot();

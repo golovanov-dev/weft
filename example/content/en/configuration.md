@@ -291,10 +291,10 @@ what is missing under `mail_errors` (`app.mail.from`, `app.mail.smtp.host` with 
 settings is skipped, the error log gets a line, and `vendor/bin/weft-health` lists the setting under
 `alert_errors`.
 
-The example's contact form sends every request as an alert too (`business_event`, with the
-visitor's name, email and message), so each request reaches every channel, Telegram included.
-With `ALERT_MAIL_TO` the same as `MAIL_TO`, every request arrives as two emails: give alerts an
-address of their own.
+The example's contact form also sends an alert for every request (`business_event`, with the trace
+id and no form data): `New contact request` at `info` when the email was accepted, `Contact request
+not delivered` at `critical` when it was not. With `ALERT_MAIL_TO` the same as `MAIL_TO`, every request arrives as two
+emails: give alerts an address of their own.
 
 ### Trace
 

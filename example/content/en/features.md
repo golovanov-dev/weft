@@ -101,8 +101,7 @@ user asked about, `ai-training` collect training data. A crawler obeys only the 
 so each group also gets `robots_disallow`, and a group's `allow` inside one of those paths is left
 out: it would reopen it. Operators say their user-triggered fetchers may ignore
 robots.txt. In `DEBUG` or with `robots_allow` off, groups are left out and everything is closed.
-Preset names are lowercase; a name starting with `ai-` or `ai_` that is not a preset, or a group key
-other than `agents`, `allow` and `disallow`, fails `weft-health` (`seo_errors`).
+Preset names are lowercase; any other name is written as a user-agent as is.
 
 A `robots.txt` or `llms.txt` file in `public/` is served by the web server instead of the engine's,
 and the settings here do nothing: delete it. With `robots_groups` or `llms` set, `weft-health` fails
@@ -342,8 +341,8 @@ The example's `api/contact.php` runs them in this order, and each one answers be
 3. the fields — 422 with the list, before the rate limit, so correcting a field is not throttled;
 4. rate limit — 429;
 5. captcha — 400; last, as it costs a request to Google or Yandex;
-6. record and deliver (`ContactService`) — the request goes into the trace, then out by email or an
-   alert; 503 when neither reached a person, 200 otherwise.
+6. record and deliver (`ContactService`) — the request goes into the trace, then out by email, and
+   an alert without the form data says it came; 503 when the email was not accepted, 200 otherwise.
 
 Rate-limit counters live in Redis when `app.cache.driver` is `redis`, on the cache's connection and
 apart from its keys (in files when Redis cannot be used, as for the cache), otherwise in files under
@@ -362,7 +361,7 @@ another server proxying to PHP it is the proxy's address, so every visitor share
 example's contact form then takes one submission per 5 seconds for the whole site. List the proxies
 in the `PROXY_IPS` constant (`config/config.php`) as IP addresses or CIDR ranges
 (`'173.245.48.0/20'`, `'2400:cb00::/32'`); a host name such as `localhost` or a Docker service name
-is ignored, and `vendor/bin/weft-health` lists it under `proxy_ips_invalid`. For a request from one of them, the client IP is the rightmost `X-Forwarded-For` entry
+is ignored, and `vendor/bin/weft-health` lists it under `proxy_ips_errors`. For a request from one of them, the client IP is the rightmost `X-Forwarded-For` entry
 that is not in `PROXY_IPS`; entries further left are set by the client and ignored. No other header
 is read: a proxy that passes the address only in `X-Real-IP` or `X-Client-Ip`, or an entry that is
 not an IP, leaves the proxy's address in place. To see which address Weft took, look at `client_ip`
@@ -382,11 +381,11 @@ keys. With the flag on and a key missing (or an unknown driver), `verify()` reco
 `DEBUG` on it passes, so the form works locally; with `DEBUG` off it fails with the error code
 `misconfigured` and sends a critical alert (category `security`), so in production every submission
 is rejected until both keys are set. `vendor/bin/weft-health` lists the missing keys under
-`captcha_missing_keys` and, with `DEBUG` off, fails. A rejection the visitor did not cause — the
+`captcha_missing_keys` and fails. A rejection the visitor did not cause — the
 provider unreachable (`request-failed`), the secret refused (`invalid-input-secret`), a token for a
 host not in `app.captcha.allowed_hosts` or for another action — records a `captcha.failed` trace
-event and a line in the error log with the reason. A low score, or a SmartCaptcha token that failed
-(`invalid-input-response`, followed in `errorCodes` by Yandex's message), records nothing.
+event and a line in the error log with the reason. A low score records nothing; a SmartCaptcha
+token that failed (`invalid-input-response`) leaves Yandex's message in the error log.
 
 `Csrf::check()`, `RateLimiter::honeypot()` and `Captcha::verify()` take the field as it came. A
 value that is not a string is a wrong CSRF token (`_csrf[]=…`) and no captcha token
@@ -397,8 +396,8 @@ Validation before the rate limit lets a visitor correct a field and send again a
 `api/contact.php` in this example for the complete flow: it answers the form's script with JSON
 (`422` lists the fields to correct as `errors: [{name, text}]`, `419` asks to refresh the page) and
 redirects a form posted without JavaScript back to the contact page with `?status=`. It answers
-success only when the request was delivered — the email to `MAIL_TO` was accepted or the alert
-reached a person — and `503` otherwise: where to see why, and where the message stays, is in
+success only when the request was delivered — the email to `MAIL_TO` was accepted — and `503`
+otherwise: where to see why, and where the message stays, is in
 [Deployment](/docs/deployment), "The contact form answers 503".
 
 ### SmartCaptcha in this example
@@ -483,22 +482,15 @@ mail get the message, type, category, site, trace id and `$context` as text. The
 severity, type, category and message, without `$context`.
 
 Delivery is synchronous and best-effort: nothing is retried and no failure reaches your code.
-Channels are tried one after another, so a send waits for each in turn: `alertloop` up to
-`app.alertloop.timeout` seconds, `telegram` up to 4, `mail` up to twice `app.mail.smtp.timeout` with
-the `smtp` driver and TLS, plus the DNS lookup (see "Mail"; with `mail`, as long as the local sendmail
-takes). An alert with a dedupe key also
-waits for the counter store that keeps its window (below): with Redis, 1 second at most for each of
-its two commands, plus, when this request has not connected to Redis yet, 2 seconds to connect and 1
-for each of `AUTH`, `SELECT` and `PING` — 7 seconds more at most. It is not silent, though — a
+Channels are tried one after another, each up to its own timeout; an alert with a dedupe key also
+waits for the counter store that keeps its window (below). It is not silent, though — a
 channel that fails is recorded on the request trace as an `alert.failed` event (channel, status,
 transport flag, event type and category; never the alert body, never the bot token). A listed
 channel without its settings is skipped and the error log says so once per request.
 
 An alert with a dedupe key is sent once per five minutes: a repeat within that window is dropped
 locally and `send()` returns `false`, so an error hit on every request does not make every request
-wait for the channels. The window opens when a send starts and is dropped unless a channel that
-reaches a person took the alert (or `log` is the only channel), so the next repeat tries again. It
-is kept where rate-limit counters are (Redis or files); if that store fails, the alert is sent.
+wait for the channels, even when the first send failed. It is kept where rate-limit counters are (Redis or files); if that store fails, the alert is sent.
 Alerts without a dedupe key, such as `business_event`, are always sent.
 
 Unhandled exceptions and fatals alert automatically. For an exception thrown by a page or an API
@@ -606,22 +598,20 @@ are left out on purpose — preloading them would undo the code split.
 
 `vendor/bin/weft-health`, run in the site root, prints a JSON report and exits with 1 when the site
 is not ready to serve: logs or rate-limit counters PHP cannot write, an unusable `PROXY_IPS`, a
-captcha, an alert channel or mail without its settings, a malformed IndexNow key, robots or
-`llms.txt` settings that do not apply, development settings (`DEBUG`, example.com, no built assets),
+captcha, an alert channel or mail without its settings, a static `robots.txt` or `llms.txt` that
+hides the generated one, development settings (`DEBUG`, example.com, no built assets),
 or a failed check of the site. What each field means: [Deployment](/docs/deployment), "What
 `weft-health` checks".
 
 The engine cannot know what your site needs, so the site adds its own checks in `app/Bootstrap.php`.
 A check returns the fields to show and `ok`; anything but `ok => true`, or an exception, fails the
-report. A minimal check that a contact form has a channel (this example's
-`App\Bootstrap::contactForm()` also fails on example.com addresses, on mail settings that cannot
-send and on a `mail()` PHP cannot call):
+report. A minimal check that a contact form has an address to email (this example's
+`App\Bootstrap::contactForm()` also fails on example.com and on an address that is not plain):
 
 ```php
 Health::check('contact_form', static function (): array {
     $mailTo = (string) Config::get('app.contact.mail_to', '');
-    $alerts = Alert::deliveryChannels();   // listed, set up, and reaching a person
-    return ['ok' => $mailTo !== '' || $alerts !== [], 'mail_to' => $mailTo, 'alert_channels' => $alerts];
+    return ['ok' => $mailTo !== '', 'mail_to' => $mailTo];
 });
 ```
 

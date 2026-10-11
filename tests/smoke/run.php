@@ -267,8 +267,12 @@ for ($i = 0; $i < 25 && $found === []; $i++) {
 }
 check(($found[0]['To'][0]['Address'] ?? '') === 'owner@smoke.test', 'the request reached MAIL_TO through SMTP', 'Mailpit at ' . $mailpit . ' has no message with ' . $marker);
 $received = array_map(static fn(string $line): mixed => json_decode($line, true), @file($alerts, FILE_IGNORE_NEW_LINES) ?: []);
-$alert = array_values(array_filter($received, static fn(mixed $a): bool => is_array($a) && str_contains((string) $a['body'], $marker)))[0] ?? [];
-check(($alert['path'] ?? '') === '/v1/events' && ($alert['key'] ?? '') === 'smoke-key', 'the request alert reached AlertLoop through HttpClient', json_encode($received) ?: '');
+$alert = array_values(array_filter($received, static fn(mixed $a): bool => is_array($a) && str_contains((string) $a['body'], 'New contact request')))[0] ?? [];
+check(
+    ($alert['path'] ?? '') === '/v1/events' && ($alert['key'] ?? '') === 'smoke-key' && !str_contains((string) $alert['body'], $marker),
+    'the request alert reached AlertLoop through HttpClient, without the form data',
+    json_encode($received) ?: '',
+);
 
 $catchAll = request($base . '/smoke/a/b');
 check($catchAll['status'] === 200 && str_contains($catchAll['body'], 'catch-all path=a/b'), 'catch-all page gets the rest of the path', 'got ' . $catchAll['status']);

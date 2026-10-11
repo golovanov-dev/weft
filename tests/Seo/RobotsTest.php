@@ -137,22 +137,6 @@ final class RobotsTest extends TestCase
     }
 
     /** A preset name or a group key with a typo is reported (health fails on it); robots.txt is written as it is. */
-    public function testATypoInAGroupIsReportedAndWrittenAsItIs(): void
-    {
-        Config::set('app.seo.robots_groups', [
-            ['agents' => ['AI-Training', 'ai-search', 'Aidan'], 'disallow' => ['/']],
-            ['agents' => 'ai_training', 'dissallow' => ['/']],
-        ]);
-
-        $this->assertSame([
-            'app.seo.robots_groups: AI-Training is not a preset',
-            'app.seo.robots_groups: dissallow is not a group key (agents, allow, disallow)',
-            'app.seo.robots_groups: ai_training is not a preset',
-        ], Robots::errors());
-        $this->assertStringEndsWith("\nUser-agent: ai_training\nAllow: /\n", Robots::text());
-        $this->assertStringContainsString("\nUser-agent: AI-Training\nUser-agent: OAI-SearchBot\n", Robots::text());
-    }
-
     /** DEBUG closes the site for every crawler: no group reopens it. */
     #[RunInSeparateProcess]
     public function testDebugIgnoresGroups(): void

@@ -119,8 +119,13 @@ final class RedisStoreTest extends TestCase
             $this->markTestSkipped('ext-redis is not installed');
         }
 
-        // No Redis server in tests: the shared store gets a client that records the keys it is sent.
+        // No Redis server in tests: the shared connection is a client that records the keys it is sent.
         $redis = new class extends \Redis {
+            public function isConnected(): bool
+            {
+                return true;
+            }
+
             /** @var list<string> */
             public array $keys = [];
             /** @var array<string, string> */
@@ -150,9 +155,7 @@ final class RedisStoreTest extends TestCase
                 return [];
             }
         };
-        $shared = (new \ReflectionClass(RedisStore::class))->newInstanceWithoutConstructor();
-        (new \ReflectionProperty(RedisStore::class, 'redis'))->setValue($shared, $redis);
-        (new \ReflectionProperty(RedisStore::class, 'shared'))->setValue(null, $shared);
+        (new \ReflectionProperty(RedisStore::class, 'connection'))->setValue(null, $redis);
         Config::set('app.url.base', 'https://Example.com');
         Config::set('app.cache', ['enabled' => true, 'driver' => 'redis']);
 
@@ -266,6 +269,9 @@ final class RedisStoreTest extends TestCase
             Config::set('app.cache', ['enabled' => true, 'driver' => 'redis', 'path' => $dir]);
 
             $this->assertNull(Cache::get('page'));
+            // The closed connection is not opened again for the rate limiter: it goes to files.
+            $this->assertTrue(RateLimiter::allow('contact', 5, 60));
+            $this->assertSame('file', RateLimiter::storeStatus()['store']);
 
             // The server takes connections in order: this one comes after any the store made.
             $last = stream_socket_client('tcp://127.0.0.1:' . $port);
@@ -280,6 +286,65 @@ final class RedisStoreTest extends TestCase
             $this->removeDir($dir);
         }
     }
+
+    /**
+     * A Redis that wants a password: it prints "accept" for every connection, answers its first
+     * command with NOAUTH and closes it; on QUIT it prints "quit" and exits.
+     */
+    private const NOAUTH_REDIS = <<<'SERVER'
+        $server = stream_socket_server('tcp://127.0.0.1:0');
+        echo parse_url('tcp://' . stream_socket_get_name($server, false), PHP_URL_PORT), "\n";
+        while ($client = stream_socket_accept($server, 30)) {
+            echo "accept\n";
+            $line = (string) fgets($client);
+            $args = [];
+            for ($i = (int) substr($line, 1); $i > 0; $i--) {
+                $length = (int) substr((string) fgets($client), 1);
+                $args[] = substr((string) stream_get_contents($client, $length + 2), 0, $length);
+            }
+            if (strtoupper($args[0] ?? '') === 'QUIT') {
+                echo "quit\n";
+                exit;
+            }
+            @fwrite($client, "-NOAUTH Authentication required.\r\n");
+            fclose($client);
+        }
+        SERVER;
+
+    /** A request waits for a Redis that rejects it once: the cache and the rate limiter share the failure. */
+    #[RunInSeparateProcess]
+    public function testAFailedConnectionIsNotTriedAgainInTheSameRequest(): void
+    {
+        if (!extension_loaded('redis')) {
+            $this->markTestSkipped('ext-redis is not installed');
+        }
+
+        $server = proc_open([PHP_BINARY, '-r', self::NOAUTH_REDIS], [1 => ['pipe', 'w']], $pipes);
+        $dir = $this->makeTempDir();
+        try {
+            $port = (int) fgets($pipes[1]);
+            define('REDIS_PORT', $port);
+            Config::set('app.cache', ['enabled' => true, 'driver' => 'redis', 'path' => $dir]);
+
+            $this->assertNull(Cache::get('page'));
+            $this->assertTrue(RateLimiter::allow('contact', 5, 60));
+            $this->assertTrue(RateLimiter::allow('contact', 5, 60));
+            // The rate limiter reports the reason Redis gave the cache.
+            $this->assertStringContainsString('NOAUTH', (string) RateLimiter::storeStatus()['error']);
+
+            $last = stream_socket_client('tcp://127.0.0.1:' . $port);
+            fwrite($last, "*1\r\n\$4\r\nQUIT\r\n");
+            $lines = [];
+            while (($line = fgets($pipes[1])) !== false && ($lines[] = trim($line)) !== 'quit') {
+            }
+            $this->assertSame(['accept', 'accept', 'quit'], $lines);
+        } finally {
+            proc_terminate($server);
+            proc_close($server);
+            $this->removeDir($dir);
+        }
+    }
+
     public function testFlushTakesThePrefixLiterallyInThePattern(): void
     {
         if (!extension_loaded('redis')) {

@@ -61,7 +61,7 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(I18n::class, ['dict' => [], 'locale' => 'en']);
         self::setStatics(Cache::class, ['store' => null, 'failureLogged' => false]);
         self::setStatics(RateLimiter::class, ['store' => null, 'redisError' => null]);
-        self::setStatics(RedisStore::class, ['shared' => null, 'sharedFailure' => null]);
+        self::setStatics(RedisStore::class, ['connection' => null, 'failure' => null]);
         self::setStatics(View::class, ['shared' => []]);
         self::setStatics(Database::class, ['instance' => null]);
         self::setStatics(Vite::class, ['manifest' => null]);

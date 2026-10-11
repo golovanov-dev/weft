@@ -11,7 +11,6 @@ use Golovanov\Weft\I18n\Locale;
 use Golovanov\Weft\Kernel;
 use Golovanov\Weft\Observability\Alert;
 use Golovanov\Weft\Observability\ErrorHandler;
-use Golovanov\Weft\Security\RateLimiter;
 use Golovanov\Weft\Seo\Seo;
 use Golovanov\Weft\View\View;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -631,9 +630,9 @@ final class KernelTest extends TestCase
         // The 500 went out before the alert waited for AlertLoop.
         $this->assertStringContainsString('<h1>500</h1>', $sentBeforeAlert[0] ?? '');
 
-        // The alert is the one the exception handler raises for the same throw site. Drop the
-        // "already reported" window, or the second send of that dedupe key is held back.
-        RateLimiter::release('alert:' . $alerts[0]['dedupe_key']);
+        // The alert is the one the exception handler raises for the same throw site. Empty the
+        // counter store, or the "already reported" window holds back the second send of that key.
+        $this->removeDir((string) Config::get('app.rate_limit.path'));
         try {
             View::render(APP_ROOT . '/pages/broken.php');
         } catch (\RuntimeException $e) {

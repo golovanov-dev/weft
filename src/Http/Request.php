@@ -165,54 +165,31 @@ final class Request
     }
 
     /**
-     * Entries of PROXY_IPS (or of $entries) that are neither an IP address nor a CIDR range, such as
-     * a host name. The client IP resolution ignores them; health checks report them.
+     * What is wrong with PROXY_IPS, for health checks: it is not an array (no proxy is trusted), an
+     * entry is neither an IP address nor a CIDR range (it is ignored), or an entry trusts a large
+     * part of the internet (an IPv4 prefix shorter than /8, an IPv6 one shorter than /16).
      *
-     * @param array<mixed>|null $entries null reads the PROXY_IPS constant
-     * @return list<mixed>
-     */
-    public static function invalidProxyIps(?array $entries = null): array
-    {
-        $invalid = [];
-        foreach ($entries ?? self::proxyIps() as $entry) {
-            if (self::parseProxy($entry) === null) {
-                $invalid[] = $entry;
-            }
-        }
-        return $invalid;
-    }
-
-    /**
-     * Entries of PROXY_IPS (or of $entries) that trust every address or a large part of the
-     * internet: an IPv4 prefix shorter than /8, an IPv6 one shorter than /16 ("0.0.0.0/0", "::/0").
-     * Visitors from those addresses share the proxy's rate limit or, with a forged X-Forwarded-For,
-     * pick their own IP. Health checks report them.
-     *
-     * @param array<mixed>|null $entries null reads the PROXY_IPS constant
      * @return list<string>
      */
-    public static function trustAllProxyIps(?array $entries = null): array
+    public static function proxyIpsErrors(): array
     {
-        $found = [];
-        foreach ($entries ?? self::proxyIps() as $entry) {
+        if (!defined('PROXY_IPS')) {
+            return [];
+        }
+        if (!is_array(PROXY_IPS)) {
+            return ['PROXY_IPS must be an array, ' . get_debug_type(PROXY_IPS) . ' given; no proxy is trusted'];
+        }
+        $errors = [];
+        foreach (PROXY_IPS as $entry) {
             $proxy = self::parseProxy($entry);
-            if ($proxy !== null && $proxy[1] < (strlen($proxy[0]) === 4 ? 8 : 16)) {
-                $found[] = $entry;
+            $shown = (string) json_encode($entry, JSON_UNESCAPED_SLASHES);
+            if ($proxy === null) {
+                $errors[] = "PROXY_IPS: {$shown} is not an IP address or CIDR range";
+            } elseif ($proxy[1] < (strlen($proxy[0]) === 4 ? 8 : 16)) {
+                $errors[] = "PROXY_IPS: {$shown} trusts too many addresses";
             }
         }
-        return $found;
-    }
-
-    /**
-     * Why PROXY_IPS is unusable as a whole: it is defined but not an array, so no proxy is
-     * trusted. Null when it is an array or not defined. Health checks report it.
-     */
-    public static function proxyIpsError(): ?string
-    {
-        if (!defined('PROXY_IPS') || is_array(PROXY_IPS)) {
-            return null;
-        }
-        return 'PROXY_IPS must be an array, ' . get_debug_type(PROXY_IPS) . ' given; no proxy is trusted';
+        return $errors;
     }
 
     /** @return array<mixed> */

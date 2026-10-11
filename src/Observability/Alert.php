@@ -23,21 +23,15 @@ use Golovanov\Weft\Security\RateLimiter;
  * so once per request; `weft-health` shows it too.
  *
  * Delivery is synchronous and best-effort; nothing is retried, no exception ever leaves this class,
- * and a failure never breaks the main request flow. Channels are tried one after another, so a send
- * waits for each in turn: alertloop up to app.alertloop.timeout seconds, telegram up to 4 s, mail up
- * to twice app.mail.smtp.timeout with the smtp driver and TLS (`ssl` or `starttls`: the handshake has
- * a limit of its own) plus the DNS lookup of the host, which no timeout bounds (with `mail`, as long
- * as the local sendmail takes).
- * An alert with a dedupe key also waits for its window in the rate-limit store: with Redis at most
- * 1 s for each of two commands, plus 2 s to connect and 1 s for each of AUTH, SELECT and PING when
- * the request has not connected yet (RedisStore), so at most 7 s more. A failed delivery is recorded
- * as an `alert.failed` trace event (metadata only, never the alert payload or a secret).
+ * and a failure never breaks the main request flow. Channels are tried one after another, each up to
+ * its own timeout; an alert with a dedupe key also waits for the rate-limit store that keeps its
+ * window. A failed delivery is recorded as an `alert.failed` trace event (metadata only, never the
+ * alert payload or a secret).
  *
  * An alert with a dedupe key is sent once per five minutes: repeats within that window are dropped
- * locally, so an incident hit on every request does not make every request wait for the channels.
- * The window opens when a send starts and is dropped unless a channel that reaches a person took the
- * alert (or `log` is the only channel), so the next repeat tries again. It lives in the rate-limit
- * store; when that store fails, the alert is sent.
+ * locally, whether the first send was delivered or not, so an incident hit on every request does
+ * not make every request wait for the channels. The window lives in the rate-limit store; when that
+ * store fails, the alert is sent.
  *
  * @see https://github.com/golovanov-dev/alertloop
  */
@@ -47,10 +41,7 @@ final class Alert
     public const WARNING = 'warning';
     public const INFO = 'info';
 
-    /** Channels that bring an alert to a person; `log` only writes it down. */
-    private const DELIVERING = ['alertloop', 'telegram', 'mail'];
-
-    /** Seconds during which a repeat of a delivered dedupe key is not sent. */
+    /** Seconds during which a repeat of a dedupe key is not sent. */
     private const REPORTED_WINDOW = 300;
 
     /** Seconds a send waits for Telegram. */
@@ -110,8 +101,7 @@ final class Alert
             $event['payload'] = $context;
         }
 
-        $windowed = $dedupeKey !== null && $dedupeKey !== '';
-        if ($windowed && !RateLimiter::claim('alert:' . $dedupeKey, self::REPORTED_WINDOW)) {
+        if ($dedupeKey !== null && $dedupeKey !== '' && !RateLimiter::claim('alert:' . $dedupeKey, self::REPORTED_WINDOW)) {
             return false;
         }
         $delivered = false;
@@ -119,9 +109,6 @@ final class Alert
             if (self::deliver($channel, $event) && $channel !== 'log') {
                 $delivered = true;
             }
-        }
-        if ($windowed && !$delivered && $channels !== ['log']) {
-            RateLimiter::release('alert:' . $dedupeKey);
         }
         return $delivered;
     }
@@ -142,16 +129,6 @@ final class Alert
     public static function channels(): array
     {
         return array_values(array_unique(array_map(strval(...), (array) Config::get('app.alerts.channels', []))));
-    }
-
-    /**
-     * Listed channels that reach a person and have their settings: where send() can deliver.
-     *
-     * @return list<string>
-     */
-    public static function deliveryChannels(): array
-    {
-        return array_values(array_intersect(self::readyChannels(), self::DELIVERING));
     }
 
     /**

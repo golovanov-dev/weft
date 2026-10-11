@@ -6,6 +6,7 @@ namespace Golovanov\Weft\Seo;
 
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\I18n\Url;
+use Golovanov\Weft\Observability\ErrorHandler;
 
 /**
  * robots.txt generator. Blocks everything in DEBUG or with app.seo.robots_allow off, allows all
@@ -30,34 +31,9 @@ final class Robots
         'ai-training' => ['GPTBot', 'ClaudeBot', 'Google-Extended', 'Applebot-Extended', 'CCBot'],
     ];
 
-    /**
-     * Typos in app.seo.robots_groups, for health: a key other than agents/allow/disallow (its rules
-     * would be dropped), and a name in `agents` that looks like a preset (`ai-…`, `ai_…`, any case)
-     * and is not one (it would become a user-agent no crawler has). robots.txt is written as is.
-     *
-     * @return list<string>
-     */
-    public static function errors(): array
-    {
-        $errors = [];
-        foreach ((array) Config::get('app.seo.robots_groups', []) as $group) {
-            foreach (array_diff_key((array) $group, array_flip(['agents', 'allow', 'disallow'])) as $key => $_) {
-                $errors[] = "app.seo.robots_groups: {$key} is not a group key (agents, allow, disallow)";
-            }
-            foreach ((array) (((array) $group)['agents'] ?? []) as $agent) {
-                $agent = (string) $agent;
-                if (preg_match('/^ai[-_]/i', $agent) && !isset(self::PRESETS[$agent])) {
-                    $errors[] = "app.seo.robots_groups: {$agent} is not a preset";
-                }
-            }
-        }
-        return array_values(array_unique($errors));
-    }
-
     public static function text(): string
     {
-        $debug = (bool) Config::env('DEBUG', false);
-        $allow = !$debug && (bool) Config::get('app.seo.robots_allow', true);
+        $allow = !ErrorHandler::debug() && (bool) Config::get('app.seo.robots_allow', true);
         $disallow = array_map(self::line(...), (array) Config::get('app.seo.robots_disallow', []));
 
         $lines = ['User-agent: *'];

@@ -20,17 +20,17 @@ final class RedisStore implements Store
 
     private Redis $redis;
 
-    /** Whether this store runs on the request's connection (fromConfig()). */
-    private bool $onSharedConnection = false;
+    /** This request's connection, shared by the cache and the rate limiter (fromConfig()). */
+    private static ?Redis $connection = null;
 
-    /** This request's connection (fromConfig()), or why it could not be made. */
-    private static ?self $shared = null;
-    private static ?\Throwable $sharedFailure = null;
+    /** Why Redis failed in this request; fromConfig() then throws it instead of connecting again. */
+    private static ?\Throwable $failure = null;
 
     /**
      * Connects, authenticates, selects the database and pings; throws when Redis rejects any of it.
      *
-     * @param Redis|null $client a client to connect instead of a new one (tests)
+     * @param Redis|null $client a client to use instead of a new one; one that is connected already
+     *   is used as is
      */
     public function __construct(
         string $host = '127.0.0.1',
@@ -41,6 +41,9 @@ final class RedisStore implements Store
         ?Redis $client = null,
     ) {
         $this->redis = $client ?? new Redis();
+        if ($this->redis->isConnected()) {
+            return;
+        }
         $this->redis->connect($host, $port, self::CONNECT_TIMEOUT, null, 0, self::READ_TIMEOUT);
         // A connection lost mid-request fails its command at once instead of reconnecting (set
         // after connect(), which resets it to 10).
@@ -63,67 +66,35 @@ final class RedisStore implements Store
 
     /**
      * A store on this request's connection to the Redis of REDIS_HOST, REDIS_PORT, REDIS_PASSWORD
-     * and REDIS_DB, its keys under sitePrefix() . $namespace. The first call connects; later calls,
-     * from the cache or the rate limiter, share that connection, and after a failed connection
-     * rethrow its error without trying again. A command that fails on it closes it for the rest of
-     * the request (see failed()): its reply may still arrive and would answer the next command.
+     * and REDIS_DB, its keys under sitePrefix() . $namespace. The first call connects; the cache and
+     * the rate limiter share that connection. A caller whose command fails goes on with files.
+     * Redis is tried once per request: after a failed connection, or a command that closed it
+     * (command()), every later call throws at once and its caller goes on with files too.
      *
      * @internal Used by Cache and RateLimiter.
      */
     public static function fromConfig(string $namespace = ''): self
     {
-        if (self::$sharedFailure !== null) {
-            throw self::$sharedFailure;
+        if (self::$failure === null && self::$connection?->isConnected() === false) {
+            self::$failure = new \RuntimeException('a Redis command failed earlier in this request');
+        }
+        if (self::$failure !== null) {
+            throw self::$failure;
         }
         try {
-            self::$shared ??= new self(
+            $store = new self(
                 host: (string) Config::env('REDIS_HOST', '127.0.0.1'),
                 port: (int) Config::env('REDIS_PORT', 6379),
                 password: (string) Config::env('REDIS_PASSWORD', ''),
                 database: (int) Config::env('REDIS_DB', 0),
+                prefix: self::sitePrefix() . $namespace,
+                client: self::$connection,
             );
         } catch (\Throwable $e) {
-            throw self::$sharedFailure = $e;
+            throw self::$failure = $e;
         }
-        $store = clone self::$shared;
-        $store->prefix = self::sitePrefix() . $namespace;
-        $store->onSharedConnection = true;
+        self::$connection = $store->redis;
         return $store;
-    }
-
-    /**
-     * True when a command failed on this request's connection: it is closed, the store only
-     * rethrows that error, and fromConfig() does too, so callers fall back to files.
-     *
-     * @internal Used by Cache and RateLimiter.
-     */
-    public function failed(): bool
-    {
-        return $this->onSharedConnection && self::$sharedFailure !== null;
-    }
-
-    /**
-     * Run one Redis command. On RedisException (a timeout, a lost connection) the connection is
-     * closed: a reply that arrives late must not be read as the answer to the next command.
-     */
-    private function command(\Closure $call): mixed
-    {
-        if ($this->failed()) {
-            throw self::$sharedFailure;
-        }
-        try {
-            return $call();
-        } catch (\RedisException $e) {
-            if ($this->onSharedConnection) {
-                self::$sharedFailure = $e;
-            }
-            // After a reply timeout phpredis has dropped the socket itself; close() on it would
-            // connect (and AUTH) again only to close.
-            if ($this->redis->isConnected()) {
-                $this->redis->close();
-            }
-            throw $e;
-        }
     }
 
     /**
@@ -138,6 +109,23 @@ final class RedisStore implements Store
         }
         $host = parse_url((string) Config::get('app.url.base', ''), PHP_URL_HOST);
         return is_string($host) && $host !== '' ? strtolower($host) . ':' : 'weft:';
+    }
+
+    /**
+     * Run one Redis command. On RedisException (a timeout, a lost connection) the connection is
+     * closed: phpredis can leave it open, and a reply that arrives late would answer the next command.
+     */
+    private function command(\Closure $call): mixed
+    {
+        try {
+            return $call();
+        } catch (\RedisException $e) {
+            // A socket phpredis dropped itself is left alone: close() would connect it again first.
+            if ($this->redis->isConnected()) {
+                $this->redis->close();
+            }
+            throw $e;
+        }
     }
 
     private function lastError(): string
@@ -199,10 +187,5 @@ final class RedisStore implements Store
         if (is_array($keys) && $keys !== []) {
             $this->command(fn () => $this->redis->del($keys));
         }
-    }
-
-    public function client(): Redis
-    {
-        return $this->redis;
     }
 }

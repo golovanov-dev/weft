@@ -7,6 +7,7 @@ namespace Golovanov\Weft\Seo;
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\HttpClient;
 use Golovanov\Weft\I18n\Url;
+use Golovanov\Weft\Observability\ErrorHandler;
 use Golovanov\Weft\Observability\Health;
 
 /**
@@ -107,7 +108,7 @@ final class IndexNow
             fwrite($out, 'Would submit ' . count($changed) . " addresses:\n" . implode("\n", $changed) . "\n" . $note);
             return 0;
         }
-        if ((bool) Config::env('DEBUG', false)) {
+        if (ErrorHandler::debug()) {
             fwrite($out, 'DEBUG is on: ' . count($changed) . " addresses not submitted.\n");
             return 0;
         }

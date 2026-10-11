@@ -7,6 +7,7 @@ namespace Golovanov\Weft\Tests\Example;
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\Request;
 use Golovanov\Weft\Http\RequestContext;
+use Golovanov\Weft\Observability\Trace;
 use Golovanov\Weft\Security\Csrf;
 use Golovanov\Weft\Tests\TestCase;
 
@@ -107,17 +108,39 @@ final class ContactEndpointTest extends TestCase
         $this->assertStringContainsString('Contact request not delivered', self::errorLogSince($logOffset));
     }
 
-    public function testRequestAcceptedByAlertLoopIsASuccessAlertedWithoutDedupeKey(): void
+    /**
+     * The alert says a request came, with its trace id and no form data (a channel such as Telegram
+     * is no place for a visitor's details), and is no delivery: without the email the form answers
+     * 503, and the alert says the request was not delivered.
+     */
+    public function testAlertWithoutFormDataIsNoDelivery(): void
     {
         $this->alertsOn();
+        $traceId = Trace::boot();
 
-        [$status, , $data] = $this->post($this->validForm());
+        [$status] = $this->post($this->validForm());
+
+        $this->assertSame(503, $status);
+        $this->assertCount(1, $this->alerts);
+        $this->assertSame('Contact request not delivered', $this->alerts[0]['message']);
+        $this->assertSame('critical', $this->alerts[0]['severity']);
+        $this->assertSame($traceId, $this->alerts[0]['trace_id']);
+        $this->assertArrayNotHasKey('dedupe_key', $this->alerts[0]);
+        $this->assertArrayNotHasKey('payload', $this->alerts[0]);
+    }
+
+    public function testAlertOfADeliveredRequestIsInfo(): void
+    {
+        $this->alertsOn();
+        $this->mailTo('owner@site.test');
+
+        [$status] = $this->post($this->validForm());
 
         $this->assertSame(200, $status);
-        $this->assertTrue($data['success']);
         $this->assertCount(1, $this->alerts);
-        $this->assertStringStartsWith('New contact request', $this->alerts[0]['message']);
-        $this->assertArrayNotHasKey('dedupe_key', $this->alerts[0]);
+        $this->assertSame('New contact request', $this->alerts[0]['message']);
+        $this->assertSame('info', $this->alerts[0]['severity']);
+        $this->assertArrayNotHasKey('payload', $this->alerts[0]);
     }
 
     /** Contact emails go to $address through Mail's fake transport, which answers $error; $this->sent collects them. */
@@ -165,7 +188,7 @@ final class ContactEndpointTest extends TestCase
     /** 422 names the fields; the corrected form sent at once is not throttled by the failed one. */
     public function testInvalidFieldsAreNamedAndTheCorrectedRetryIsNotThrottled(): void
     {
-        $this->alertsOn();
+        $this->mailTo('owner@site.test');
 
         [$status, , $data] = $this->post(['email' => 'not-an-email', 'message' => 'short'] + $this->validForm());
 
@@ -263,7 +286,7 @@ final class ContactEndpointTest extends TestCase
     /** A form posted without JavaScript gets a redirect to the page, not raw JSON. */
     public function testFormPostWithoutJavaScriptIsRedirected(): void
     {
-        $this->alertsOn();
+        $this->mailTo('owner@site.test');
 
         [$status, $body] = $this->post($this->validForm(), json: false);
 
