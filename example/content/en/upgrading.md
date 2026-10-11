@@ -52,6 +52,10 @@ On your machine, in the site's directory. Do what each **Action.** entry of the 
   at `info` or `Contact request not delivered` at `critical`.
 - `.gitignore`: add `/config/config.dev.php` (a development config with secrets, which
   `git add -A` would otherwise commit) and `/storage/indexnow.json` (what `weft-indexnow` submitted).
+  If `config/config.dev.php` is already in git, `git rm --cached config/config.dev.php`, commit, and
+  change the secrets it holds: they stay in the repository's history.
+  On every other clone (your other machines, a server that runs `git pull`) the next `git pull`
+  deletes `config/config.dev.php`: copy it aside before the pull and put it back after.
 - `scripts/cache-clear.php`: take the new one. The old one prints `Cache flushed.` even when nothing
   was flushed (caching off, Redis unavailable, a failed flush); the new one says so and, when the
   store cannot be flushed, exits with 1.

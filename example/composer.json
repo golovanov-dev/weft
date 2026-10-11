@@ -5,7 +5,7 @@
   "license": "MIT",
   "require": {
     "php": ">=8.4",
-    "golovanov/weft": "^0.1",
+    "golovanov/weft": "^0.2",
     "league/commonmark": "^2.4"
   },
   "autoload": {

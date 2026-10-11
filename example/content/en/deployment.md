@@ -44,7 +44,9 @@ echo 'umask 002' >> ~/.profile
 ```
 
 Now log out and back in: the group and the umask of step 5 apply from your next login, and step 7
-already writes to `storage/`. Then, in the site root:
+already writes to `storage/`. A login shell reads `~/.profile` only when there is no `~/.bash_profile`
+(RHEL and its kin have one) and never under zsh: then put `umask 002` in `~/.bash_profile` or
+`~/.zprofile` instead. After logging in, `umask` prints `0002`. Then, in the site root:
 
 ```bash
 # 6. PHP-FPM umask
@@ -61,12 +63,16 @@ sudo -u www-data sh -c 'umask 002; vendor/bin/weft-health'
   `/etc/php/8.4/fpm/pool.d/www.conf`) or the user Apache runs as. **`php8.4-fpm`**:
   `systemctl list-units '*fpm*'` shows yours; with Apache's mod_php, use `apache2` (or `httpd`) in
   step 6.
+- **Step 1**: a private repository needs read access from the server: generate an SSH key there
+  (`ssh-keygen -t ed25519`) and add `~/.ssh/id_ed25519.pub` to the repository's deploy keys. With a deploy key, clone by the
+  repository's SSH address (`git@github.com:<owner>/<repo>.git`), not HTTPS: that is what goes
+  into `<your repository URL>` of this step.
 - **Step 3**: set `DEBUG=false` and `DEV_MODE=false` (otherwise errors are shown to visitors and
   assets are fetched from a Vite dev server that is not running), `MAIL_TO` (your inbox), `MAIL_FROM`
   (an address of your domain), `MAIL_DRIVER='smtp'` and `SMTP_*` where PHP `mail()` does not work (no
   sendmail on the server), and the constants of the features you use: `ALERTLOOP_*`, `TELEGRAM_*` or
-  `ALERT_MAIL_TO` for alerts, `INDEXNOW_KEY`
-  ([Configuration](/docs/configuration#environment--configconfigphp)).
+  `ALERT_MAIL_TO` for alerts, `INDEXNOW_KEY`, `CAPTCHA_*`, `DB_*`, `REDIS_*`, `PROXY_IPS` — and any other key
+  your site uses: `config/config.example.php` lists them all ([Configuration](/docs/configuration#environment--configconfigphp)).
   Your `https://` domain is `$origin` at the top of `app/Configs/app.php`: change it on your machine
   and commit it. Keep a copy of the finished `config/config.php` off the server (a password
   manager): a rebuilt server needs it.
@@ -162,8 +168,8 @@ no trace, and it checks the permissions of whoever runs it, so from your own she
    add `define('WEB_ROOT', '/home/<user>/public_html');` to `config/config.php`.
 4. Add a panel cron task, every 15 minutes (your panel's PHP 8.4 binary for `/usr/bin/php8.4`):
    `cd /home/<user>/site && out=$(/usr/bin/php8.4 vendor/bin/weft-health 2>&1) || echo "$out"`. It
-   prints, and the panel mails or logs, only a failed check; for the first check, run it once
-   without `out=…` and read the output.
+   prints, and the panel mails or logs, only a failed check; for the first check, set the task
+   up without `out=…`, read the output in the panel's email or log, then put `out=…` back.
 
 To update, upload what changed after a new build, and delete on the server what you deleted locally
 (or a deleted page keeps answering).

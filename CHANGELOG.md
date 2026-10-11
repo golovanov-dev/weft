@@ -3,7 +3,7 @@
 All notable changes to Weft are documented in this file. Weft follows semantic versioning;
 pre-1.0 the API may change between minor versions.
 
-## 0.2.0 - Unreleased
+## 0.2.0 - 2026-10-11
 
 To upgrade from 0.1.x, do what each entry marked **Action.** says (most say which sites they apply
 to). The steps, the recipes and the rollback are in the upgrade guide,

@@ -8,7 +8,7 @@ first.
 
 | Version | Supported |
 |---|---|
-| 0.1.x | ✅ current |
+| 0.2.x | ✅ current |
 
 Before 1.0.0 only the latest minor line is supported. A fix ships as a patch release of that line
 and is not backported: upgrading within 0.x is the fix.
