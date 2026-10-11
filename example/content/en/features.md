@@ -69,7 +69,8 @@ engine matched, never from the URL as requested. A canonical the page sets with
 `Seo::set(['canonical' => …])` is a full URL or a link from `url()`; both are rendered absolute, in
 the canonical and in `og:url`. A 404 gets none of the three — the engine's own and
 a page that answers 404 itself (`Abort::notFound()` or `http_response_code(404)`), like an unknown
-slug on a dynamic page. JSON-LD
+slug on a dynamic page. `Url::routePath()` is the matched path: `null` on a 404, where
+`Url::currentPath()` is `/` and `Url::isActive()` is false. JSON-LD
 is written with `<` and `>` escaped, so no value can end its `<script>` element. `/sitemap.xml` and
 `/robots.txt` are generated too; in `DEBUG` robots blocks indexing automatically, and it lists the
 sitemap only when `app.sitemap` is a non-empty list or a callable. robots.txt does not call the
@@ -101,7 +102,9 @@ user asked about, `ai-training` collect training data. A crawler obeys only the 
 so each group also gets `robots_disallow`, and a group's `allow` inside one of those paths is left
 out: it would reopen it. Operators say their user-triggered fetchers may ignore
 robots.txt. In `DEBUG` or with `robots_allow` off, groups are left out and everything is closed.
-Preset names are lowercase; any other name is written as a user-agent as is.
+Preset names are lowercase; any other name is written as a user-agent as is. A group has only the
+keys `agents`, `allow` and `disallow`: any other key, such as a misspelt `disalow`, is ignored without
+a warning, and its rule is lost.
 
 A `robots.txt` or `llms.txt` file in `public/` is served by the web server instead of the engine's,
 and the settings here do nothing: delete it. With `robots_groups` or `llms` set, `weft-health` fails
@@ -140,11 +143,11 @@ the sitemap addresses that are new or have a new `lastmod`: the first run submit
 address is remembered only once the endpoint accepts it, in the state file — `cache-clear` does not
 touch it. Removed pages are not submitted. A change is a new `lastmod`: an address without one is
 submitted once, when it is new, and never after an edit — the command says how many there are. To
-have edits submitted, give the routes a `lastmod` ([Configuration](/docs/configuration),
-"Sitemap"). `--dry-run` lists the addresses without submitting; in `DEBUG` nothing is submitted. It
-refuses to run while `app.url.base` is on example.com. It exits with 1 when it refuses or the
+have edits submitted, give the routes a `lastmod` ([Configuration](/docs/configuration#sitemap)).
+`--dry-run` lists the addresses without submitting; in `DEBUG` nothing is submitted. It
+refuses to run with a malformed key or while `app.url.base` is on example.com. It exits with 1 when it refuses or the
 endpoint does, 2 on an unknown option (`--help` prints the usage). Run it from cron:
-[Deployment](/docs/deployment), "IndexNow".
+[Deployment](/docs/deployment#indexnow).
 
 ### SEO audit
 
@@ -274,11 +277,9 @@ Also `Cache::get/set/has/forget/flush`, and `php scripts/cache-clear.php`, which
 entries only. Values come back without their classes, so cache arrays and scalars.
 
 Two properties worth knowing: when caching is **off**, a NullStore is used — `remember()` still runs
-the callback, so wrapping code in it is always safe and you can enable the cache later. And if Redis
-is unreachable or rejects `REDIS_PASSWORD` or `REDIS_DB`, the engine falls back to the file store
-instead of failing the request; `vendor/bin/weft-health` then fails and says why. A store that fails
-later (a read-only replica, `maxmemory` reached) does not fail the page either: reads are misses,
-writes are skipped, and the error log gets one line per request.
+the callback, so wrapping code in it is always safe and you can enable the cache later. And a
+Redis that cannot be used, or rejects commands, never fails the page: the engine goes on with files or
+without the cache ([Troubleshooting](/docs/troubleshooting#redis-fails)).
 
 > A useful trick used by this very site: put the file's `mtime` in the cache key. Editing content
 > invalidates the entry automatically.
@@ -318,7 +319,8 @@ vendor/bin/eventtrace show <trace_id> --dir=storage/logs/cli
 
 ## Forms: rate limiting, CSRF, honeypot, captcha
 
-Rate limiting is **on by default**.
+Nothing here runs by itself: a form is protected by the checks its endpoint calls, and the captcha
+is off by default.
 
 ```php
 use Golovanov\Weft\Security\{RateLimiter, Csrf, Captcha};
@@ -352,7 +354,8 @@ reset them. A window starts at the first hit and later hits never extend it; the
 expired counter files now and then.
 If a counter cannot be written, the limiter **fails open**: the request is allowed and the failure
 goes to the error log, so a broken store never locks users out. `vendor/bin/weft-health` shows
-where counters go (`rate_limit_store`, `rate_limit_path`) and fails when they cannot be written.
+where counters go (`rate_limit_store`, `rate_limit_path`) and fails when the directory cannot be
+written ([Troubleshooting](/docs/troubleshooting#php-cannot-write-storage)).
 
 Limits count per client IP, taken from `REMOTE_ADDR`; an IPv6 client counts by its `/64` network,
 the block one host usually gets. On shared hosting and with nginx + php-fpm on
@@ -368,7 +371,7 @@ not an IP, leaves the proxy's address in place. To see which address Weft took, 
 in the `request_start` trace event. From the same proxies Weft reads `X-Forwarded-Proto`:
 `Request::isHttps()` is true when its last value is `https` or, without the header, when PHP sees
 HTTPS; the example uses it for the `Secure` flag of the session cookie. What to list for Cloudflare,
-a chain of proxies or Docker, and how to check it: [Deployment](/docs/deployment).
+a chain of proxies or Docker, and how to check it: [Deployment](/docs/deployment#behind-a-proxy-or-cdn).
 
 The captcha is on when `app.captcha.enabled` is true and both keys are set; in this example the
 flag follows `CAPTCHA_SECRET_KEY`. `app.captcha.driver` picks the provider: `recaptcha` (Google
@@ -379,7 +382,7 @@ the flag is off, `verify()` returns a pass (`skipped => true`), so forms work in
 keys. With the flag on and a key missing (or an unknown driver), `verify()` records a
 `captcha.misconfigured` trace event and a line in the error log (`storage/logs/errors/`), then: with
 `DEBUG` on it passes, so the form works locally; with `DEBUG` off it fails with the error code
-`misconfigured` and sends a critical alert (category `security`), so in production every submission
+`misconfigured` and sends a critical alert (category `security`, dedupe key `captcha:misconfigured`), so in production every submission
 is rejected until both keys are set. `vendor/bin/weft-health` lists the missing keys under
 `captcha_missing_keys` and fails. A rejection the visitor did not cause — the
 provider unreachable (`request-failed`), the secret refused (`invalid-input-secret`), a token for a
@@ -398,7 +401,7 @@ Validation before the rate limit lets a visitor correct a field and send again a
 redirects a form posted without JavaScript back to the contact page with `?status=`. It answers
 success only when the request was delivered — the email to `MAIL_TO` was accepted — and `503`
 otherwise: where to see why, and where the message stays, is in
-[Deployment](/docs/deployment), "The contact form answers 503".
+[Troubleshooting](/docs/troubleshooting#the-contact-form-answers-503).
 
 ### SmartCaptcha in this example
 
@@ -439,12 +442,13 @@ use Golovanov\Weft\Mail\Mail;
 $sent = Mail::send('owner@site.test', 'New order', "Order 42\nTotal: 100", replyTo: $customerEmail);
 ```
 
-Plain-text email in UTF-8, sent by `app.mail.driver` ([Configuration](/docs/configuration), "Mail"):
+Plain-text email in UTF-8, sent by `app.mail.driver` ([Configuration](/docs/configuration#mail)):
 `mail` hands it to PHP `mail()`, `smtp` talks to the server in `app.mail.smtp` (STARTTLS on 587 or
 TLS on 465, certificate verified, AUTH PLAIN or LOGIN). `send()` returns `true` when the driver
 accepted the message — `mail()` returned `true`, or the SMTP server answered `250` — which is not
 yet delivery to the mailbox. It never throws: a message that is not sent leaves a line
-`Mail not sent (<driver>): <reason>` in `errors/` and returns `false`. Addresses are plain
+`Mail not sent (<driver>): <reason>` in `errors/` and returns `false` (the reasons:
+[Troubleshooting](/docs/troubleshooting#the-contact-form-answers-503)). Addresses are plain
 (`name@site.test`); one with a line break or a display name is refused, and a line break in the
 subject becomes a space, so neither can add a header. The trace gets a `mail_out` event with the
 driver, number of recipients, size and outcome — never the subject, the body or an address.
@@ -459,13 +463,13 @@ it waits as long as the local sendmail takes.
 ```php
 use Golovanov\Weft\Observability\Alert;
 
-Alert::send('New contact request', Alert::INFO, 'business_event', context: $data);
+Alert::send('New contact request', Alert::INFO, 'business_event');
 Alert::critical('Payment webhook failed', ['order' => $id]);
 Alert::send('Captcha rejected', Alert::WARNING, dedupeKey: 'captcha-rejected', category: 'security');
 ```
 
 An alert goes to every channel listed in `app.alerts.channels`, in that order
-([Configuration](/docs/configuration), "Alerts"):
+([Configuration](/docs/configuration#alerts)):
 
 | Channel | Where | Settings |
 |---|---|---|
@@ -485,8 +489,9 @@ Delivery is synchronous and best-effort: nothing is retried and no failure reach
 Channels are tried one after another, each up to its own timeout; an alert with a dedupe key also
 waits for the counter store that keeps its window (below). It is not silent, though — a
 channel that fails is recorded on the request trace as an `alert.failed` event (channel, status,
-transport flag, event type and category; never the alert body, never the bot token). A listed
-channel without its settings is skipped and the error log says so once per request.
+transport flag, event type and category; never the alert body, never the bot token): see
+[Troubleshooting](/docs/troubleshooting#an-alert-did-not-come). A listed channel without its settings
+is skipped and the error log says so once per request.
 
 An alert with a dedupe key is sent once per five minutes: a repeat within that window is dropped
 locally and `send()` returns `false`, so an error hit on every request does not make every request
@@ -520,7 +525,9 @@ server has its time zone tables loaded, otherwise as the offset at connection ti
 
 Errors are thrown as `RuntimeException` with the `PDOException` as its previous, and the MySQL
 message goes to `errors/`. `Database` sends no alert itself: an error nobody catches alerts as an
-unhandled exception ("Alerts for sensitive spots", above).
+unhandled exception ([Alerts for sensitive spots](#alerts-for-sensitive-spots)). All failed
+queries share one dedupe key, so the first one's alert silences the others for five minutes; a failed
+connection has a key of its own.
 
 If MySQL drops the connection (error 2006 or 2013), the call throws and the next call opens a new
 connection; nothing is repeated, since a statement cut off mid-way may already have run on the
@@ -600,8 +607,8 @@ are left out on purpose — preloading them would undo the code split.
 is not ready to serve: logs or rate-limit counters PHP cannot write, an unusable `PROXY_IPS`, a
 captcha, an alert channel or mail without its settings, a static `robots.txt` or `llms.txt` that
 hides the generated one, development settings (`DEBUG`, example.com, no built assets),
-or a failed check of the site. What each field means: [Deployment](/docs/deployment), "What
-`weft-health` checks".
+or a failed check of the site. What each field means:
+[Troubleshooting](/docs/troubleshooting#weft-health-fails).
 
 The engine cannot know what your site needs, so the site adds its own checks in `app/Bootstrap.php`.
 A check returns the fields to show and `ok`; anything but `ok => true`, or an exception, fails the
@@ -622,7 +629,7 @@ cron may run it every few minutes.
 
 Sent on every response: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
 `Permissions-Policy`, optional `Content-Security-Policy` and HSTS (off by default; see
-[Configuration](/docs/configuration)), plus `X-Trace-Id`.
+[Configuration](/docs/configuration#the-rest)), plus `X-Trace-Id`.
 
 Sanitising is split by direction: `Sanitize::input()` normalises incoming data (no HTML escaping),
 `Sanitize::output()` escapes for HTML — that is what `e()` calls. Escape when you render, never when

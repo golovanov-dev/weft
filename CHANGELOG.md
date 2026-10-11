@@ -5,298 +5,146 @@ pre-1.0 the API may change between minor versions.
 
 ## 0.2.0 - Unreleased
 
-To upgrade from 0.1.x: do what each entry marked **Action.** says, in every section (most say
-which sites they apply to), then run `composer require golovanov/weft:^0.2 -W` (`-W` also updates
-traceloom to the `^0.5` that 0.2 requires; `composer update` stays on 0.1.x) and
-`vendor/bin/weft-health` (`--dev` on a development machine). The steps and the rollback are in the
-deployment guide, "Updating".
+To upgrade from 0.1.x, do what each entry marked **Action.** says (most say which sites they apply
+to). The steps, the recipes and the rollback are in the upgrade guide,
+[Upgrading](example/content/en/upgrading.md).
 
 ### Security
 
-- Request and outgoing `HttpClient` bodies and query strings go into the trace parsed into fields,
-  so traceloom masks them by key; before, a body was one raw string masking could not reach.
-  Parsed: a body that decodes as JSON (whatever its content type), an urlencoded form, multipart
-  fields (never uploaded files), and always the query string, into `query`. Any other body stays a
-  raw string, and so does an `HttpClient` body passed as a string: pass an array to mask it; the `referer` header is logged as sent. Weft masks nothing itself: list keys such as
-  `email` or `phone` in the new `app.trace.sensitive_keys` (a whole key name: `phone` does not mask
-  `customer_phone`), or set the new `app.trace.log_body` to `false` (default `true`) to log a body
-  as its size and content type only. A body over 8 KB is always logged as its size and content
-  type only. Fields you write with `Trace::event()` are masked by key the same way.
-- **Action.** `Model` rejects a column name that is not a plain identifier (`[A-Za-z_][A-Za-z0-9_]*`) with
-  `InvalidArgumentException` in `create()`, `update()`, `findBy()`, `where()` and `exists()`: array
-  keys went into the SQL as-is, so `create($request->body())` was an SQL injection. It is not an
-  allow-list: keep passing `create()` and `update()` only the fields you expect, and write queries
-  with quoted or qualified names (`` `order` ``, `posts.id`) with `Database`.
-- **Action.** An enabled captcha without its site key or secret key no longer passes every submission: outside
-  `DEBUG`, `Captcha::verify()` returns `ok => false` with the error code `misconfigured` and sends a
-  critical alert (dedupe key `captcha:misconfigured`); with `DEBUG` on it passes. Either way the
-  problem goes to `errors/`. Set both keys wherever `app.captcha.enabled` is true, or set it to false.
-- **Action.** `RateLimiter` limits clients that send no session cookie. `allow()` and `throttle()` count per
-  client IP (an IPv6 client by its `/64` network), atomically, in Redis when `app.cache.driver` is
-  `redis`, otherwise in files under the new `app.rate_limit.path` (default `ratelimit/` in
-  `app.cache.path`; relative to `APP_ROOT`), whether caching is on or not; no longer in the session
-  or a `Cache::use()` store, and `cache-clear.php` no longer resets them. A window starts at its
-  first hit. Counter files 0.1.x left in the cache directory go with `php scripts/cache-clear.php`.
-  Make that directory writable by PHP (a counter that cannot be written allows the request and
-  logs an error), and behind a reverse proxy or CDN list it in `PROXY_IPS`, or all visitors share
-  one counter.
-- **Action.** Behind a proxy in `PROXY_IPS`, the client IP is the rightmost `X-Forwarded-For` entry not in
-  `PROXY_IPS`; `X-Client-Ip` is no longer read. Both it and the leftmost entry, used before, are set
-  by the client, so a forged header got around rate limits. If your proxy passes the address only
-  in `X-Client-Ip` or `X-Real-IP`, make it append `X-Forwarded-For`, or every visitor shares the
-  proxy's limit. On shared hosting and with nginx + php-fpm on one machine `PROXY_IPS` usually
-  stays empty. To check, compare `client_ip` in the newest `request_start` trace with your address.
-- **Action.** The example's config template sent contact requests to the Weft author: `MAIL_TO` and `MAIL_FROM`
-  were `hello@golovanov.dev` and `noreply@golovanov.dev`, now `hello@example.com` and
-  `noreply@example.com`; step 3 of the deployment guide names them. If your `config/config.php`
-  came from the template, set both to addresses of your own.
+- **Action.** Request and `HttpClient` bodies and query strings are traced as fields, so masking by
+  key reaches them; a body that is neither JSON nor a form stays a raw string. Weft masks nothing
+  itself: list personal fields (`email`, `phone`) in the new `app.trace.sensitive_keys`, or set the
+  new `app.trace.log_body` to `false` to log bodies as their size and content type only.
+- **Action.** `Model` rejects a column name that is not a plain identifier with
+  `InvalidArgumentException`: array keys went into the SQL as-is, so `create($request->body())` was
+  an SQL injection. Still pass `create()` and `update()` only the fields you expect; write queries
+  with quoted or qualified names (`posts.id`) with `Database`.
+- **Action.** An enabled captcha without both keys no longer passes every submission: outside
+  `DEBUG` it rejects them (`misconfigured`) and sends a critical alert. Set both keys or disable it.
+- **Action.** `RateLimiter` counts per client IP (IPv6 per `/64`), atomically, in Redis or in files
+  under the new `app.rate_limit.path`, not in the session, so clients without a session cookie are
+  limited too. Make that directory writable by PHP; behind a proxy, list it in `PROXY_IPS`.
+- **Action.** Behind a proxy in `PROXY_IPS`, the client IP is the rightmost `X-Forwarded-For` entry
+  not in `PROXY_IPS`, and `X-Client-Ip` is no longer read: a forged header got around rate limits. A
+  proxy that passes the address only in `X-Client-Ip` or `X-Real-IP` must append `X-Forwarded-For`.
+- **Action.** The example's config template sent contact requests to the Weft author
+  (`hello@golovanov.dev`); its addresses are now on example.com. If your config came from it, set
+  `MAIL_TO` and `MAIL_FROM` of your own.
 
 ### Added
 
-- `Mail::send($to, $subject, $body, $replyTo)` sends a plain-text UTF-8 email through PHP `mail()`
-  or an SMTP server (`app.mail.driver` `mail` or `smtp`; `app.mail.from`, `from_name`, and
-  `app.mail.smtp.host`, `port`, `encryption` — `starttls`, `ssl` or `none` — `username`, `password`,
-  `timeout`), with no extra package. It returns `false` and writes `Mail not sent` to `errors/`
-  instead of throwing, refuses an address with a line break, and traces a `mail_out` event without
-  the subject, body or addresses.
-- Alert channels: `app.alerts.channels` lists any of `alertloop`, `telegram` (a bot message,
-  `app.alerts.telegram.bot_token` and `chat_id`), `mail` (an email to `app.alerts.mail_to` through
-  `Mail`) and `log` (a line in `errors/`), tried in order. `alert.failed` trace events name the
-  `channel`. `Alert::channels()` and `Alert::configErrors()` tell what is set up.
-- Yandex SmartCaptcha: `app.captcha.driver` `smartcaptcha` verifies its tokens with the same keys and
-  the same diagnostics as reCAPTCHA (`recaptcha`, the default); only the secret and the token are
-  sent to Yandex, and the host is checked against `allowed_hosts`. The page loads Yandex's widget
-  itself: in the example that means changing three files, listed in the features guide.
-- `vendor/bin/weft-health`, run in the site root, prints the health report of the site it boots
-  (through the site's `bootstrap.php`) and exits with 1 (`ok: false`) when logs or rate-limit
-  counters cannot be written (the directories `errors/` and the site's `requests/` under
-  `LOGS_PATH`, though the command runs from the console; the counter directory), when counters went
-  to files while `app.cache.driver` is `redis`, when `PROXY_IPS` is not an array or has an entry
-  that is invalid or too wide for a proxy (`/0`, IPv4 wider than `/8`, IPv6 wider than `/16`), when
-  the captcha, a listed alert channel or `app.mail` lacks a setting, when a static `robots.txt` or
-  `llms.txt` hides the generated one (`seo_errors`), when `production` names a development setting
-  (`DEBUG`, `DEV_MODE`, `config/config.example.php` loaded, `app.url.base` on example.com, no built
-  `app.vite.entry` in the Vite manifest) unless run with `--dev`, and when a check of the site
-  fails. New fields: `config` (the environment config loaded), `production`, `checks`,
-  `cache_driver`, `rate_limit_store`, `rate_limit_path`, `rate_limit_writable`, `rate_limit_error`,
-  `proxy_ips_errors`, `captcha_missing_keys`, `alert_channels`, `alert_errors`, `mail_driver`,
-  `mail_errors`, `seo_errors`, `logs_error`. Engine side: `Captcha::missingKeys()`,
-  `Alert::configErrors()`, `ErrorHandler::logsError()`, `RateLimiter::storeStatus()`,
-  `Request::proxyIpsErrors()`, `Vite::manifestError()`.
-- `Health::check($name, $check)` adds a check of the site to `weft-health`: register it in
-  `app/Bootstrap.php`; the callable returns the fields to show and `ok`, reported under
-  `checks.<name>`, and anything but `ok => true`, or an exception, fails the report. The example
-  checks that `MAIL_TO`, where its contact form sends requests, holds real plain addresses
-  (`checks.contact_form`).
-- **Action.** `Request::isHttps()`: a request from a proxy in `PROXY_IPS` came over HTTPS when the last value of
-  its `X-Forwarded-Proto` is `https`; from any other address, or without the header, when
-  `$_SERVER['HTTPS']` is set and not `off`. `example/public/index.php` uses it for the `Secure` flag
-  of the session cookie, so a proxy listed in `PROXY_IPS` needs no `HTTPS=on`. If your site copied
-  that file, take its session cookie block, which now comes after `require bootstrap.php`.
-- `PROXY_IPS` accepts IPv4 and IPv6 CIDR ranges (`'173.245.48.0/20'`, `'2400:cb00::/32'`) next to
-  addresses, so a CDN such as Cloudflare can be listed by its published ranges. Host names
-  (`localhost`, a Docker service name) are ignored: write the address.
-- Catch-all pages: `pages/<dir>/[...path].php` serves every deeper URL under `<dir>` with
-  `$path = 'a/b/c'`, after the exact file, `index.php` and `[param].php`; the nearest one wins, and
-  `pages/[...path].php` catches any page URL. A page template can end with
-  `throw Abort::notFound()` (the site's 404 page, without canonical) or `Abort::redirect($url)` (301).
-- `Pagination::fromRequest($request, $total, $perPage)` gives page numbers, offset and links for
-  `?page=N`: `?page=1` is a 301 to the address without it, a page that does not exist is a 404, and
-  page 2 and later get their own canonical and a title suffix (`app.seo.page_suffix`, default
-  ` — Page %d`).
+- `Mail::send()`: plain-text UTF-8 email through PHP `mail()` or SMTP (`app.mail.*`), with no extra
+  package; it returns `false` and writes `Mail not sent` to `errors/` instead of throwing.
+- Alert channels: `app.alerts.channels` lists any of `alertloop`, `telegram`, `mail` and `log`,
+  tried in order; `alert.failed` trace events name the `channel`.
+- Yandex SmartCaptcha: `app.captcha.driver` `smartcaptcha`, with the same keys and diagnostics as
+  reCAPTCHA; the example's pages need three files changed (features guide).
+- `vendor/bin/weft-health`, run in the site root, reports whether the site it boots is ready for
+  production and exits with 1 when not (`--dev` on a development machine). Its fields:
+  [Troubleshooting](example/content/en/troubleshooting.md).
+- `Health::check($name, $check)` adds a check of the site to that report; the example checks
+  `MAIL_TO` (`checks.contact_form`).
+- `Request::isHttps()` believes `X-Forwarded-Proto` from proxies in `PROXY_IPS`; the example uses it
+  for the `Secure` flag of the session cookie. **Action.** If your site copied `public/index.php`,
+  take its session cookie block, which now comes after `require bootstrap.php`.
+- `PROXY_IPS` accepts IPv4 and IPv6 CIDR ranges (`'173.245.48.0/20'`); host names are ignored.
+- Catch-all pages: `pages/<dir>/[...path].php` serves every deeper URL with `$path = 'a/b/c'`; a
+  template can `throw Abort::notFound()` or `Abort::redirect($url)`.
+- `Pagination::fromRequest($request, $total, $perPage)` for `?page=N`: `?page=1` is a 301, a missing
+  page a 404, and page 2 on gets its own canonical and a title suffix (`app.seo.page_suffix`).
 - JSON-LD builders `Schema::organization()`, `localBusiness()`, `webSite()`, `article()`,
-  `product()`, `faq()` and `breadcrumbs()` check the fields search engines require; a missing one
-  throws in `DEBUG` and otherwise leaves the block out with a line in `errors/`.
-- robots.txt groups per crawler: `app.seo.robots_groups` lists `agents` (user-agent tokens or the
-  presets `ai-search`, `ai-user`, `ai-training`) with their `allow` and `disallow` paths. Without
-  it robots.txt is unchanged.
-- `/llms.txt` in the llmstxt.org format from `app.llms`, an array or a callable returning one;
-  without the key it stays a 404. `weft-health` fails (`seo_errors`) on a `public/robots.txt` or
-  `public/llms.txt` the web server serves instead of the configured one: delete the file.
+  `product()`, `faq()` and `breadcrumbs()`, which check the fields search engines require.
+- robots.txt groups per crawler (`app.seo.robots_groups`) with the presets `ai-search`, `ai-user`
+  and `ai-training`; without the key robots.txt is unchanged.
+- `/llms.txt` from `app.llms`, an array or a callable; without the key it stays a 404.
 - IndexNow: with `app.indexnow.key` set, the key is served at `/<key>.txt`, and
-  `vendor/bin/weft-indexnow` (for cron) submits the sitemap addresses that are new or have a new
-  `lastmod`, remembering only what the endpoint accepted; `--dry-run` lists them; it refuses to
-  run with a malformed key.
-- `vendor/bin/weft-seo-audit <site-url>` checks the pages in a live site's sitemap over HTTP —
-  status 200, title, meta description, canonical, one `h1`, JSON-LD that parses, no `noindex` —
-  and exits with 1 when one fails, for CI. It needs `ext-dom`, now in `suggest`. A site behind
-  Basic auth: `WEFT_AUDIT_AUTH=user:pass` in the environment; an address with `@` anywhere
-  is refused.
+  `vendor/bin/weft-indexnow` (for cron) submits the sitemap addresses that are new or changed.
+- `vendor/bin/weft-seo-audit <site-url>` checks a live site's pages over HTTP and exits with 1 when
+  one fails, for CI. It needs `ext-dom`, now in `suggest`; Basic auth comes from `WEFT_AUDIT_AUTH`.
 
 ### Changed
 
-- **Action.** The health check moved from the example's `scripts/health.php` into the engine:
-  `vendor/bin/weft-health`, run in the site root. Delete your copy of `scripts/health.php` and call
-  `vendor/bin/weft-health` from deploy scripts, CI and cron (`--dev` on a development machine); in
-  `composer.json`, change the `health` script to `weft-health`. The
-  report no longer has the `traceloom` field, which was always `true`, nor `alertloop_enabled`: if you
-  parse the output, stop reading them (alerts are in `alert_channels`). `ok` is now false on a server with development settings: fix what `production` names.
-- **Action.** Weft requires `golovanov/traceloom` `^0.5`. If your site's `composer.json` requires traceloom
-  itself, raise that constraint to `^0.5` too, or Composer cannot install Weft 0.2.0; otherwise
-  `-W` in the upgrade command above updates it.
-- **Action.** Each page has one address: a GET or HEAD request for `/about/` gets a 301 to `/about`, `/home`
-  (the `app.default_route` page) to `/`, `/ru/home` and `/ru/` to `/ru`, the query string kept;
-  other methods are served as before. Point your own links at the final address.
-  `Url::link('/', 'ru')`, hreflang and sitemap entries for a locale root are `/ru`, not `/ru/`: if
-  you write a static `public/sitemap.xml` with `php scripts/sitemap.php`, run it again. `/404` and
-  `/<dir>/index` are a 404, not a second address of the 404 page or of `/<dir>`.
-- **Action.** A path Weft used to clean up silently is a 404 (JSON under `/api`), not the page its clean form
-  names with 200: `/about!!`, non-ASCII or percent-encoded characters, empty, `.` or `..` segments,
-  a leading `//`. Pages are reachable only by paths of `A-Z a-z 0-9 / _ - .`; fix links that use
-  anything else.
+- **Action.** The health check moved from the example's `scripts/health.php` into the engine,
+  `vendor/bin/weft-health`: new fields, `ok` false on more, no `traceloom` or `alertloop_enabled`.
+  Delete `scripts/health.php` and call the new command from deploy scripts, CI and cron.
+- **Action.** Weft requires `golovanov/traceloom` `^0.5`: update with
+  `composer require golovanov/weft:^0.2 -W`, and raise your own traceloom constraint if you have one.
+- **Action.** Each page has one address: a GET or HEAD for `/about/`, `/home` or `/ru/` gets a 301 to
+  `/about`, `/` or `/ru` (`Url::link('/', 'ru')`, hreflang and the sitemap give `/ru` too), and `/404` and
+  `/<dir>/index` are a 404. Point your links at the final address, and run
+  `php scripts/sitemap.php` again if you keep a static sitemap.
+- **Action.** A path Weft used to clean up silently is a 404 (anything but `A-Z a-z 0-9 / _ - .`,
+  an empty, `.` or `..` segment): fix links that use anything else.
 - Canonical, `og:url` and hreflang are built from the matched route, never from the request URI; a
-  404 gets none of them, including a page that answers `http_response_code(404)` itself.
-  `Seo::set(['canonical' => …])` still wins. The matched path is `Url::routePath()` (`null` on a
-  404); on a 404 `Url::currentPath()` is `/` and `Url::isActive()` is false.
-- **Action.** Trace format, for anything that parses traces: `body` in `request_start` and `http_out_request`
-  is an object `{size, content_type, data}` (`data` an array, or the raw string for a body that is
-  not JSON or a form, absent with `log_body` off), or `null` without a body, instead of a string;
-  `uri` in `request_start` and `url` in `http_out_request` / `http_out_response` no longer include
-  the query string, which moved to `query` (absent when there is none).
-- **Action.** Trace files are deleted after 30 days, starting with the first request after the upgrade. To keep
-  that history, set `app.trace.retention_days` before upgrading (`0` keeps files forever).
-- **Action.** A relative `app.cache.path` is taken from `APP_ROOT`, not from the working directory (under
-  PHP-FPM, `public/`), so the site and CLI scripts share one cache; without `APP_ROOT` the default
-  is `storage/cache` in the working directory, not in the system temp directory. If your path is
-  relative, make its new location writable by PHP; the old directory can be deleted.
-- **Action.** `example/public/index.php` no longer calls `session_start()`: the session starts only when a form
-  needs a CSRF token (`Csrf`), so readers get no `PHPSESSID` cookie and no no-cache headers PHP
-  sent with the session. If your site copied this file, remove the line too; if you relied on those
-  headers, send `Cache-Control` yourself.
-- **Action.** Alerts are switched on by the new `app.alerts.channels` list alone; `app.alertloop.enabled` is
-  gone, and without `channels` no alert is sent. To keep AlertLoop alerts, add
-  `'alerts' => ['channels' => ['alertloop']]` to `app/Configs/app.php` and delete `'enabled'` from
-  its `'alertloop'` block. `Alert` reads AlertLoop's settings only from that block (`app.alertloop.*`),
-  as documented; it read a top-level `alertloop.*`, so alerts configured as documented were silently
-  off: if you have `app/Configs/alertloop.php`, move its array into `app.php` under `'alertloop'` and
-  delete the file. A listed channel without its settings sends nothing and says so in the error log,
-  once per request. `Alert::send()` returns `true` only when a channel that reaches a person took the
-  alert.
-- **Action.** Console scripts (`cli` and `phpdbg` SAPIs: `scripts/*.php`, cron jobs) write traces to
-  `LOGS_PATH/cli/`, not `LOGS_PATH/requests/`, which is now the site's alone (PHP's built-in server
-  counts as the site); `app.trace.retention_days` applies to both. If a log collector or a script of
-  yours reads the traces of console scripts, point it at `LOGS_PATH/cli/`. To read a script's trace, use
-  `vendor/bin/eventtrace show <trace_id> --dir=storage/logs/cli`.
-- **Action.** Weft sets no permissions on the error log, cache entries, rate-limit counters and their
-  directories (it created the directories at most `0770`): they get the mode the process umask
-  gives, so with umask `022` error logs are readable by other users unless `storage/` is closed to
-  them. Traces keep traceloom's modes (`0640`, directory `0750`). When upgrading, apply steps 5 and
-  6 of the deployment guide (one group for PHP and every other writer, setgid directories,
-  `umask 002`; step 5 also hands files your scripts left in `storage/logs/requests/` to PHP's
-  group), add `umask 002;` to your cron lines and to commands you run over ssh or from CI, move cron
-  jobs that run Weft scripts from the crontab of `www-data` or `root` to the deploy user's, exclude
-  `storage/` and `config/config.php` if you deploy with rsync, and run `vendor/bin/weft-health` as
-  the PHP user.
-- **Action.** The Redis key prefix defaults to the host of `app.url.base` and a colon (`example.com:`), not
-  `weft:`, and cache entries are kept under `<prefix>cache:`: `Cache::flush()` and `cache-clear.php`
-  delete only those, not rate-limit counters or another site's keys. After the upgrade the Redis
-  cache starts empty, with your own `app.cache.prefix` too. If your `app/Configs/app.php` came from
-  the example, delete its `'prefix' => 'weft:docs:'` line. Old keys with a TTL expire on their own.
-  To delete the old `weft:` keys at once — only if no other Weft site uses this Redis database,
-  since `weft:` was every site's default, and your `app.cache.prefix` does not start with `weft:` —
-  run once after the upgrade, on a Linux shell (with a password, first
-  `read -rs REDISCLI_AUTH && export REDISCLI_AUTH` and type it, so it stays out of the shell history):
-  `redis-cli -h <REDIS_HOST> -p <REDIS_PORT> -n <REDIS_DB> --scan --pattern 'weft:*' | grep '^weft:' | xargs -r -d '\n' -n 500 redis-cli -h <REDIS_HOST> -p <REDIS_PORT> -n <REDIS_DB> unlink`.
-  It deletes in batches of 500 without blocking Redis; a key with a line break in its name is left
-  as it is.
-- **Action.** The cache restores values without their classes: an object comes back as
-  `__PHP_Incomplete_Class`. Cache arrays and scalars; convert objects before `Cache::set()` or
-  `remember()`.
-- **Action.** `HttpClient` returns `ok => false` for a response with status 400 or higher (`error` is
-  `HTTP <status>`); `status` and the decoded `body` are still returned. Before, any response that
-  arrived was `ok`, so a 503 `{"error":"maintenance"}` counted as success. Where your code reads an
-  error response's body, branch on `status`, not on `ok`.
-- **Action.** An alert with a dedupe key is sent at most once per five minutes: a repeat within that window is
-  not sent and `Alert::send()` returns `false`, whether the first send was delivered or not. The
-  window is kept with the rate-limit counters, and if that store fails the alert is sent. Where
-  every occurrence must arrive, send the alert without a dedupe key.
-- **Action.** The example's contact form answers success only when the request was delivered: the email to
-  `MAIL_TO` was accepted (the alert it also sends carries no form data and is no delivery).
-  Otherwise it answers 503 with a
-  message for the visitor and writes `Contact request not delivered` to `errors/`; a failed
-  `mail()` writes a line too. A 422 lists the fields as `errors: [{name, text}]` (was `fields`),
-  the rate limit counts after validation, and a form posted without JavaScript is redirected (303)
-  to the contact page with `?status=`. If your site copied the form, copy `api/contact.php`,
-  `app/Services/ContactService.php`, `pages/contact.php`, `frontend/src/contact.js`, the
-  `status` strings of `lang/en/contact.php` and, for `weft-health`, the `contact_form` check:
-  `app/Bootstrap.php` whole, or, if yours has code of its own, the `Health::check()` line of `init()`,
-  the method `contactForm()` and the three `use` lines. Set `MAIL_TO`, or every submission answers
-  503.
-- **Action.** The example's environment constants: `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` are now
-  `CAPTCHA_SITE_KEY` and `CAPTCHA_SECRET_KEY`; new are `MAIL_DRIVER` and `SMTP_*` (email) and
-  `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ALERT_MAIL_TO` (alert channels) and `INDEXNOW_KEY`;
-  the sender moved from `app.contact.mail_from` to `app.mail.from` (still `MAIL_FROM`). If your
-  `config/config.php` came from the template, rename the two captcha constants in every copy of it
-  (yours and the server's), keeping their values, and add the new ones from
-  `config/config.example.php`; with the old names and the new `app.php`, or with the new names added
-  empty from the template, the captcha is off: `vendor/bin/weft-health` shows
-  `captcha_enabled: false`. If your site copied `app.php`, take its `'captcha'`, `'mail'`, `'alerts'`
-  and `'contact'` blocks, and `'indexnow'` with `INDEXNOW_KEY`: without that block the key does nothing
-  and `/<key>.txt` is a 404.
-  `MAIL_TO` takes plain addresses, several separated by commas; `Name <owner@site>`, which `mail()`
-  accepted, now fails every contact email and `weft-health` (`MAIL_TO is not an email address`,
-  alert channels or not): write the bare address.
-- **Action.** `Database` sends no alert, and `Database::setErrorNotifier()` and `Alert::notifier()` are removed:
-  a database error nobody catches alerts as any unhandled exception does, once per five minutes, with
-  the MySQL message only in `errors/`. Remove
-  `Database::setErrorNotifier(Alert::notifier())` from your `app/Bootstrap.php`, or every request
-  stops with a fatal error.
-- **Action.** `Database::execute()`, `Model::update()` and `Model::delete()` return the number of rows changed
-  (MySQL does not count a row an `UPDATE` leaves as it was), not always `true`. Where you compare
-  their result with `=== true`, compare the count instead.
-- **Action.** `Database` no longer runs `SELECT 1` before every call. A call on a lost connection (MySQL 2006
-  or 2013) throws, and the next call opens a new connection; the statement is not repeated. So the
-  first call of a script idle longer than MySQL's `wait_timeout` throws. Inside
-  `transaction()` a lost connection throws
-  `RuntimeException('Database connection lost in a transaction')` on every call until
-  `transaction()` returns; before, Weft reconnected and the rest of the transaction was written
-  without it. If a rollback fails, the original exception is still the one thrown. Retry the whole
-  transaction where that is safe.
-- Connecting to MySQL gives up after 5 seconds, not pdo_mysql's 30; the new optional `DB_TIMEOUT`
-  constant sets it. A query still has no read timeout but `mysqlnd.net_read_timeout` (the
-  database section of the features guide).
-- **Action.** `Jwt::decode()` rejects a token without `exp`, and `Jwt::encode()` without `ttl` issues a token
-  that expires in an hour instead of one that never does. Tokens issued by `encode()` without `ttl`
-  stop working after the upgrade: issue new ones, and pass `ttl` where an hour is too short.
-- **Action.** HSTS no longer sends `includeSubDomains`, and its lifetime is configurable: `app.security.hsts`
-  stays the switch, the new `app.security.hsts_max_age` (default `31536000`) sets `max-age`, and the
-  new `app.security.hsts_subdomains` (default `false`) adds `includeSubDomains`. If every subdomain of
-  your domain serves HTTPS and you want them covered, set `hsts_subdomains` to `true`. The example's
-  `app.php` now ships with `hsts` off: read "HTTPS and HSTS" in the deployment guide before turning
-  it on.
-- **Action.** A relative `og:image` (`app.seo.og_image`, or an image a page sets with `Seo::set()`) gets
-  `BASE_URI` ahead of it, as links do. If your site lives in a sub-directory and the value includes
-  it (`'/site/img/og.png'`), remove it (`'/img/og.png'`), or the address doubles it
-  (`https://example.com/site/site/img/og.png`) and social previews lose their picture. A full URL
-  is used as it is.
+  404 gets none of them. `Url::routePath()` is the matched path.
+- **Action.** Trace format: `body` is an object `{size, content_type, data}` or `null`, and the
+  query string moved from `uri` and `url` to `query`. Update anything that parses traces.
+- **Action.** Trace files are deleted after `app.trace.retention_days` (30), from the first request
+  after the upgrade: set it before upgrading to keep them (`0` keeps them forever).
+- **Action.** Console scripts (`cli` and `phpdbg`) trace to `LOGS_PATH/cli/`, not
+  `LOGS_PATH/requests/`: point whatever reads script traces there.
+- **Action.** A relative `app.cache.path` is taken from `APP_ROOT`, not from the working directory
+  (without `APP_ROOT`, the default `storage/cache` is in the working directory, not the system temp
+  directory): make its new location writable by PHP.
+- **Action.** `example/public/index.php` no longer calls `session_start()`, so readers get no session
+  cookie. Remove the line from your copy; send `Cache-Control` yourself if you relied on the
+  session's no-cache headers.
+- **Action.** Alerts are switched on by `app.alerts.channels` alone, and `app.alertloop.enabled` is
+  gone; `Alert` reads AlertLoop's settings only from `app.alertloop.*` (it read a top-level
+  `alertloop.*`, so alerts configured as documented were off). Add
+  `'alerts' => ['channels' => ['alertloop']]` to keep them.
+- `Alert::send()` returns `true` only when a channel that reaches a person took the alert.
+- **Action.** Weft sets no permissions on the error log, cache entries and rate-limit counters (it
+  created their directories at most `0770`): they get the process umask. Set up `storage/` with one
+  group, setgid directories and `umask 002`, and run Weft scripts as the deploy user (upgrade guide).
+- **Action.** The Redis key prefix defaults to the host of `app.url.base` (`example.com:`), not
+  `weft:`, and `Cache::flush()` and `cache-clear.php` delete only cache entries. The cache starts
+  empty; delete the example's `'prefix' => 'weft:docs:'` line. The old keys: upgrade guide.
+- **Action.** The cache restores values without their classes (`__PHP_Incomplete_Class`): cache
+  arrays and scalars.
+- **Action.** `HttpClient` returns `ok => false` for a status of 400 or higher (`error` is
+  `HTTP <status>`): where you read an error response's body, branch on `status`.
+- **Action.** An alert with a dedupe key is sent at most once per five minutes, whether the first was
+  delivered or not: send without a key where every occurrence must arrive.
+- **Action.** The example's contact form answers success only when the email to `MAIL_TO` was
+  accepted, otherwise 503; its alert carries no form data. A 422 lists `errors: [{name, text}]` (was
+  `fields`), and a form posted without JavaScript gets a 303. If you copied the form, copy the files
+  the upgrade guide lists.
+- **Action.** The example's constants `RECAPTCHA_SITEKEY` and `RECAPTCHA_SECRETKEY` are now
+  `CAPTCHA_SITE_KEY` and `CAPTCHA_SECRET_KEY`; with the old names the captcha is off. Rename them in
+  your copy, and in the server's when you deploy 0.2.0 (step 5 of the upgrade guide). New constants:
+  `MAIL_DRIVER`, `SMTP_*`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ALERT_MAIL_TO`, `INDEXNOW_KEY`.
+- **Action.** The sender moved from `app.contact.mail_from` to `app.mail.from` (still `MAIL_FROM`),
+  and `MAIL_TO` takes bare addresses separated by commas: `Name <owner@site>` now fails every contact
+  email and `weft-health`.
+- **Action.** `Database` sends no alert: `Database::setErrorNotifier()` and `Alert::notifier()` are
+  removed, and an uncaught database error alerts as any unhandled exception. Remove the
+  `setErrorNotifier()` call from `app/Bootstrap.php`, or every request stops with a fatal error.
+- **Action.** `Database::execute()`, `Model::update()` and `Model::delete()` return the number of rows
+  changed, not always `true`: compare the count where you compared with `=== true`.
+- **Action.** `Database` no longer runs `SELECT 1` before every call: a call on a lost connection
+  throws and the next one reconnects, so the first call after an idle longer than `wait_timeout`
+  throws; inside `transaction()` every call throws until it returns. Retry the whole transaction.
+- Connecting to MySQL gives up after 5 seconds, not 30; the new optional `DB_TIMEOUT` sets it.
+- **Action.** `Jwt::decode()` rejects a token without `exp`, and `Jwt::encode()` without `ttl` issues
+  one that expires in an hour: tokens issued without `ttl` stop working, issue new ones.
+- **Action.** HSTS sends `includeSubDomains` only with the new `app.security.hsts_subdomains`, and the
+  new `hsts_max_age` sets `max-age` (default `31536000`). The example ships with `hsts` off.
+- **Action.** A relative `og:image` gets `BASE_URI` ahead of it: in a sub-directory, remove it from
+  the value (`'/img/og.png'`, not `'/site/img/og.png'`).
 
 ### Fixed
 
-- An exception thrown by a page or an API endpoint raises the same critical alert as any other
-  unhandled exception (same message and dedupe key); before, it was only logged. The alert is sent
-  after the 500 response, and the half-rendered output is discarded.
-- A Redis that rejects the connection (a wrong, missing or unexpected `REDIS_PASSWORD`, `REDIS_DB`
-  out of range, which used to select database 0) or rejects commands (a read-only replica,
-  `maxmemory` under `noeviction`) no longer makes cached pages fail with 500. On a rejected
-  connection the cache and rate limits fall back to files, as with an unreachable Redis; a rejected
-  read is a miss and a write is skipped. When phpredis throws on the rejection, the rest of the
-  request uses files and the error log gets one `Cache store failed` line per request; a cache
-  write it answers with `false` instead is skipped without a line (a rejected counter is always
-  logged as `Rate limit failed open`). If `weft-health` reports `rate_limit_store: file`, `rate_limit_error` says why.
-- **Action.** The example under PHP's built-in server (`php -S … -t public public/index.php`) serves its CSS, JS
-  and images; before, every asset request returned 404. If your site copied
-  `example/public/index.php` and you develop with `php -S`, copy the new `cli-server` block at its
-  top.
-- 61 smaller fixes: 5 security, 28 reliability, 28 docs.
+- **Action.** The example under PHP's built-in server serves its CSS, JS and images. If you copied
+  `public/index.php` and develop with `php -S`, copy the `cli-server` block at its top.
+- 65 smaller fixes: 5 security, 30 reliability, 30 docs.
 
 ### Removed
 
-- **Action.** Unused API: `Config::isLoaded()`, `Locale::fromAcceptLanguage()`, the `LOCALE` constant,
-  `RequestContext::hasRequest()`, `logPath()` and `setLogPath()`, and reading the manifest from
-  `public/dist/manifest.json`, where Vite before 5 wrote it. Use `locale()` instead of `LOCALE` and
-  `RequestContext::request() !== null` instead of `hasRequest()`; build assets with Vite 5 or later.
-- **Action.** `RedisStore::client()` is removed: if your code read the store's `Redis` connection, open your own
-  `new \Redis()` with the `REDIS_*` settings.
+- **Action.** Unused API: `Config::isLoaded()`, `Locale::fromAcceptLanguage()`, the `LOCALE`
+  constant, `RequestContext::hasRequest()`, `logPath()`, `setLogPath()`, and the manifest of Vite
+  before 5. Use `locale()` and `RequestContext::request() !== null`; build with Vite 5 or later.
+- **Action.** `RedisStore::client()`: open your own `new \Redis()` with the `REDIS_*` settings.
 
 ## 0.1.3 - 2026-08-24
 

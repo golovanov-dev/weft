@@ -137,7 +137,7 @@ $delivered = (new ContactService())->submit([
     'project_url' => $field('project_url'),
 ]);
 
-// Success only when the email was accepted or an alert reached a person; the service logged the failure.
+// Success only when the email was accepted; the service logged the failure.
 if (!$delivered) {
     $reply(503, 'error', 'Your message could not be sent right now. Please try again later.');
     return;

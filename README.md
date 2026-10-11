@@ -43,11 +43,13 @@ convention-driven core so a new site is mostly content.
   (`/about`), others get `/ru/about`, with automatic hreflang and canonical redirects.
 - **Optional caching** — file or Redis. `Cache::remember()` is safe even when caching is off.
 - **Request tracing** — one JSONL timeline per request via
-  [traceloom](https://github.com/golovanov-dev/traceloom): JSON and form bodies up to 8 KB and query
-  strings logged as fields so redaction by key reaches them (other bodies as raw strings it cannot
-  look inside), console scripts traced to a separate directory, trace files deleted after 30 days.
-- **Form protection by default** — rate limiting, CSRF, honeypot and a captcha: Google reCAPTCHA v3
-  or Yandex SmartCaptcha.
+  [traceloom](https://github.com/golovanov-dev/traceloom), with redaction of sensitive keys. Request
+  bodies are logged by default, so what your forms collect (an email, a phone number, a message) is
+  kept in the trace for `app.trace.retention_days` days (30 by default) unless you list its key in
+  `app.trace.sensitive_keys`. Turning `app.trace.log_body` off drops bodies, not the fields your
+  code records with `Trace::event()`.
+- **Form protection** — rate limiting, CSRF, honeypot and a captcha (Google reCAPTCHA v3 or Yandex
+  SmartCaptcha, off by default), called from your form's endpoint.
 - **Mail** — plain-text UTF-8 email through PHP `mail()` or SMTP (STARTTLS or TLS), no extra package.
 - **Alerting for sensitive spots** — to [AlertLoop](https://github.com/golovanov-dev/alertloop),
   Telegram, email or the error log; best-effort with a timeout, and a failed delivery is recorded on
@@ -60,26 +62,31 @@ convention-driven core so a new site is mostly content.
 
 - PHP **8.4+** with `ext-curl` and `ext-json`
 - `ext-pdo` with `pdo_mysql` only if you use the database (MySQL), `ext-redis` only for the
-  Redis cache
+  Redis cache, `ext-dom` only for `vendor/bin/weft-seo-audit`
 - Node.js 20.19+ or 22.12+ (required by Vite 7) only to rebuild the frontend — not needed to run the example, whose built assets
   are committed
 
 ## Install
 
-```bash
-composer require golovanov/weft
-```
-
 Weft expects a small site skeleton around it. The fastest way to get one is to **clone** the repo
-and copy the [`example/`](example) directory — it is a complete, working site:
+and copy the [`example/`](example) directory — it is a complete, working site, and its
+`composer install` installs the engine:
 
 ```bash
 git clone https://github.com/golovanov-dev/weft.git
 cp -r weft/example my-site
+cd my-site
+composer install
 ```
 
 In `my-site/.gitignore`, delete the line `/composer.lock`, then make `my-site` a repository
 (`git init`) and commit the lock file with your site.
+
+To add the engine to a site skeleton of your own instead, in its directory:
+
+```bash
+composer require golovanov/weft
+```
 
 > **Get the example by cloning, not by "Download ZIP".** The package archive is kept lean:
 > `example/`, `tests/` and CI config are `export-ignore`d, so `composer require` — and GitHub's

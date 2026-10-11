@@ -66,8 +66,10 @@ return [
                 ['url' => '/docs/project-structure', 'title' => 'Project structure'],
                 ['url' => '/docs/configuration', 'title' => 'Configuration'],
                 ['url' => '/docs/features', 'title' => 'Features'],
-                ['url' => '/docs/deployment', 'title' => 'Deployment'],
                 ['url' => '/docs/reference', 'title' => 'Reference'],
+                ['url' => '/docs/deployment', 'title' => 'Deployment'],
+                ['url' => '/docs/troubleshooting', 'title' => 'Troubleshooting', 'notes' => 'What weft-health reports and how to fix it'],
+                ['url' => '/docs/upgrading', 'title' => 'Upgrading', 'notes' => 'From 0.1.x to 0.2'],
             ],
             'Optional' => [
                 ['url' => 'https://github.com/golovanov-dev/weft', 'title' => 'Source code'],

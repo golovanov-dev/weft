@@ -68,8 +68,9 @@ final class RedisStore implements Store
      * A store on this request's connection to the Redis of REDIS_HOST, REDIS_PORT, REDIS_PASSWORD
      * and REDIS_DB, its keys under sitePrefix() . $namespace. The first call connects; the cache and
      * the rate limiter share that connection. A caller whose command fails goes on with files.
-     * Redis is tried once per request: after a failed connection, or a command that closed it
-     * (command()), every later call throws at once and its caller goes on with files too.
+     * After a failed connection, or a command that closed it (command()), every later call in this
+     * request throws at once and its caller goes on with files too. A store created before that
+     * keeps its client, which phpredis may connect again on its next command.
      *
      * @internal Used by Cache and RateLimiter.
      */

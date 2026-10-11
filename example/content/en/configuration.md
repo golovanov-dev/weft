@@ -40,7 +40,7 @@ define('DB_TIMEOUT', 5);     // optional: seconds to wait for the connection, de
 ```
 
 The MySQL server is reached on its default port. There is no read timeout setting: queries wait
-`mysqlnd.net_read_timeout` ([Features](/docs/features), "Database").
+`mysqlnd.net_read_timeout` ([Features](/docs/features#database)).
 
 Redis (only for the `redis` cache driver):
 
@@ -186,7 +186,8 @@ and without it is valid.
 ],
 ```
 
-Both are described in [Features](/docs/features), "Crawlers and AI assistants" and "IndexNow".
+Both are described in Features: [Crawlers and AI assistants](/docs/features#crawlers-and-ai-assistants)
+and [IndexNow](/docs/features#indexnow).
 
 ### The rest
 
@@ -204,14 +205,14 @@ Both are described in [Features](/docs/features), "Crawlers and AI assistants" a
 HSTS is off by default and in this example. With `'hsts' => true` every response outside
 `DEV_MODE` carries `Strict-Transport-Security: max-age=<hsts_max_age>`, plus `; includeSubDomains`
 only with `'hsts_subdomains' => true`. A browser keeps it for `max-age` seconds; turning `hsts` off
-does not shorten that, only `max-age=0` sent to each returning visitor does. Read "HTTPS and HSTS" in
-[Deployment](/docs/deployment) before turning it on.
+does not shorten that, only `max-age=0` sent to each returning visitor does. Read
+[HTTPS and HSTS](/docs/deployment#https-and-hsts) before turning it on.
 
 The session cookie (set in `public/index.php`) is `HttpOnly`, `SameSite=Lax`, and `Secure` when the
 request came over HTTPS (`Request::isHttps()`: `X-Forwarded-Proto` from a proxy in `PROXY_IPS`,
 otherwise `$_SERVER['HTTPS']`); `session.use_strict_mode` makes PHP replace a session id it did not
 issue. Behind a proxy that talks plain HTTP to PHP, list it in `PROXY_IPS` or pass `HTTPS=on` to
-PHP, or the cookie goes without `Secure`: "HTTPS behind a proxy" in [Deployment](/docs/deployment)
+PHP, or the cookie goes without `Secure`: [HTTPS behind a proxy](/docs/deployment#https-behind-a-proxy)
 shows how.
 
 Caching is deliberately **on** in this demo (`'cache' => ['enabled' => true]` in
@@ -246,7 +247,7 @@ So the keys `vendor/bin/weft-health` names under `captcha_missing_keys` (`site_k
 `CAPTCHA_SECRET_KEY` to `''`. `'driver' => 'smartcaptcha'` verifies Yandex SmartCaptcha tokens with
 the same keys, but the example's pages are written for reCAPTCHA: switching the driver alone makes
 the form reject every request. Change `components/layout.php`, `pages/contact.php` and
-`api/contact.php` with it ([Features](/docs/features), "SmartCaptcha in this example").
+`api/contact.php` with it ([Features](/docs/features#smartcaptcha-in-this-example)).
 
 ### Mail
 
