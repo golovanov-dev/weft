@@ -137,8 +137,9 @@ npm install
 npm run dev       # Vite dev server with HMR
 ```
 
-With `DEV_MODE=true` the layout points at the dev server; with it off, at the built files in
-`public/dist/`. Run `npm run build` to refresh those. You never edit templates for this.
+With `DEV_MODE=true` the layout points at the dev server, `http://localhost:5173/dist`
+(`app.vite.dev_server`: the server's origin plus `base` from `vite.config.js`); with it off, at the
+built files in `public/dist/`. Run `npm run build` to refresh those. You never edit templates for this.
 
 ## Your first page
 

@@ -134,8 +134,10 @@ Node is needed only to edit styles/JS:
 ```bash
 cp config/config.example.php config/config.php   # then set DEV_MODE=true in it
 npm install
-npm run dev                                       # Vite dev server on :5173
+npm run dev                                       # Vite dev server: assets at http://localhost:5173/dist/
 ```
+
+Keep opening the site on the PHP server: the Vite address serves only the assets its pages load.
 
 `npm run build` refreshes the committed `public/dist/`.
 
@@ -151,7 +153,9 @@ config('app.seo.site_name');
 config('app.cache.enabled', false);
 ```
 
-Everything optional is a flag in `app/Configs/app.php`:
+A new site starts with about eight keys,
+[a short app.php](example/content/en/configuration.md#a-short-appphp). Everything optional is a
+flag in `app/Configs/app.php`:
 
 ```php
 'locales'   => ['enabled' => true, 'supported' => ['en', 'ru']],

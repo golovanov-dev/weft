@@ -35,7 +35,7 @@ final class ContactFormCheckTest extends TestCase
         Config::set('app.alerts.channels', ['alertloop']);
         Config::set('app.alertloop', ['base_url' => 'https://alerts.site.test', 'api_key' => 'k']);
 
-        $this->assertSame(['MAIL_TO is empty'], Bootstrap::contactForm()['problems']);
+        $this->assertSame(['app.contact.mail_to is empty'], Bootstrap::contactForm()['problems']);
     }
 
     /** Mail sends only to plain addresses, and the template's address reaches nobody. */

@@ -47,7 +47,7 @@ There is no route file. The URL path maps straight onto a file:
 | `/ru/about` | `pages/about.php` rendered in the `ru` locale |
 | `/sitemap.xml`, `/robots.txt` | generated from config |
 | anything else | `pages/404.php` |
-| an uncaught exception in a page | `pages/500.php`, if present (receives `$error`); the engine's own 500 if it or the layout throws too |
+| an uncaught exception in a page | `pages/500.php`, if present (receives `$error`); the engine's own 500 if it or the layout throws too; 503 for a `ServiceUnavailable` |
 
 Each page has one address. A GET or HEAD request for `/about/` gets a 301 to `/about`, `/home` (the
 `app.default_route` page) to `/`, `/ru/home` and `/ru/` to `/ru`, `/en/about` (default locale) to
@@ -144,7 +144,8 @@ App\Bootstrap::init();                        // 6) site wiring
 6. Response->send()            status, headers, body
 ```
 
-Any uncaught `Throwable` is logged, alerted (to the channels in `app.alerts.channels`) and turned into a 500 — JSON for
+Any uncaught `Throwable` is logged, alerted (to the channels in `app.alerts.channels`) and turned into a 500
+([a `ServiceUnavailable`](/docs/features#a-dependency-that-is-down) into a 503 with `Retry-After`) — JSON for
 a request routed to `/api/` or one that asked for JSON, HTML otherwise, with a stack trace only
 when `DEBUG` is on. Whatever the page or endpoint printed before it threw is dropped. The API
 contract is in [Features](/docs/features).

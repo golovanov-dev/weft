@@ -35,7 +35,7 @@ final class Bootstrap
 
         $problems = [];
         if ($recipients === []) {
-            $problems[] = 'MAIL_TO is empty';
+            $problems[] = 'app.contact.mail_to is empty';
         }
         if (array_filter($recipients, static fn(string $a): bool => !Mail::isAddress($a)) !== []) {
             $problems[] = 'MAIL_TO is not an email address';

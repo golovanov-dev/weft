@@ -28,7 +28,7 @@ field counts as on a server. `ok` is false when any of these is bad:
 | `alert_errors` | not empty | A channel in `alert_channels` lacks a setting and is skipped: the same section |
 | `mail_errors` | not empty | `app.mail` cannot send: the same section |
 | `seo_errors` | not empty | A `robots.txt` or `llms.txt` file in `public/` (in `WEB_ROOT`, when `config/config.php` sets it) that the web server serves instead of `app.seo.robots_groups` or `app.llms`: delete the file |
-| `checks.<name>.ok` | `false` | A check your site added in `app/Bootstrap.php` failed; its other fields say why. This example's `contact_form` lists in `problems`: `MAIL_TO is empty`; `MAIL_TO is on example.com` (the template's address: set your inbox); `MAIL_TO is not an email address` (an entry is not a plain address, such as `Name <a@b>`: write bare addresses, several separated by commas) |
+| `checks.<name>.ok` | `false` | A check your site added in `app/Bootstrap.php` failed; its other fields say why. This example's `contact_form` lists in `problems`: `app.contact.mail_to is empty` (set `MAIL_TO`; with the [short app.php](/docs/configuration#a-short-appphp), also add the `contact` block that reads it); `MAIL_TO is on example.com` (the template's address: set your inbox); `MAIL_TO is not an email address` (an entry is not a plain address, such as `Name <a@b>`: write bare addresses, several separated by commas) |
 
 `rate_limit_path` is `app.rate_limit.path`, else `ratelimit/` in `app.cache.path`
 (`storage/cache/ratelimit` by default; `null` while counters are in Redis). A relative path is taken
@@ -144,6 +144,30 @@ do. The site logs the reason to `errors/<date>.log` under `LOGS_PATH`, time in `
 - `Rate limit failed open` (`Claim failed open` for an alert's dedupe window) comes when a counter
   was not counted; `counter not writable` as the reason means Redis answered with an error, or, with
   files, a counter file PHP cannot write ([above](#php-cannot-write-storage)).
+
+## Every page answers 503
+
+Pages and endpoints that use the database answer 503 when the site cannot connect to it, whatever
+the reason; with the connection in `bootstrap.php` or `App\Bootstrap`, every request does. Each such
+request leaves the reason in `storage/logs/errors/`:
+
+```bash
+grep -rh 'Database connection error' storage/logs/errors/
+```
+
+The `DATABASE` line has the driver's message after `Database connection error:`. Its code in square
+brackets does not depend on the language of the server, the message may be translated:
+
+| Message | Cause |
+|---|---|
+| `could not find driver` | PHP has no `pdo_mysql` extension: install or enable it |
+| `[1045] Access denied for user` | `DB_USER` or `DB_PASSWORD` in `config/config.php` |
+| `[1044] Access denied for user … to database` | `DB_NAME`, or the user has no rights on that database |
+| `[1049] Unknown database` | `DB_NAME` |
+| `[2002]`: `Connection refused`, `timed out`, `getaddrinfo for <host> failed` | `DB_HOST`, or the MySQL server is down or unreachable from this host |
+
+No such line: a page or an endpoint threw a `ServiceUnavailable` of its own, and the `KERNEL` line
+of the same request gives its message (`EXCEPTION`, when it came from the bootstrap).
 
 ## The contact form answers 503
 

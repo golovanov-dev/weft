@@ -268,7 +268,8 @@ final class CaptchaTest extends TestCase
             return;
         }
         $this->assertCount(1, $events);
-        $this->assertSame(['errorCodes', 'hostOk', 'actionOk', 'host'], array_keys($events[0]['data']));
+        // Only these fields, in any order: never the secret or the token.
+        $this->assertEqualsCanonicalizing(['errorCodes', 'hostOk', 'actionOk', 'host'], array_keys($events[0]['data']));
         $this->assertStringContainsString('Captcha rejected a submission: ' . $reason, $log);
     }
 

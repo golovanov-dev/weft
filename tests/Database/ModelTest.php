@@ -44,8 +44,8 @@ final class ModelTest extends TestCase
             ['Ann', 'a@example.com'],
         ];
         yield 'update' => [
-            static fn(Model $m): mixed => $m->update(5, ['name' => 'Ann', 'active' => 0]),
-            'UPDATE users SET `name` = ?, `active` = ? WHERE `id` = ?',
+            static fn(Model $m): mixed => $m->update(5, ['_draft' => 'Ann', 'Col2' => 0]),
+            'UPDATE users SET `_draft` = ?, `Col2` = ? WHERE `id` = ?',
             ['Ann', 0, 5],
         ];
         yield 'delete' => [static fn(Model $m): mixed => $m->delete(5), 'DELETE FROM users WHERE `id` = ?', [5]];
@@ -84,13 +84,6 @@ final class ModelTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
         $call($this->model());
-    }
-
-    public function testPlainIdentifiersAreAccepted(): void
-    {
-        $columns = new \ReflectionMethod(Model::class, 'columns');
-
-        $this->assertSame(['name', '_draft', 'Col2'], $columns->invoke(null, ['name' => 1, '_draft' => 2, 'Col2' => 3]));
     }
 
     public function testNumericKeyIsRejected(): void

@@ -69,7 +69,7 @@ return [
                 ['url' => '/docs/reference', 'title' => 'Reference'],
                 ['url' => '/docs/deployment', 'title' => 'Deployment'],
                 ['url' => '/docs/troubleshooting', 'title' => 'Troubleshooting', 'notes' => 'What weft-health reports and how to fix it'],
-                ['url' => '/docs/upgrading', 'title' => 'Upgrading', 'notes' => 'From 0.1.x to 0.2'],
+                ['url' => '/docs/upgrading', 'title' => 'Upgrading', 'notes' => 'From 0.2 to 0.3, and from 0.1.x to 0.2'],
             ],
             'Optional' => [
                 ['url' => 'https://github.com/golovanov-dev/weft', 'title' => 'Source code'],
@@ -84,7 +84,7 @@ return [
 
     'vite' => [
         'entry' => 'src/main.js',
-        'dev_server' => 'http://localhost:5173',
+        'dev_server' => 'http://localhost:5173/dist',   // the dev server's origin plus base of vite.config.js
     ],
 
     // Caching is ON here: it makes Markdown rendering cheap and shows the feature in a real setting.

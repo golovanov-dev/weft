@@ -173,6 +173,10 @@ final class Trace
         ]);
     }
 
+    /**
+     * Sync the trace file to disk (traceloom's flush() is an fsync). Each event reaches the OS as it
+     * is written, so only a script that must survive a power loss needs this; the Kernel does not call it.
+     */
     public static function flush(): void
     {
         self::$tracer?->flush();

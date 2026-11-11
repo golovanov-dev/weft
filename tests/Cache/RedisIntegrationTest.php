@@ -59,11 +59,17 @@ final class RedisIntegrationTest extends TestCase
         Cache::set('page', ['title' => 'Home'], 60);
         $this->assertSame(['title' => 'Home'], Cache::get('page'));
         $this->assertTrue(Cache::has('page'));
+        Cache::set('object', new \ArrayObject([1]));
+        $this->assertInstanceOf(\__PHP_Incomplete_Class::class, Cache::get('object'));
         $ttl = $this->redis->ttl($this->prefix . 'cache:page');
         $this->assertGreaterThan(0, $ttl);
         $this->assertLessThanOrEqual(60, $ttl);
 
         $this->assertTrue(RateLimiter::allow('form', 2, 60));
+        // The first hit sets the window: without it the counter never expires and the client stays blocked.
+        $ttl = $this->redis->ttl($this->prefix . 'ratelimit:form:cli');
+        $this->assertGreaterThan(0, $ttl);
+        $this->assertLessThanOrEqual(60, $ttl);
         $this->redis->expire($this->prefix . 'ratelimit:form:cli', 30);
         $this->assertTrue(RateLimiter::allow('form', 2, 60));
         $this->assertFalse(RateLimiter::allow('form', 2, 60));

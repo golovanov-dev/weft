@@ -28,8 +28,10 @@ To edit styles/JS with hot reload, opt into dev mode:
 ```bash
 cp config/config.example.php config/config.php   # then set DEV_MODE=true in it
 npm install
-npm run dev                                       # Vite dev server on :5173
+npm run dev                                       # Vite dev server: assets at http://localhost:5173/dist/
 ```
+
+Keep opening the site on the PHP server: the Vite address serves only the assets its pages load.
 
 Run `npm run build` before committing to refresh `public/dist/`.
 

@@ -30,7 +30,7 @@ define('LOGS_PATH', dirname(__DIR__) . '/storage/logs');
 define('APP_TIMEZONE', 'UTC');
 
 // --- Database (optional — only if the site uses Golovanov\Weft\Database) ----------------------------
-define('DB_HOST', '127.0.0.1');
+define('DB_HOST', '127.0.0.1');   // a non-default port goes here too: '127.0.0.1:3307'
 define('DB_NAME', '');
 define('DB_USER', '');
 define('DB_PASSWORD', '');

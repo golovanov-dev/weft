@@ -7,6 +7,7 @@ namespace Golovanov\Weft\Database;
 use PDO;
 use PDOException;
 use Golovanov\Weft\Config\Config;
+use Golovanov\Weft\Http\ServiceUnavailable;
 use Golovanov\Weft\Observability\ErrorHandler;
 use Golovanov\Weft\Support\Clock;
 
@@ -16,7 +17,8 @@ use Golovanov\Weft\Support\Clock;
  *
  * A lost connection is dropped and the call throws; the next call reconnects, except inside
  * transaction(), where every call throws until it returns. Errors are logged and thrown as
- * RuntimeException; the Kernel or the exception handler alerts on those nobody catches.
+ * RuntimeException, a failed connection as ServiceUnavailable (the Kernel answers it with 503); the
+ * Kernel or the exception handler alerts on those nobody catches.
  */
 final class Database
 {
@@ -183,7 +185,7 @@ final class Database
             // Created here, not in failure(): the alert dedupe key is the line of the exception, and
             // an alert about failed queries must not hold back one about the database being down.
             $message = 'Database connection error';
-            throw new \RuntimeException($message, self::logged($message, $e), $e);
+            throw new ServiceUnavailable($message, code: self::logged($message, $e), previous: $e);
         }
     }
 

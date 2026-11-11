@@ -5,80 +5,17 @@ declare(strict_types=1);
 namespace Golovanov\Weft\Tests\Database;
 
 use Golovanov\Weft\Database\Database;
+use Golovanov\Weft\Http\ServiceUnavailable;
 use Golovanov\Weft\Tests\TestCase;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
 /**
- * Failures on a PDO that talks to no server. Reconnecting needs a real one: DatabaseIntegrationTest.
- * After a lost connection the next call would open a real PDO, so these tests look at the dropped
- * connection through reflection instead.
+ * Failures a real MySQL cannot be made to give, on a PDO that talks to no server. A lost connection,
+ * in a transaction or not, is tested on a real one: DatabaseIntegrationTest. The next call would
+ * open a real PDO, so the dropped connection is looked at through reflection.
  */
 final class DatabaseTest extends TestCase
 {
-    public function testLostConnectionThrowsAndDropsTheConnection(): void
-    {
-        $pdo = new FakePdo();
-        $db = $pdo->install();
-        $pdo->prepareFailures = [FakePdo::lostConnection()];
-
-        try {
-            $db->execute('INSERT INTO t VALUES (1)');
-            $this->fail('A lost connection must throw.');
-        } catch (\RuntimeException $e) {
-            $this->assertSame('Database query failed', $e->getMessage());
-            $this->assertSame(2006, $e->getCode());
-        }
-        $this->assertSame([], $pdo->statements);
-        $this->assertNull(self::connection($db));
-    }
-
-    public function testLostConnectionInATransactionThrowsWithoutRepeatingTheStatement(): void
-    {
-        $pdo = new FakePdo();
-        $db = $pdo->install();
-        $pdo->prepareFailures = [FakePdo::lostConnection()];
-
-        try {
-            $db->transaction(static fn(Database $db): int => $db->execute('INSERT INTO t VALUES (1)'));
-            $this->fail('A lost connection in a transaction must throw.');
-        } catch (\RuntimeException $e) {
-            $this->assertSame('Database connection lost in a transaction', $e->getMessage());
-            $this->assertSame(2006, $e->getCode());
-        }
-        $this->assertSame([], $pdo->statements);
-    }
-
-    public function testCaughtLossInATransactionKeepsEveryLaterCallFailing(): void
-    {
-        $pdo = new FakePdo();
-        $db = $pdo->install();
-        $pdo->prepareFailures = [null, FakePdo::lostConnection()];
-        $later = null;
-
-        try {
-            $db->transaction(static function (Database $db) use (&$later): void {
-                $db->execute("INSERT INTO t VALUES ('a')");
-                try {
-                    $db->execute("INSERT INTO t VALUES ('b')");
-                } catch (\RuntimeException) {
-                    // The callback swallows the loss and goes on.
-                }
-                try {
-                    $db->execute("INSERT INTO t VALUES ('c')");
-                } catch (\RuntimeException $e) {
-                    $later = $e;
-                }
-            });
-            $this->fail('A lost connection in a transaction must throw.');
-        } catch (\RuntimeException $e) {
-            $this->assertSame('Database connection lost in a transaction', $e->getMessage());
-        }
-        $this->assertSame('Database connection lost in a transaction', $later?->getMessage());
-        $this->assertSame([["INSERT INTO t VALUES ('a')", []]], $pdo->statements);
-        $this->assertNull(self::connection($db));
-        $this->assertNull((new \ReflectionProperty(Database::class, 'lostInTransaction'))->getValue($db));
-    }
-
     public function testFailedRollbackKeepsTheOriginalExceptionAndDropsTheConnection(): void
     {
         $pdo = new FakePdo();
@@ -100,13 +37,13 @@ final class DatabaseTest extends TestCase
     }
 
     #[RunInSeparateProcess]
-    public function testConnectionErrorAndQueryErrorAlertUnderDifferentKeys(): void
+    public function testConnectionErrorIsServiceUnavailableAndAlertsUnderItsOwnKey(): void
     {
         // An unknown charset fails in the client, before any network access.
         define('DB_CHARSET', 'no-such-charset');
         $pdo = new FakePdo();
         $db = $pdo->install();
-        $pdo->prepareFailures = [new \PDOException('syntax error')];
+        $pdo->prepareFailure = new \PDOException('syntax error');
 
         try {
             $db->execute('SELEKT 1');
@@ -121,6 +58,9 @@ final class DatabaseTest extends TestCase
         }
 
         $this->assertSame('Database connection error', $connection->getMessage());
+        // The Kernel answers a failed connection with 503; a failed query stays a 500.
+        $this->assertInstanceOf(ServiceUnavailable::class, $connection);
+        $this->assertNotInstanceOf(ServiceUnavailable::class, $query);
         // ErrorHandler::alertException() keys the alert by the file and line of the exception.
         $this->assertNotSame($query->getFile() . $query->getLine(), $connection->getFile() . $connection->getLine());
     }

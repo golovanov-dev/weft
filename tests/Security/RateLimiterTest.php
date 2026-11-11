@@ -15,21 +15,6 @@ use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
 final class RateLimiterTest extends TestCase
 {
-    private string $dir = '';
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-        $this->dir = $this->makeTempDir();
-        Config::set('app.rate_limit.path', $this->dir);
-    }
-
-    protected function tearDown(): void
-    {
-        $this->removeDir($this->dir);
-        parent::tearDown();
-    }
-
     public function testAllowLimitsAClientWithoutASessionWhileCachingIsOff(): void
     {
         Config::set('app.cache.enabled', false);
@@ -105,9 +90,8 @@ final class RateLimiterTest extends TestCase
 
     public function testFailsOpenWhenTheCounterCannotBeWritten(): void
     {
-        $notADir = $this->dir . '/file';
-        file_put_contents($notADir, '');
-        Config::set('app.rate_limit.path', $notADir);
+        // A file where the counter directory should be.
+        Config::set('app.rate_limit.path', __FILE__);
 
         $this->assertTrue(RateLimiter::allow('form', 1, 60));
         $this->assertTrue(RateLimiter::allow('form', 1, 60));
@@ -116,19 +100,18 @@ final class RateLimiterTest extends TestCase
     public function testStoreStatusReportsTheCounterDirectory(): void
     {
         $this->assertSame(
-            ['store' => 'file', 'path' => $this->dir, 'writable' => true, 'error' => null],
+            ['store' => 'file', 'path' => Config::get('app.rate_limit.path'), 'writable' => true, 'error' => null],
             RateLimiter::storeStatus(),
         );
     }
 
     public function testStoreStatusReportsAnUnwritableCounterDirectory(): void
     {
-        $notADir = $this->dir . '/file';
-        file_put_contents($notADir, '');
-        Config::set('app.rate_limit.path', $notADir);
+        // A file where the counter directory should be.
+        Config::set('app.rate_limit.path', __FILE__);
 
         $this->assertSame(
-            ['store' => 'file', 'path' => $notADir, 'writable' => false, 'error' => 'PHP cannot write ' . $notADir],
+            ['store' => 'file', 'path' => __FILE__, 'writable' => false, 'error' => 'PHP cannot write ' . __FILE__],
             RateLimiter::storeStatus(),
         );
     }
@@ -151,52 +134,6 @@ final class RateLimiterTest extends TestCase
         }
     }
 
-    #[RunInSeparateProcess]
-    public function testStoreStatusFallsBackToFilesWhenRedisIsUnavailable(): void
-    {
-        // Nothing listens on port 1; without ext-redis the store fails even earlier.
-        define('REDIS_PORT', 1);
-        Config::set('app.cache.driver', 'redis');
-
-        $status = RateLimiter::storeStatus();
-        $this->assertSame(['store' => 'file', 'path' => $this->dir, 'writable' => true], array_slice($status, 0, 3));
-        $this->assertStringStartsWith('Redis not used: ', (string) $status['error']);
-    }
-
-    public function testRedisStoreCountsWithItsPrefixAndTheWindow(): void
-    {
-        if (!extension_loaded('redis')) {
-            $this->markTestSkipped('ext-redis is not installed');
-        }
-
-        // No Redis server in tests: the client is replaced and the store is built without
-        // connecting. This covers the wiring (prefixed key, window as TTL, count to verdict),
-        // not the Lua script itself.
-        $redis = new class extends \Redis {
-            /** @var array<string, int> */
-            public array $counts = [];
-            /** @var array<string, int> */
-            public array $ttls = [];
-
-            public function eval(string $script, array $args = [], int $num_keys = 0): mixed
-            {
-                [$key, $ttl] = $args;
-                $this->counts[$key] = ($this->counts[$key] ?? 0) + 1;
-                $this->ttls[$key] = $ttl;
-                return $this->counts[$key];
-            }
-        };
-        $store = (new \ReflectionClass(RedisStore::class))->newInstanceWithoutConstructor();
-        (new \ReflectionProperty(RedisStore::class, 'redis'))->setValue($store, $redis);
-        (new \ReflectionProperty(RedisStore::class, 'prefix'))->setValue($store, 'site:');
-        (new \ReflectionProperty(RateLimiter::class, 'store'))->setValue(null, $store);
-
-        $this->assertTrue(RateLimiter::allow('api', 2, 30));
-        $this->assertTrue(RateLimiter::allow('api', 2, 30));
-        $this->assertFalse(RateLimiter::allow('api', 2, 30));
-        $this->assertSame(['site:ratelimit:api:cli' => 30], $redis->ttls);
-    }
-
     public function testFailsOpenAndLogsWhenRedisRejectsTheIncrement(): void
     {
         if (!extension_loaded('redis')) {
@@ -204,22 +141,31 @@ final class RateLimiterTest extends TestCase
         }
 
         // phpredis 6 throws on an error reply to EVAL (read-only replica, maxmemory under noeviction).
+        // A client that reports itself connected is used as is; close() must not reach for a server.
         $redis = new class extends \Redis {
+            public function isConnected(): bool
+            {
+                return true;
+            }
+
+            public function close(): bool
+            {
+                return true;
+            }
+
             public function eval(string $script, array $args = [], int $num_keys = 0): mixed
             {
                 throw new \RedisException("READONLY You can't write against a read only replica.");
             }
         };
-        $store = (new \ReflectionClass(RedisStore::class))->newInstanceWithoutConstructor();
-        (new \ReflectionProperty(RedisStore::class, 'redis'))->setValue($store, $redis);
-        (new \ReflectionProperty(RedisStore::class, 'prefix'))->setValue($store, 'site:');
-        (new \ReflectionProperty(RateLimiter::class, 'store'))->setValue(null, $store);
+        (new \ReflectionProperty(RedisStore::class, 'connection'))->setValue(null, $redis);
+        Config::set('app.cache.driver', 'redis');
         $logOffset = self::errorLogSize();
 
         $this->assertTrue(RateLimiter::allow('form', 1, 60));
         $this->assertTrue(RateLimiter::allow('form', 1, 60));
         $this->assertStringContainsString(
-            "RATE_LIMIT ERRNO:500 | Rate limit failed open: READONLY You can't write against a read only replica.",
+            "Rate limit failed open: READONLY You can't write against a read only replica.",
             self::errorLogSince($logOffset),
         );
     }

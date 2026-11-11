@@ -25,47 +25,37 @@ final class SeoTest extends TestCase
         $_SERVER['REQUEST_URI'] = '/about';
     }
 
-    public function testDocumentTitleAppliesTemplate(): void
+    /** @return iterable<string, array{array<string, mixed>, array<string, mixed>, string}> */
+    public static function titles(): iterable
     {
-        Seo::set(['title' => 'About']);
-        $this->assertSame('About — Example', Seo::documentTitle());
+        yield 'template applied' => [[], ['title' => 'About'], 'About — Example'];
+        yield 'default title when unset' => [['default_title' => 'Example — Home of Examples'], [], 'Example — Home of Examples'];
+        yield 'later page gets the configured suffix on the default' => [['default_title' => 'Example', 'page_suffix' => ', стр. %d'], ['page' => 2], 'Example, стр. 2'];
+        // A suffix without %d (a translation that lost it) still numbers the page, after a space.
+        yield 'suffix without placeholder' => [[], ['title' => 'Blog', 'page_suffix' => ' (more)', 'page' => 3], 'Blog (more) 3 — Example'];
+        yield 'site name without a default title' => [[], [], 'Example'];
+        yield 'template without placeholder is ignored' => [['title_template' => 'Static Title'], ['title' => 'About'], 'About'];
     }
 
-    public function testDocumentTitleFallsBackToDefaultWhenUnset(): void
+    /**
+     * @param array<string, mixed> $seo  app.seo keys set over setUp()'s
+     * @param array<string, mixed> $page what the page set with Seo::set()
+     */
+    #[DataProvider('titles')]
+    public function testDocumentTitle(array $seo, array $page, string $expected): void
     {
-        Config::set('app.seo.default_title', 'Example — Home of Examples');
-        $this->assertSame('Example — Home of Examples', Seo::documentTitle());
-    }
-
-    public function testLaterPageWithoutTitleGetsTheConfiguredSuffixOnTheDefault(): void
-    {
-        Config::set('app.seo.default_title', 'Example');
-        Config::set('app.seo.page_suffix', ', стр. %d');
-        Seo::set(['page' => 2]);
-        $this->assertSame('Example, стр. 2', Seo::documentTitle());
-    }
-
-    /** A suffix without %d (a translation that lost it) still numbers the page, after a space. */
-    public function testPageSuffixWithoutPlaceholderGetsTheNumberAfterASpace(): void
-    {
-        Seo::set(['title' => 'Blog', 'page_suffix' => ' (more)', 'page' => 3]);
-        $this->assertSame('Blog (more) 3 — Example', Seo::documentTitle());
-    }
-
-    public function testDocumentTitleFallsBackToSiteNameWithoutDefaultTitle(): void
-    {
-        $this->assertSame('Example', Seo::documentTitle());
-    }
-
-    public function testDocumentTitleIgnoresTemplateWithoutPlaceholder(): void
-    {
-        Config::set('app.seo.title_template', 'Static Title');
-        Seo::set(['title' => 'About']);
-        $this->assertSame('About', Seo::documentTitle());
+        foreach ($seo as $key => $value) {
+            Config::set('app.seo.' . $key, $value);
+        }
+        Seo::set($page);
+        $this->assertSame($expected, Seo::documentTitle());
     }
 
     public function testRenderEmitsTitleDescriptionCanonicalAndOpenGraph(): void
     {
+        Config::set('app.seo.og_image_alt', 'Default social card');
+        Config::set('app.seo.og_image_width', 2400);
+        Config::set('app.seo.og_image_height', 1260);
         Seo::set(['title' => 'About', 'description' => 'About the site.']);
         $html = Seo::render();
 
@@ -77,7 +67,7 @@ final class SeoTest extends TestCase
         $this->assertStringContainsString('<meta property="og:title" content="About — Example" />', $html);
         $this->assertStringContainsString('<meta property="og:url" content="https://example.com/about" />', $html);
         $this->assertStringContainsString('<meta property="og:site_name" content="Example" />', $html);
-        // No image configured — the plain summary card is used.
+        // No image, even with its alt and size configured: the plain summary card, no og:image meta.
         $this->assertStringContainsString('<meta name="twitter:card" content="summary" />', $html);
         $this->assertStringNotContainsString('og:image', $html);
     }
@@ -140,16 +130,6 @@ final class SeoTest extends TestCase
         Config::set('app.seo.og_image_width', 2400);
         Seo::set(['title' => 'About', 'image' => 'og/about.png']);
         $this->assertStringNotContainsString('og:image:width', Seo::render());
-    }
-
-    public function testImageMetaIsAbsentWithoutAnImage(): void
-    {
-        Config::set('app.seo.og_image_alt', 'Default social card');
-        Config::set('app.seo.og_image_width', 2400);
-        Config::set('app.seo.og_image_height', 1260);
-        Seo::set(['title' => 'About']);
-        $html = Seo::render();
-        $this->assertStringNotContainsString('og:image', $html);
     }
 
     public function testRenderEmitsHreflangAlternatesWhenLocalesEnabled(): void
@@ -262,6 +242,7 @@ final class SeoTest extends TestCase
             '/sub/ru/blog' => 'https://example.com/sub/ru/blog',
             'blog' => 'https://example.com/blog',
             '//cdn.test/x' => 'https://cdn.test/x',
+            'https://example.com/custom' => 'https://example.com/custom',
         ];
         foreach ($cases as $set => $expected) {
             Seo::set(['canonical' => $set]);
@@ -270,11 +251,5 @@ final class SeoTest extends TestCase
             $this->assertStringContainsString('<link rel="canonical" href="' . $expected . '" />', $html);
             $this->assertStringContainsString('<meta property="og:url" content="' . $expected . '" />', $html);
         }
-    }
-
-    public function testCanonicalCanBeOverriddenPerPage(): void
-    {
-        Seo::set(['canonical' => 'https://example.com/custom']);
-        $this->assertStringContainsString('<link rel="canonical" href="https://example.com/custom" />', Seo::render());
     }
 }

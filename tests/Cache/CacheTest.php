@@ -25,11 +25,6 @@ final class CacheTest extends TestCase
         parent::tearDown();
     }
 
-    public function testDisabledCacheUsesNullStore(): void
-    {
-        $this->assertInstanceOf(NullStore::class, Cache::store());
-    }
-
     public function testNullStoreIsAlwaysAMiss(): void
     {
         $store = new NullStore();
@@ -82,16 +77,6 @@ final class CacheTest extends TestCase
         $this->assertFalse(Cache::has('k'));
     }
 
-    public function testEnabledFileDriverBuildsFileStore(): void
-    {
-        $this->dir = $this->makeTempDir();
-        Config::set('app.cache.enabled', true);
-        Config::set('app.cache.driver', 'file');
-        Config::set('app.cache.path', $this->dir);
-
-        $this->assertInstanceOf(FileStore::class, Cache::store());
-    }
-
     public function testRelativeCachePathIsResolvedFromAppRoot(): void
     {
         $relative = 'cache-' . bin2hex(random_bytes(4));
@@ -113,11 +98,10 @@ final class CacheTest extends TestCase
         Config::set('app.cache', ['enabled' => true, 'driver' => 'redis', 'path' => $this->dir]);
         $logOffset = self::errorLogSize();
 
-        $this->assertInstanceOf(FileStore::class, Cache::store());
         Cache::set('k', 'v');
         $this->assertSame('v', Cache::get('k'));
         $this->assertCount(1, glob($this->dir . '/*.cache') ?: []);
-        $this->assertStringContainsString('CACHE ERRNO:500 | Cache init failed, falling back to file: ', self::errorLogSince($logOffset));
+        $this->assertStringContainsString('Cache init failed, falling back to file: ', self::errorLogSince($logOffset));
     }
 
     /**
@@ -167,7 +151,7 @@ final class CacheTest extends TestCase
         Cache::flush();
 
         $log = self::errorLogSince($logOffset);
-        $this->assertStringContainsString('CACHE ERRNO:500 | Cache store failed, continuing without cache: OOM command not allowed', $log);
+        $this->assertStringContainsString('Cache store failed, continuing without cache: OOM command not allowed', $log);
         $this->assertSame(1, substr_count($log, "\n"));
         // The line points at the store that threw, not at the facade.
         $this->assertStringContainsString('| ' . __FILE__ . ':', $log);

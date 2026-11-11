@@ -1,10 +1,52 @@
 ---
 title: Upgrading
-description: Moving a site from Weft 0.1.x to 0.2 — config, copied files, the server, Redis keys and the way back.
+description: Moving a site to a new minor version of Weft — 0.2 to 0.3, and 0.1.x to 0.2 with its config, copied files, the server, Redis keys and the way back.
 order: 8
 ---
 
 # Upgrading
+
+## From 0.2 to 0.3
+
+Follow [Updating the engine](/docs/deployment#the-engine) in Deployment. This page adds what 0.3
+needs at its steps; the 0.3.0 section of the
+[CHANGELOG](https://github.com/golovanov-dev/weft/blob/main/CHANGELOG.md) lists every change.
+
+### Step 2: your site's code and config
+
+On your machine, in the site's directory. Commit the result.
+
+- **`composer.json`.** If it requires `golovanov/traceloom` itself, raise that to `^0.6`, or
+  Composer cannot install Weft 0.3.
+- **`app/Configs/app.php`.** If `app.vite.dev_server` is `http://localhost:5173` and
+  `vite.config.js` has `base: '/dist/'`, set it to `http://localhost:5173/dist` or delete the line:
+  that is the default. Only `DEV_MODE` reads it.
+- **`pages/500.php`.** It is also the page of a 503, when the database or another dependency is
+  down ([A dependency that is down](/docs/features#a-dependency-that-is-down)). If its text says the
+  page is broken, word it for both, or show other text when `$error` is a `ServiceUnavailable`. A
+  site without `pages/500.php` gets the engine's own page, `503` and `Something went wrong.`:
+  nothing to do.
+- **Your own trace readers.** If a script or a log shipper parses the trace files, read the
+  traceloom entry of the CHANGELOG first: `data` is always an object, and an exception in it is
+  `{type, message, cause}`.
+
+### Step 3: the constants
+
+0.3 adds no constants and renames none: skip this step.
+
+### Step 4: the update
+
+```bash
+composer require golovanov/weft:^0.3 -W
+vendor/bin/weft-health --dev
+```
+
+`-W` also updates traceloom to the `^0.6` that 0.3 requires; `composer update` stays on 0.2.
+
+### Back to 0.2
+
+Roll back as in [Updating the engine](/docs/deployment#the-engine); nothing on the server needs
+undoing.
 
 ## From 0.1.x to 0.2
 

@@ -6,14 +6,29 @@ namespace Golovanov\Weft\Tests\Assets;
 
 use Golovanov\Weft\Assets\Vite;
 use Golovanov\Weft\Tests\TestCase;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
 /**
  * Production tag rendering. DEV_MODE is an environment constant and is never defined in the
- * test bootstrap, so Vite::tags() always takes the manifest branch here; the parsed manifest
- * is injected into the static cache instead of being read from disk.
+ * test bootstrap, so Vite::tags() takes the manifest branch here, except in the one test that runs
+ * in a process of its own; the parsed manifest is injected into the static cache instead of being
+ * read from disk.
  */
 final class ViteTest extends TestCase
 {
+    /** The default dev server is where Vite serves with base '/dist/', the directory of the built files. */
+    #[RunInSeparateProcess]
+    public function testDevModePointsAtTheDevServerUnderDist(): void
+    {
+        define('DEV_MODE', true);
+
+        $this->assertSame(
+            '<script type="module" src="http://localhost:5173/dist/@vite/client"></script>' . "\n  "
+            . '<script type="module" src="http://localhost:5173/dist/src/main.js"></script>' . "\n",
+            Vite::tags('src/main.js'),
+        );
+    }
+
     /** @param array<string, array<string, mixed>> $manifest */
     private function setManifest(array $manifest): void
     {

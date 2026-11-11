@@ -49,6 +49,7 @@ Request::isHttps();           // came over HTTPS: X-Forwarded-Proto from PROXY_I
 
 Pagination::fromRequest($request, $total, $perPage);  // ->page ->pages ->offset ->limit ->prev ->next ->url($n)
 throw Abort::notFound();  throw Abort::redirect($url, 301);   // from a page template or an api/ endpoint
+throw new ServiceUnavailable($message, retryAfter: 120, previous: $e);   // 503, logged and alerted
 
 Response::html($html, 200);  Response::json($data, 200);  Response::text($t);  Response::redirect($url, 302);
 $response->withHeader($n, $v);  $response->send();

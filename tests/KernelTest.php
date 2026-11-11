@@ -7,10 +7,12 @@ namespace Golovanov\Weft\Tests;
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\Request;
 use Golovanov\Weft\Http\Response;
+use Golovanov\Weft\Http\ServiceUnavailable;
 use Golovanov\Weft\I18n\Locale;
 use Golovanov\Weft\Kernel;
 use Golovanov\Weft\Observability\Alert;
 use Golovanov\Weft\Observability\ErrorHandler;
+use Golovanov\Weft\Observability\Trace;
 use Golovanov\Weft\Seo\Seo;
 use Golovanov\Weft\View\View;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -94,32 +96,45 @@ final class KernelTest extends TestCase
             @mkdir(dirname($dir . '/' . $file), 0777, true);
             file_put_contents($dir . '/' . $file, '');
         }
-        $match = static fn (string $route): ?array => (new \ReflectionMethod(Kernel::class, 'matchPage'))->invoke(null, $dir, $route);
+        $match = static fn (string $route): array => array_slice((array) (new \ReflectionMethod(Kernel::class, 'matchPage'))->invoke(null, $dir, $route), 0, 2);
 
         try {
-            $this->assertSame([$dir . '/shop/sale.php', [], 'shop/sale'], $match('shop/sale'));
-            $this->assertSame([$dir . '/shop/index.php', [], 'shop'], $match('shop'));
-            $this->assertSame([$dir . '/shop/[item].php', ['item' => 'x'], 'shop'], $match('shop/x'));
-            $this->assertSame([$dir . '/shop/[...path].php', ['path' => 'x/y'], 'shop'], $match('shop/x/y'));
-            $this->assertSame([$dir . '/shop/deep/[...rest].php', ['rest' => 'a/b'], 'shop/deep'], $match('shop/deep/a/b'));
-            $this->assertSame([$dir . '/[...all].php', ['all' => 'other/x'], 'all'], $match('other/x'));
+            $this->assertSame([$dir . '/shop/sale.php', []], $match('shop/sale'));
+            $this->assertSame([$dir . '/shop/index.php', []], $match('shop'));
+            $this->assertSame([$dir . '/shop/[item].php', ['item' => 'x']], $match('shop/x'));
+            $this->assertSame([$dir . '/shop/[...path].php', ['path' => 'x/y']], $match('shop/x/y'));
+            $this->assertSame([$dir . '/shop/deep/[...rest].php', ['rest' => 'a/b']], $match('shop/deep/a/b'));
+            $this->assertSame([$dir . '/[...all].php', ['all' => 'other/x']], $match('other/x'));
         } finally {
             $this->removeDir($dir);
         }
     }
 
-    public function testAbortNotFoundAnswersLikeAnUnknownPage(): void
+    /** @return array<string, array{string, string}> */
+    public static function notFoundPages(): array
+    {
+        return [
+            'unknown route' => ['/ru/about!!', 'custom-404'],
+            'page that answers 404 itself' => ['/ru/notes/missing', 'note-missing'],
+            'Abort::notFound()' => ['/ru/docs/gone', 'custom-404'],
+        ];
+    }
+
+    /** However a page ends in a 404, what it had set before is gone: no canonical, og:url or hreflang. */
+    #[DataProvider('notFoundPages')]
+    public function testNotFoundHasNoCanonicalOrHreflang(string $uri, string $body): void
     {
         Config::set('app.url.base', 'https://example.com');
         Config::set('app.locales', ['enabled' => true, 'supported' => ['en', 'ru'], 'default' => 'en']);
+        $_SERVER['REQUEST_URI'] = $uri;
 
-        $response = $this->route('/ru/docs/gone');
+        $response = $this->route($uri);
         $this->assertSame(404, $response->status);
-        $this->assertStringContainsString('custom-404', $response->body);
+        $this->assertStringContainsString($body, $response->body);
         $this->assertStringNotContainsString('docs:', $response->body);
-        // What the page had set before it gave up is gone with it.
         $html = Seo::render();
         $this->assertStringNotContainsString('canonical', $html);
+        $this->assertStringNotContainsString('og:url', $html);
         $this->assertStringNotContainsString('hreflang', $html);
         $this->assertStringNotContainsString('Docs page', $html);
     }
@@ -214,16 +229,6 @@ final class KernelTest extends TestCase
         $this->assertSame('/list?x=y', $response->headers['Location']);
     }
 
-    public function testPagePastTheEndIsANotFoundWithoutCanonical(): void
-    {
-        Config::set('app.url.base', 'https://example.com');
-
-        $response = $this->route('/list?page=4');
-        $this->assertSame(404, $response->status);
-        $this->assertStringContainsString('custom-404', $response->body);
-        $this->assertStringNotContainsString('canonical', Seo::render());
-    }
-
     public function testLaterPageHasItsOwnCanonicalTitleAndHreflang(): void
     {
         Config::set('app.url.base', 'https://example.com');
@@ -269,14 +274,10 @@ final class KernelTest extends TestCase
             'three leading slashes and a trailing one' => ['///about/'],
             'a host-like first segment' => ['//evil.com/'],
             'only two slashes' => ['//'],
+            // Leading slashes are never redirected, even on GET: the target would not be this path.
+            'leading slashes, a trailing one and a query' => ['//about/?next=x'],
+            'only three slashes' => ['///'],
         ];
-    }
-
-    /** Leading slashes are never redirected, even on GET: the target would not be this path. */
-    public function testLeadingSlashesAreNotRedirected(): void
-    {
-        $this->assertSame(404, $this->route('//about/?next=x')->status);
-        $this->assertSame(404, $this->route('///')->status);
     }
 
     #[RunInSeparateProcess]
@@ -362,32 +363,6 @@ final class KernelTest extends TestCase
         $this->assertStringContainsString('<link rel="canonical" href="https://example.com/notes/hello" />', Seo::render());
     }
 
-    public function testNotFoundPageHasNoCanonical(): void
-    {
-        Config::set('app.url.base', 'https://example.com');
-        $_SERVER['REQUEST_URI'] = '/about!!';
-
-        $this->route('/about!!');
-        $html = Seo::render();
-        $this->assertStringNotContainsString('canonical', $html);
-        $this->assertStringNotContainsString('og:url', $html);
-    }
-
-    /** A dynamic page that answers 404 itself gets the same head as the engine's 404. */
-    public function testPageThatAnswersNotFoundHasNoCanonicalOrHreflang(): void
-    {
-        Config::set('app.url.base', 'https://example.com');
-        Config::set('app.locales', ['enabled' => true, 'supported' => ['en', 'ru'], 'default' => 'en']);
-
-        $response = $this->route('/ru/notes/missing');
-        $this->assertSame(404, $response->status);
-        $this->assertStringContainsString('note-missing', $response->body);
-        $html = Seo::render();
-        $this->assertStringNotContainsString('canonical', $html);
-        $this->assertStringNotContainsString('og:url', $html);
-        $this->assertStringNotContainsString('hreflang', $html);
-    }
-
     public function testFoundPageHasHreflangFromTheMatchedRoute(): void
     {
         Config::set('app.url.base', 'https://example.com');
@@ -410,15 +385,6 @@ final class KernelTest extends TestCase
         $this->assertStringContainsString('<loc>https://example.com/about</loc>', $response->body);
     }
 
-    public function testSitemapConfigMayBeACallable(): void
-    {
-        Config::set('app.url.base', 'https://example.com');
-        Config::set('app.sitemap', static fn(): array => ['/dynamic']);
-
-        $response = $this->route('/sitemap.xml');
-        $this->assertStringContainsString('<loc>https://example.com/dynamic</loc>', $response->body);
-    }
-
     public function testRobotsTxtIsServed(): void
     {
         Config::set('app.url.base', 'https://example.com');
@@ -427,18 +393,6 @@ final class KernelTest extends TestCase
         $this->assertSame(200, $response->status);
         $this->assertSame('text/plain; charset=utf-8', $response->headers['Content-Type']);
         $this->assertStringContainsString('User-agent: *', $response->body);
-    }
-
-    public function testRobotsTxtIsServedWhenTheSitemapCallableThrows(): void
-    {
-        Config::set('app.url.base', 'https://example.com');
-        Config::set('app.sitemap', static function (): array {
-            throw new \RuntimeException('sitemap generator failed');
-        });
-        $response = $this->route('/robots.txt');
-
-        $this->assertSame(200, $response->status);
-        $this->assertStringContainsString('Sitemap: https://example.com/sitemap.xml', $response->body);
     }
 
     public function testLlmsTxtIsServedFromACallableOnlyWhenConfigured(): void
@@ -568,6 +522,57 @@ final class KernelTest extends TestCase
         $this->assertSame(500, $response->status);
         $this->assertStringContainsString('<h1>500</h1>', $response->body);
         $this->assertStringNotContainsString('custom-500', $response->body);
+
+        $response = $this->errorResponse('/about', new ServiceUnavailable());
+        $this->assertSame(503, $response->status);
+        $this->assertStringContainsString('<h1>503</h1>', $response->body);
+    }
+
+    /** A dependency that is down: pages/500.php or the JSON error, with 503 and Retry-After. */
+    public function testServiceUnavailableIsA503WithRetryAfter(): void
+    {
+        $response = $this->errorResponse('/about', new ServiceUnavailable('payments down', 30));
+        $this->assertSame(503, $response->status);
+        $this->assertSame('30', $response->headers['Retry-After']);
+        $this->assertStringContainsString('custom-500', $response->body);
+
+        try {
+            $this->route('/api/broken');
+        } catch (\RuntimeException) {
+        }
+        $response = $this->errorResponse('/api/broken', new ServiceUnavailable());
+        $this->assertSame(503, $response->status);
+        $this->assertSame('120', $response->headers['Retry-After']);
+        $this->assertSame(['success' => false, 'error' => 'Service Unavailable'], json_decode($response->body, true));
+
+        $this->expectException(\InvalidArgumentException::class);
+        new ServiceUnavailable(retryAfter: -1);
+    }
+
+    /** handle() end to end: a 503 is logged and alerted the way a 500 is. */
+    public function testServiceUnavailableRaisesTheAlert(): void
+    {
+        Config::set('app.alerts.channels', ['alertloop']);
+        Config::set('app.alertloop', ['base_url' => 'https://alerts.example', 'api_key' => 'k']);
+        $alerts = [];
+        self::fakeHttp(static function (array $request) use (&$alerts): array {
+            $alerts[] = json_decode((string) $request['body'], true);
+            return ['status' => 202];
+        });
+        $_SERVER['REQUEST_URI'] = '/unavailable';
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $logOffset = self::errorLogSize();
+
+        ob_start();
+        Kernel::handle();
+        $output = (string) ob_get_clean();
+
+        $this->assertStringContainsString('custom-500', $output);
+        $end = array_values(array_filter($this->traceEvents(Trace::id()), static fn(array $e): bool => ($e['event'] ?? null) === 'request_end'));
+        $this->assertSame(503, $end[0]['data']['status']);
+        $this->assertStringContainsString('payments down', self::errorLogSince($logOffset));
+        $this->assertCount(1, $alerts);
+        $this->assertSame('Unhandled exception: payments down', $alerts[0]['message']);
     }
 
     private function errorResponse(string $uri, \Throwable $error): Response

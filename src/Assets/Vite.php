@@ -10,7 +10,9 @@ use Golovanov\Weft\I18n\Url;
 /**
  * Vite integration.
  *
- *  - DEV_MODE on  → point tags at the Vite dev server (HMR): http://localhost:5173.
+ *  - DEV_MODE on  → point tags at the Vite dev server (HMR): app.vite.dev_server, the server's
+ *    origin plus the `base` of vite.config.js, http://localhost:5173/dist by default. The built
+ *    files are always served from /dist/, so that `base` is '/dist/'.
  *  - DEV_MODE off → read public/dist/.vite/manifest.json and emit hashed, cache-busted assets.
  *
  * Usage in the layout <head>/<body>:
@@ -27,7 +29,7 @@ final class Vite
 
     private static function devServer(): string
     {
-        return rtrim((string) Config::get('app.vite.dev_server', 'http://localhost:5173'), '/');
+        return rtrim((string) Config::get('app.vite.dev_server', 'http://localhost:5173/dist'), '/');
     }
 
     /**

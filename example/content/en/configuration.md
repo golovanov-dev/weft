@@ -31,7 +31,7 @@ define('LOGS_PATH', dirname(__DIR__) . '/storage/logs'); // errors/, traces: req
 Database (only if you use `Golovanov\Weft\Database`):
 
 ```php
-define('DB_HOST', '127.0.0.1');
+define('DB_HOST', '127.0.0.1'); // a port other than 3306 goes here, '127.0.0.1:3307': there is no DB_PORT
 define('DB_NAME', '');
 define('DB_USER', '');
 define('DB_PASSWORD', '');
@@ -39,7 +39,7 @@ define('DB_CHARSET', 'utf8mb4');
 define('DB_TIMEOUT', 5);     // optional: seconds to wait for the connection, default 5
 ```
 
-The MySQL server is reached on its default port. There is no read timeout setting: queries wait
+There is no read timeout setting: queries wait
 `mysqlnd.net_read_timeout` ([Features](/docs/features#database)).
 
 Redis (only for the `redis` cache driver):
@@ -98,6 +98,65 @@ negative for a group. A bot cannot write first: without that message Telegram an
 ## Business — `app/Configs/app.php`
 
 The file returns an array. Read it anywhere with `config('app.<path>')`.
+
+### A short app.php
+
+A skeleton for a site of your own, with your own pages and layout. It does not replace `app.php` in
+a copy of `example/`: the docs pages in the example's sitemap, its `/llms.txt` and its cache come
+from keys the template leaves out, and the template's `/about` is a 404 there. In a copy, edit
+the example's `app.php` instead.
+
+These are the keys every site needs; every other key is off or has a working default until you add
+it from the sections below:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+return [
+    'url' => ['base' => 'https://example.com'],   // your domain: canonical, og:url, sitemap
+
+    'seo' => [
+        'site_name'      => 'Acme',
+        'default_title'  => 'Acme — what the site does',
+        'title_template' => '%s — Acme',
+        'description'    => 'One sentence for search results and link previews.',
+        'og_image'       => '/img/og.png',
+    ],
+
+    'sitemap' => ['/', '/about'],                 // every page address; see Sitemap
+
+    'vite' => ['entry' => 'src/main.js'],         // weft-health checks public/dist has it
+];
+```
+
+The integration constants of `config/config.php` act only through the `app.php` blocks that read
+them. The template has none of those blocks, so with it these constants turn nothing on, and
+`vendor/bin/weft-health` does not report them. To use one, copy its block from the example's
+`app/Configs/app.php` into yours:
+
+| Constants in `config/config.php` | Block of `app.php` |
+|---|---|
+| `MAIL_DRIVER`, `MAIL_FROM`, `SMTP_*` | `mail` |
+| `ALERTLOOP_BASE_URL`, `ALERTLOOP_API_KEY` | `alerts` and `alertloop` |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | `alerts` |
+| `ALERT_MAIL_TO` | `alerts` and `mail` |
+| `CAPTCHA_SITE_KEY`, `CAPTCHA_SECRET_KEY` | `captcha` |
+| `INDEXNOW_KEY` | `indexnow` |
+| `MAIL_TO` | `contact` |
+
+In the copied blocks, replace the example's values with your own: `from_name` in `mail`, `source`
+in `alertloop`, `allowed_hosts` in `captcha`. The engine reads the other constants itself (`DB_*`,
+`REDIS_*`, `AUTH_JWT_*`, `PROXY_IPS` and the rest).
+
+The example's pages and components also read `app.contact` and `app.links`: those are its keys, not
+the engine's. If you keep its templates, copy three blocks from the example's `app/Configs/app.php`:
+`contact` (as is: `request_types` are the choices of the form), `links` (with your own URLs) and
+`mail`. Without `contact` and `links` the links are empty and the form cannot be sent; without `mail`
+it sends nothing, and `errors/` gets `Mail not sent (mail): app.mail.from is empty`.
+
+### Routing and URL
 
 ```php
 'default_route' => 'home',    // which pages/*.php answers "/"; /home redirects to "/"
@@ -192,7 +251,7 @@ and [IndexNow](/docs/features#indexnow).
 ### The rest
 
 ```php
-'vite'       => ['entry' => 'src/main.js', 'dev_server' => 'http://localhost:5173'],
+'vite'       => ['entry' => 'src/main.js', 'dev_server' => 'http://localhost:5173/dist'],   // dev server origin + base of vite.config.js
 'cache'      => ['enabled' => true, 'driver' => 'file', 'path' => '…/storage/cache'],  // on in this demo, see below; path: absolute or relative to APP_ROOT, defaults to storage/cache
 'rate_limit' => ['max' => 20, 'window' => 60, 'path' => '…'],  // per client IP (IPv6: per /64) per bucket; path: absolute or relative to APP_ROOT, defaults to ratelimit/ in cache.path
 'captcha'    => ['enabled' => …, 'driver' => 'recaptcha', 'site_key' => …, 'secret_key' => …, 'threshold' => 0.5, 'allowed_hosts' => ['example.com']],

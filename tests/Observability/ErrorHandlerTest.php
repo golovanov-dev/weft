@@ -52,6 +52,76 @@ final class ErrorHandlerTest extends TestCase
         $this->assertStringStartsWith('fatal:', $alerts[0]['dedupe_key']);
     }
 
+    /**
+     * An exception the site's bootstrap does not catch: PHP with a registered exception handler
+     * would answer 200 with an empty page. A failed connection there is a 503, as in the Kernel.
+     * One thrown after the Kernel answered leaves that answer alone, though with output_buffering
+     * (php.ini-production) the answer is still in PHP's buffer and headers_sent() is false.
+     */
+    public function testUncaughtExceptionOnTheWebAnswers500Or503(): void
+    {
+        $dir = $this->makeTempDir();
+        file_put_contents($dir . '/index.php', '<?php
+            require ' . var_export(dirname(__DIR__, 2) . '/vendor/autoload.php', true) . ';
+            define("APP_ROOT", isset($_GET["after"]) ? ' . var_export(dirname(__DIR__) . '/fixtures/site', true) . ' : __DIR__);
+            define("LOGS_PATH", __DIR__ . "/logs");
+            Golovanov\Weft\Observability\ErrorHandler::run();
+            if (isset($_GET["after"])) {
+                Golovanov\Weft\Kernel::handle();
+                throw new RuntimeException("after the response");
+            }
+            throw isset($_GET["down"])
+                ? new Golovanov\Weft\Http\ServiceUnavailable("Database connection error", retryAfter: 30)
+                : new RuntimeException("boom");
+        ');
+        $socket = stream_socket_server('tcp://127.0.0.1:0');
+        $this->assertNotFalse($socket);
+        $address = stream_socket_get_name($socket, false);
+        fclose($socket);
+        $log = ['file', $dir . '/server.log', 'w'];
+        $server = proc_open([PHP_BINARY, '-d', 'output_buffering=4096', '-S', $address, $dir . '/index.php'], [1 => $log, 2 => $log], $pipes);
+        $this->assertIsResource($server);
+
+        try {
+            [$error, $errorHeaders] = self::get('http://' . $address . '/');
+            [$down, $downHeaders] = self::get('http://' . $address . '/?down=1');
+            [$page, $pageHeaders] = self::get('http://' . $address . '/about?after=1');
+            $errors = implode('', array_map('file_get_contents', glob($dir . '/logs/errors/*.log') ?: []));
+        } finally {
+            proc_terminate($server);
+            proc_close($server);
+            $this->removeDir($dir);
+        }
+
+        $this->assertSame('HTTP/1.1 500 Internal Server Error', $errorHeaders[0] ?? '');
+        $this->assertStringContainsString('<h1>500</h1><p>Something went wrong.</p>', $error);
+        $this->assertSame('HTTP/1.1 503 Service Unavailable', $downHeaders[0] ?? '');
+        $this->assertContains('Retry-After: 30', $downHeaders);
+        $this->assertStringContainsString('EXCEPTION ERRNO:0 | boom', $errors);
+        $this->assertSame('HTTP/1.1 200 OK', $pageHeaders[0] ?? '');
+        $this->assertStringContainsString('about-page', $page);
+        $this->assertStringNotContainsString('<h1>500</h1>', $page);
+        $this->assertStringContainsString('EXCEPTION ERRNO:0 | after the response', $errors);
+    }
+
+    /**
+     * The body and headers of a GET to the test server; waits up to 5 seconds for it to start.
+     *
+     * @return array{string, list<string>}
+     */
+    private static function get(string $url): array
+    {
+        $context = stream_context_create(['http' => ['ignore_errors' => true, 'timeout' => 5]]);
+        for ($try = 0; $try < 50; $try++) {
+            $body = @file_get_contents($url, false, $context);
+            if ($body !== false) {
+                return [$body, $http_response_header];
+            }
+            usleep(100_000);
+        }
+        self::fail('The test server did not answer ' . $url);
+    }
+
     public function testErrorThatIsNotFatalAtShutdownIsLeftAlone(): void
     {
         $calls = 0;

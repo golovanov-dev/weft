@@ -6,8 +6,12 @@ on:
 
 jobs:
   tests:
-    name: PHP 8.4 tests
+    name: PHP ${{ matrix.php }} tests
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4', '8.5']
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -15,7 +19,7 @@ jobs:
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: ${{ matrix.php }}
           extensions: curl, json, dom, redis
           coverage: none
 
@@ -30,11 +34,12 @@ jobs:
         run: vendor/bin/phpunit --exclude-group integration --fail-on-skipped
 
   integration:
-    name: Integration (MySQL ${{ matrix.mysql }}, Redis)
+    name: Integration (PHP ${{ matrix.php }}, MySQL ${{ matrix.mysql }}, Redis)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
+        php: ['8.4', '8.5']
         mysql: ['5.7', '8.0']
     services:
       mysql:
@@ -69,7 +74,7 @@ jobs:
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: ${{ matrix.php }}
           extensions: curl, json, redis, pdo_mysql
           coverage: none
 
@@ -80,8 +85,12 @@ jobs:
         run: vendor/bin/phpunit --group integration --fail-on-skipped
 
   smoke:
-    name: Example site smoke test
+    name: Example site smoke test (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4', '8.5']
     services:
       mailpit:
         image: axllent/mailpit
@@ -100,7 +109,7 @@ jobs:
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: ${{ matrix.php }}
           extensions: curl, json, mbstring
           coverage: none
 

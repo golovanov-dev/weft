@@ -113,59 +113,24 @@ final class RedisStoreTest extends TestCase
         $this->assertGreaterThan(0, $client->readTimeout, 'a hung Redis must not hold the request');
     }
 
-    public function testCacheAndRateLimiterShareOneConnectionInSeparateKeySpaces(): void
+    /** Keys, TTL, counters and flush are checked on a real Redis: RedisIntegrationTest. */
+    public function testThePrefixIsTheConfiguredOneElseTheHostElseWeft(): void
     {
         if (!extension_loaded('redis')) {
             $this->markTestSkipped('ext-redis is not installed');
         }
 
-        // No Redis server in tests: the shared connection is a client that records the keys it is sent.
+        // No Redis server in tests: a client that is connected already is used as is.
         $redis = new class extends \Redis {
             public function isConnected(): bool
             {
                 return true;
             }
-
-            /** @var list<string> */
-            public array $keys = [];
-            /** @var array<string, string> */
-            public array $values = [];
-
-            public function set(string $key, mixed $value, mixed $options = null): \Redis|string|bool
-            {
-                $this->keys[] = 'set ' . $key;
-                $this->values[$key] = (string) $value;
-                return true;
-            }
-
-            public function get(string $key): mixed
-            {
-                return $this->values[$key] ?? false;
-            }
-
-            public function eval(string $script, array $args = [], int $num_keys = 0): mixed
-            {
-                $this->keys[] = 'eval ' . $args[0];
-                return 1;
-            }
-
-            public function keys(string $pattern): \Redis|array|false
-            {
-                $this->keys[] = 'keys ' . $pattern;
-                return [];
-            }
         };
         (new \ReflectionProperty(RedisStore::class, 'connection'))->setValue(null, $redis);
-        Config::set('app.url.base', 'https://Example.com');
-        Config::set('app.cache', ['enabled' => true, 'driver' => 'redis']);
 
-        Cache::set('page', new \ArrayObject([1]));
-        $this->assertInstanceOf(\__PHP_Incomplete_Class::class, Cache::get('page'));
-        RateLimiter::allow('form', 5, 60);
-        Cache::flush();
-
-        $this->assertSame(['set example.com:cache:page', 'eval example.com:ratelimit:form:cli', 'keys example.com:cache:*'], $redis->keys);
         $this->assertSame('mine:cache:', self::prefixWith(['prefix' => 'mine:']));
+        $this->assertSame('example.com:cache:', self::prefixWith(['base' => 'https://Example.com']));
         $this->assertSame('weft:cache:', self::prefixWith(['base' => '']));
     }
 
@@ -343,37 +308,6 @@ final class RedisStoreTest extends TestCase
             proc_close($server);
             $this->removeDir($dir);
         }
-    }
-
-    public function testFlushTakesThePrefixLiterallyInThePattern(): void
-    {
-        if (!extension_loaded('redis')) {
-            $this->markTestSkipped('ext-redis is not installed');
-        }
-
-        // No Redis server in tests: KEYS matches with fnmatch(), the same glob rules as Redis.
-        $redis = new class extends \Redis {
-            /** @var list<string> */
-            public array $stored = ['site[1]:cache:page', 'site1:cache:page', 'sitex:cache:page'];
-
-            public function keys(string $pattern): \Redis|array|false
-            {
-                return array_values(array_filter($this->stored, fn (string $key): bool => fnmatch($pattern, $key)));
-            }
-
-            public function del(array|string $key, string ...$other_keys): \Redis|int|false
-            {
-                $this->stored = array_values(array_diff($this->stored, (array) $key));
-                return 1;
-            }
-        };
-        $store = (new \ReflectionClass(RedisStore::class))->newInstanceWithoutConstructor();
-        (new \ReflectionProperty(RedisStore::class, 'redis'))->setValue($store, $redis);
-        (new \ReflectionProperty(RedisStore::class, 'prefix'))->setValue($store, 'site[1]:cache:');
-
-        $store->flush();
-
-        $this->assertSame(['site1:cache:page', 'sitex:cache:page'], $redis->stored);
     }
 
     /** @param array<string, string> $config prefix: app.cache.prefix; base: app.url.base */

@@ -11,7 +11,7 @@ use PDOStatement;
 
 /**
  * A PDO that talks to no server: it records each prepared statement with its parameters, answers
- * with $rows / $rowCount, and throws $failure (once per entry) where a test asks it to.
+ * with $rows / $rowCount, and throws $prepareFailure / $rollBackFailure where a test asks it to.
  */
 final class FakePdo extends PDO
 {
@@ -25,8 +25,7 @@ final class FakePdo extends PDO
 
     public bool $inTransaction = false;
 
-    /** @var list<PDOException|null> thrown by the next prepare() calls, one each; null lets one through */
-    public array $prepareFailures = [];
+    public ?PDOException $prepareFailure = null;
 
     public ?PDOException $rollBackFailure = null;
 
@@ -45,18 +44,10 @@ final class FakePdo extends PDO
         return $db;
     }
 
-    public static function lostConnection(): PDOException
-    {
-        $e = new PDOException('SQLSTATE[HY000]: General error: 2006 MySQL server has gone away');
-        $e->errorInfo = ['HY000', 2006, 'MySQL server has gone away'];
-        return $e;
-    }
-
     public function prepare(string $query, array $options = []): PDOStatement|false
     {
-        $failure = array_shift($this->prepareFailures);
-        if ($failure !== null) {
-            throw $failure;
+        if ($this->prepareFailure !== null) {
+            throw $this->prepareFailure;
         }
         $pdo = $this;
         return new class ($pdo, $query) extends PDOStatement {

@@ -254,7 +254,7 @@ link. The engine runs the file with `$request` in scope and turns what it prints
   headers (`Location`) are sent as set. A redirect (`Abort::redirect()`) has no body and is not
   JSON;
 - an uncaught throwable discards the printed output and becomes a JSON 500, logged and alerted like
-  any other;
+  any other; a `ServiceUnavailable` becomes a 503 (below);
 - `exit` or `die` bypasses the engine: the output goes out with PHP's default `Content-Type`, and the
   trace has no `request_end`. Use `return` to stop early.
 
@@ -504,6 +504,32 @@ not wait for the channels. A database error your code does not catch takes the s
 reads `Unhandled exception: Database query failed` (or `Database connection error`), and the MySQL
 message is only in `errors/`.
 
+### A dependency that is down
+
+A 500 tells search engines the page is broken; a 503 with `Retry-After` tells them to come back.
+`Golovanov\Weft\Http\ServiceUnavailable` (a `RuntimeException`) gets the 503: `Database` throws it
+when it cannot connect, and a page or an endpoint throws it when a service of its own fails:
+
+```php
+use Golovanov\Weft\Http\ServiceUnavailable;
+
+throw new ServiceUnavailable('Payments API unreachable', previous: $e);   // Retry-After: 120
+throw new ServiceUnavailable('Payments API unreachable', retryAfter: 600);
+```
+
+It is logged and alerted like any uncaught exception. A page answers with your `pages/500.php` and
+status 503 (it gets the exception as `$error`), or the engine's own 503 page; an endpoint or a
+request for JSON gets `{"success":false,"error":"Service Unavailable"}`. A failed query is still a
+500.
+
+Every failed connection is a 503, a wrong `DB_PASSWORD` or `DB_NAME` and a missing `pdo_mysql`
+extension too, so a 503 alone does not mean the database is down: the reason is in `errors/`, in the
+line `Database connection error: …` ([Troubleshooting](/docs/troubleshooting#every-page-answers-503)).
+A connection made before the Kernel, in `bootstrap.php` or `App\Bootstrap`, fails every request,
+pages that need no database too: each gets the engine's built-in 503 page with `Retry-After`, not
+`pages/500.php` and not JSON. Any other exception there gets the built-in 500 page. Connect in pages
+and endpoints.
+
 ## Database
 
 ```php
@@ -524,7 +550,8 @@ the application timezone, so `NOW()` matches `Clock`: by name (`Europe/Moscow`) 
 server has its time zone tables loaded, otherwise as the offset at connection time (`+03:00`).
 
 Errors are thrown as `RuntimeException` with the `PDOException` as its previous, and the MySQL
-message goes to `errors/`. `Database` sends no alert itself: an error nobody catches alerts as an
+message goes to `errors/`. A failed connection is a `ServiceUnavailable`, so an uncaught one answers
+503 ([A dependency that is down](#a-dependency-that-is-down)). `Database` sends no alert itself: an error nobody catches alerts as an
 unhandled exception ([Alerts for sensitive spots](#alerts-for-sensitive-spots)). All failed
 queries share one dedupe key, so the first one's alert silences the others for five minutes; a failed
 connection has a key of its own.
@@ -593,8 +620,10 @@ and every call recorded on the current request's trace timeline.
 echo Golovanov\Weft\Assets\Vite::tags('src/main.js');   // already in the layout
 ```
 
-`DEV_MODE=true` points at the dev server with HMR; `DEV_MODE=false` reads
-`public/dist/.vite/manifest.json` and emits hashed, cache-busted files.
+`DEV_MODE=true` points at the dev server with HMR, `app.vite.dev_server`: its origin plus the `base`
+of `vite.config.js`, `http://localhost:5173/dist` by default. `DEV_MODE=false` reads
+`public/dist/.vite/manifest.json` and emits hashed, cache-busted files from `/dist/`, so `base` is
+`'/dist/'`.
 
 In production the tags also carry preload hints: `rel="modulepreload"` for the entry and every
 chunk it statically imports (the manifest's `imports`, walked recursively) and `rel="preload"` for

@@ -15,7 +15,8 @@ export default defineConfig({
     },
   },
   server: {
-    // Dev server; the layout points <script>/<link> at http://localhost:5173 when DEV_MODE is on.
+    // Dev server; with DEV_MODE on the layout loads http://localhost:5173/dist/… (origin + base,
+    // app.vite.dev_server in app/Configs/app.php).
     port: 5173,
     strictPort: true,
     origin: 'http://localhost:5173',

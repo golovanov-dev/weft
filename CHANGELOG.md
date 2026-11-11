@@ -3,6 +3,44 @@
 All notable changes to Weft are documented in this file. Weft follows semantic versioning;
 pre-1.0 the API may change between minor versions.
 
+## 0.3.0 - 2026-11-11
+
+To upgrade from 0.2, do what each entry marked **Action.** says. The steps are in the upgrade guide,
+[Upgrading](example/content/en/upgrading.md).
+
+### Added
+
+- `Golovanov\Weft\Http\ServiceUnavailable`: a page or an endpoint throws it when a dependency is down,
+  and the answer is a 503 with `Retry-After` (its `retryAfter`, 120 seconds by default) instead of a
+  500, logged and alerted the same way: [Features](example/content/en/features.md#a-dependency-that-is-down).
+- PHP 8.5 is supported, next to 8.4.
+- A short `app.php` with the keys a new site needs:
+  [Configuration](example/content/en/configuration.md#a-short-appphp).
+
+### Changed
+
+- **Action.** A failed database connection answers 503 with `Retry-After: 120` instead of 500. It
+  is a `ServiceUnavailable`, a `RuntimeException`, so your `catch` blocks still take it; a failed
+  query is still a 500. `pages/500.php` is the page of the 503 too: word it for both, or show other
+  text when `$error` is a `ServiceUnavailable`.
+- **Action.** Weft requires `golovanov/traceloom` `^0.6`: update with
+  `composer require golovanov/weft:^0.3 -W`, and raise your own traceloom constraint if you have one.
+- **Action.** Trace format (traceloom 0.6), for those who read trace files with their own tools:
+  `data` is always an object (`{}`, not `[]`, for an event without data); an exception in event data
+  is `{type, message, cause}`, without the stack trace; `NAN` and `INF` are `"NaN"` and `"Infinity"`;
+  keys such as `aws_access_key_id` are masked.
+
+### Fixed
+
+- **Action.** `DEV_MODE` loaded no assets in the example: `app.vite.dev_server` was
+  `http://localhost:5173`, but Vite serves under its `base`, `/dist/`. The example and the engine's
+  default are now `http://localhost:5173/dist`. If your `app.php` came from the example, set that
+  value or delete the line.
+- An exception thrown outside the Kernel, in `bootstrap.php` or `App\Bootstrap`, answered 200 with
+  an empty page, which monitoring and search engines take for a working one. It is now a 500 with the
+  engine's built-in page, or a 503 with `Retry-After` for a `ServiceUnavailable`, such as a database
+  connection made there: [Features](example/content/en/features.md#a-dependency-that-is-down).
+
 ## 0.2.0 - 2026-10-11
 
 To upgrade from 0.1.x, do what each entry marked **Action.** says (most say which sites they apply

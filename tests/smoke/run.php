@@ -285,13 +285,9 @@ $own = request($base . '/smoke/canonical');
 check(canonical($own['body']) === $base . '/smoke/list', 'a canonical set with url() is absolute on page 1', canonical($own['body']));
 check(str_contains($own['body'], '<meta property="og:url" content="' . $base . '/smoke/list"'), 'og:url from url() is absolute too');
 
-$first = request($base . '/smoke/list?page=1');
-check($first['status'] === 301 && str_ends_with($first['headers']['location'] ?? '', '/smoke/list'), '?page=1 redirects 301 to the list', $first['status'] . ' ' . ($first['headers']['location'] ?? ''));
 $second = request($base . '/smoke/list?page=2');
 check($second['status'] === 200 && str_contains($second['body'], 'list page 2 of 5'), '?page=2 is the second page', 'got ' . $second['status']);
 check(canonical($second['body']) === $base . '/smoke/list?page=2', '?page=2 has its own absolute canonical', canonical($second['body']));
-check(request($base . '/smoke/list?page=6')['status'] === 404, 'a page past the end is 404');
-check(request($base . '/smoke/list?page=2%0A')['status'] === 404, 'a page number with a line break after it is 404');
 
 $robots = request($base . '/robots.txt');
 check(

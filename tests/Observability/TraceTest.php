@@ -55,12 +55,6 @@ final class TraceTest extends TestCase
         $this->fail('request_start was not written');
     }
 
-    private function configuration(): Configuration
-    {
-        $tracer = (new \ReflectionClass(Trace::class))->getProperty('tracer')->getValue();
-        return (new \ReflectionProperty($tracer, 'configuration'))->getValue($tracer);
-    }
-
     public function testBodyIsParsedByDefaultAndMaskedByTraceloomDefaults(): void
     {
         $raw = 'email=ann%40example.com&password=s3cret-pass';
@@ -231,33 +225,9 @@ final class TraceTest extends TestCase
         $fields = $field === 'query' ? $data['query'] : $data['body']['data'];
         $this->assertSame(Configuration::REDACTED, $fields['token']);
         unset($fields['token']);
-        // traceloom turns each invalid byte into U+FFFD and appends a digest of the original name.
+        // The renamed field keeps its value; how traceloom renames it is tested in traceloom.
         $this->assertSame(['1'], array_values($fields));
-        $this->assertMatchesRegularExpression('/^\x{FFFD}{3}~[0-9a-f]{16}$/u', (string) array_key_first($fields));
         $this->assertStringNotContainsString('t0ken-value', $line);
-    }
-
-    public function testRenamedNameDoesNotOverwriteAnotherField(): void
-    {
-        // %E8 and %FF both become U+FFFD, and %EF%BF%BD is a literal U+FFFD already.
-        $raw = 'a%E8=1&a%FF=2&a%EF%BF%BD=3&user%5Bpass%FFword%5D=s3cret-pass';
-
-        [$data, $line] = $this->requestStart($this->post('application/x-www-form-urlencoded', $raw));
-
-        $fields = $data['body']['data'];
-        $this->assertSame('3', $fields["a\u{FFFD}"]);
-        $this->assertSame([Configuration::REDACTED], array_values($fields['user']));
-        $this->assertMatchesRegularExpression('/^pass\x{FFFD}word~[0-9a-f]{16}$/u', (string) array_key_first($fields['user']));
-        unset($fields["a\u{FFFD}"], $fields['user']);
-        // Both renamed names stay, each with its own value: the digest is of the original name.
-        $this->assertCount(2, $fields);
-        foreach (array_keys($fields) as $key) {
-            $this->assertMatchesRegularExpression('/^a\x{FFFD}~[0-9a-f]{16}$/u', (string) $key);
-        }
-        $values = array_values($fields);
-        sort($values);
-        $this->assertSame(['1', '2'], $values);
-        $this->assertStringNotContainsString('s3cret-pass', $line);
     }
 
     public function testEmptyQueryMeansNoQueryField(): void
@@ -286,7 +256,7 @@ final class TraceTest extends TestCase
 
         Trace::boot();
 
-        $this->assertSame($expected, $this->configuration()->retentionDays);
+        $this->assertSame($expected, (new \ReflectionMethod(Trace::class, 'configuration'))->invoke(null)->retentionDays);
     }
 
     /** A console script writes its traces to cli/, never to the web's requests/. */

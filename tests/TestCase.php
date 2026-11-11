@@ -18,6 +18,7 @@ use Golovanov\Weft\Kernel;
 use Golovanov\Weft\Mail\Mail;
 use Golovanov\Weft\Mail\Smtp;
 use Golovanov\Weft\Observability\Alert;
+use Golovanov\Weft\Observability\ErrorHandler;
 use Golovanov\Weft\Observability\Health;
 use Golovanov\Weft\Observability\Trace;
 use Golovanov\Weft\Security\RateLimiter;
@@ -66,6 +67,7 @@ abstract class TestCase extends BaseTestCase
         self::setStatics(Database::class, ['instance' => null]);
         self::setStatics(Vite::class, ['manifest' => null]);
         self::setStatics(Alert::class, ['reporting' => false, 'misconfiguredLogged' => false]);
+        self::setStatics(ErrorHandler::class, ['responded' => false]);
         self::setStatics(Health::class, ['checks' => []]);
         self::setStatics(HttpClient::class, ['transport' => null]);
         self::setStatics(Mail::class, ['transport' => null]);

@@ -9,6 +9,7 @@ use Golovanov\Weft\Http\Abort;
 use Golovanov\Weft\Http\Request;
 use Golovanov\Weft\Http\RequestContext;
 use Golovanov\Weft\Http\Response;
+use Golovanov\Weft\Http\ServiceUnavailable;
 use Golovanov\Weft\I18n\I18n;
 use Golovanov\Weft\I18n\Locale;
 use Golovanov\Weft\I18n\Url;
@@ -40,6 +41,8 @@ use Golovanov\Weft\View\View;
  * (301) to /about, /, /about or /ru/about; a path with characters Sanitize::path() would drop or
  * fold is a 404. A page or an API endpoint may end itself with throw Abort::notFound() or
  * Abort::redirect(): a page gets the 404 page, an endpoint the JSON 404, both the redirect.
+ * Any other throwable is logged, alerted and answered with 500; a ServiceUnavailable with 503 and
+ * Retry-After.
  */
 final class Kernel
 {
@@ -64,14 +67,16 @@ final class Kernel
             $response = self::errorResponse($request, $e);
         }
 
+        // No Trace::flush(): every event already reached the OS when it was written, and the fsync
+        // flush() does would delay each response for a durability request traces do not need.
         Trace::httpEnd($response->status, RequestContext::elapsed());
-        Trace::flush();
+        ErrorHandler::responseSent();
         $response->send();
 
         if ($failure !== null) {
-            // The alert waits for its channels and its window (see Alert). Under PHP-FPM the 500
-            // is handed to the client first. Elsewhere the connection stays open until the alert
-            // is done, and with output_buffering on a short 500 stays in PHP's buffer till then.
+            // The alert waits for its channels and its window (see Alert). Under PHP-FPM the 500 or
+            // 503 is handed to the client first. Elsewhere the connection stays open until the alert
+            // is done, and with output_buffering on a short response stays in PHP's buffer till then.
             if (function_exists('fastcgi_finish_request')) {
                 fastcgi_finish_request();
             }
@@ -80,7 +85,6 @@ final class Kernel
                 session_write_close();
             }
             ErrorHandler::alertException($failure);
-            Trace::flush();
         }
     }
 
@@ -366,21 +370,30 @@ final class Kernel
         return Response::json(['success' => false, 'error' => 'Not Found', 'route' => $route], 404);
     }
 
+    /** 500, or 503 with Retry-After for a ServiceUnavailable; pages/500.php shows either. */
     private static function errorResponse(Request $request, \Throwable $e): Response
+    {
+        $unavailable = $e instanceof ServiceUnavailable;
+        $status = $unavailable ? 503 : 500;
+        $response = self::errorBody($request, $e, $status);
+        return $unavailable ? $response->withHeader('Retry-After', (string) $e->retryAfter) : $response;
+    }
+
+    private static function errorBody(Request $request, \Throwable $e, int $status): Response
     {
         $debug = ErrorHandler::debug();
         if (self::$api || $request->wantsJson()) {
             return Response::json([
                 'success' => false,
-                'error' => $debug ? $e->getMessage() : 'Internal Server Error',
-            ], 500);
+                'error' => $debug ? $e->getMessage() : ($status === 503 ? 'Service Unavailable' : 'Internal Server Error'),
+            ], $status);
         }
 
         $errorPage = Config::root() . '/pages/500.php';
         if (is_file($errorPage)) {
             Url::setRoute(null);
             try {
-                return Response::html(View::page($errorPage, self::layoutFile(), ['error' => $e]), 500);
+                return Response::html(View::page($errorPage, self::layoutFile(), ['error' => $e]), $status);
             } catch (\Throwable $pageError) {
                 // The error page or the layout failed too: log it and answer with the built-in page.
                 ErrorHandler::logException($pageError, 'kernel');
@@ -388,7 +401,7 @@ final class Kernel
         }
 
         $message = $debug ? '<pre>' . Sanitize::output((string) $e) . '</pre>' : '<p>Something went wrong.</p>';
-        return Response::html('<!doctype html><meta charset="utf-8"><title>Error</title><h1>500</h1>' . $message, 500);
+        return Response::html('<!doctype html><meta charset="utf-8"><title>Error</title><h1>' . $status . '</h1>' . $message, $status);
     }
 
     private static function layoutFile(): ?string

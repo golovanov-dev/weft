@@ -6,18 +6,26 @@ namespace Golovanov\Weft\Observability;
 
 use Golovanov\Weft\Config\Config;
 use Golovanov\Weft\Http\RequestContext;
+use Golovanov\Weft\Http\ServiceUnavailable;
 use Golovanov\Weft\Support\Clock;
+use Golovanov\Weft\Support\Sanitize;
 
 /**
  * Central error/exception handler.
  *
  * Writes human-readable lines to LOGS_PATH/errors/YYYY-mm-dd.log and, for exceptions and
  * fatal errors, raises an alert (sensitive spot). Registered once in bootstrap;
- * the Kernel reports exceptions thrown by pages and endpoints through report().
+ * the Kernel reports exceptions thrown by pages and endpoints through report(). An exception
+ * nobody caught outside the Kernel (bootstrap, App\Bootstrap::init()) gets a built-in 500 page on
+ * the web, or a 503 with Retry-After for a ServiceUnavailable. One thrown after the Kernel answered
+ * (a shutdown function, a destructor) is logged and alerted, and the answer stays as it was.
  */
 final class ErrorHandler
 {
     private static bool $registered = false;
+
+    /** Whether the Kernel has sent its response; respondIfWeb() then leaves it alone. */
+    private static bool $responded = false;
 
     public static function run(): void
     {
@@ -44,6 +52,7 @@ final class ErrorHandler
     public static function handleException(\Throwable $e): void
     {
         self::report($e, 'exception');
+        self::respondIfWeb($e);
         self::exitIfCli($e);
     }
 
@@ -81,6 +90,18 @@ final class ErrorHandler
         ], 'exception:' . md5($e->getFile() . $e->getLine()));
     }
 
+    /**
+     * Mark the request as answered. The Kernel calls it before sending its response: with
+     * output_buffering on, that response is still in PHP's buffer and headers_sent() is false, so
+     * a later exception would otherwise replace it with the 500 page.
+     *
+     * @internal Used by the Kernel.
+     */
+    public static function responseSent(): void
+    {
+        self::$responded = true;
+    }
+
     public static function handleShutdown(): void
     {
         $error = error_get_last();
@@ -94,13 +115,38 @@ final class ErrorHandler
     }
 
     /**
+     * Answer a web request whose exception escaped outside the Kernel, in the site's bootstrap.
+     *
+     * With an exception handler registered, PHP ends such a request with 200 and an empty page,
+     * which monitoring and search engines take for a working one. pages/500.php is not rendered:
+     * the site did not start. Headers already sent, or a response the Kernel already gave, leave
+     * the status as it is.
+     */
+    private static function respondIfWeb(\Throwable $e): void
+    {
+        if (PHP_SAPI === 'cli' || self::$responded || headers_sent()) {
+            return;
+        }
+
+        $unavailable = $e instanceof ServiceUnavailable;
+        $status = $unavailable ? 503 : 500;
+        http_response_code($status);
+        header('Content-Type: text/html; charset=utf-8');
+        if ($unavailable) {
+            header('Retry-After: ' . $e->retryAfter);
+        }
+
+        $message = self::debug() ? '<pre>' . Sanitize::output((string) $e) . '</pre>' : '<p>Something went wrong.</p>';
+        echo '<!doctype html><meta charset="utf-8"><title>Error</title><h1>' . $status . '</h1>' . $message;
+    }
+
+    /**
      * End a failed CLI run with a non-zero status.
      *
      * Registering an exception handler changes how PHP dies: once the handler returns, the script
      * terminates with status 0. A CLI script killed by an uncaught throwable therefore reports
      * success to cron, CI and deploy steps, and with display_errors off in production it prints
-     * nothing at all — the failure exists only in the error log nobody was told to read. The web
-     * path is untouched: there the Kernel renders the response and sets the status code.
+     * nothing at all — the failure exists only in the error log nobody was told to read.
      */
     private static function exitIfCli(\Throwable $e): void
     {

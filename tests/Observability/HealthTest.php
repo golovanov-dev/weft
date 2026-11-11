@@ -63,6 +63,41 @@ final class HealthTest extends TestCase
         $this->assertSame(0, $status, json_encode($report) ?: '');
     }
 
+    /**
+     * The short app.php of the Configuration guide runs a site: the Kernel serves a page, and the
+     * report fails only on what production needs from the site itself (its domain, a built frontend).
+     */
+    public function testTheShortAppConfigOfTheGuideRunsASite(): void
+    {
+        $guide = (string) file_get_contents(dirname(__DIR__, 2) . '/example/content/en/configuration.md');
+        // The first php block of the section itself, never one of the next section.
+        $found = preg_match('/^### A short app\.php\R(.*?)(?=^#{1,3} |\z)/ms', $guide, $section)
+            && preg_match('/^```php\R(.*?)^```/ms', $section[1], $m);
+        $this->assertTrue($found, 'the Configuration guide has no short app.php');
+        $this->makeSite('config.php', '', []);
+        file_put_contents($this->site . '/app/app.php', $m[1]);
+        mkdir($this->site . '/pages');
+        file_put_contents($this->site . '/pages/home.php', 'home page');
+        file_put_contents($this->site . '/serve.php', <<<'PHP'
+            <?php
+            require __DIR__ . '/bootstrap.php';
+            $_SERVER['REQUEST_URI'] = '/';
+            $_SERVER['REQUEST_METHOD'] = 'GET';
+            Golovanov\Weft\Kernel::handle();
+            PHP);
+
+        [$status, $page] = $this->command(escapeshellarg(PHP_BINARY) . ' serve.php');
+        $this->assertSame(0, $status);
+        $this->assertStringContainsString('home page', $page);
+
+        [$status, $report] = $this->runHealth();
+        $this->assertSame(1, $status);
+        $this->assertContains('app.url.base is on example.com', $report['production']);
+        $this->assertNotSame([], preg_grep('/manifest\.json not found$/', $report['production']));
+        [$status, $report] = $this->runHealth('--dev');
+        $this->assertSame(0, $status, json_encode($report) ?: '');
+    }
+
     public function testAFailingOrThrowingSiteCheckFailsIt(): void
     {
         $this->makeSite('config.php', '', [], <<<'PHP'
@@ -167,15 +202,20 @@ final class HealthTest extends TestCase
     /** @return array{0: int, 1: array<string, mixed>, 2: string} exit status, report, stderr */
     private function runHealth(string $args = ''): array
     {
-        $command = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/weft-health') . ' ' . $args;
+        [$status, $stdout, $stderr] = $this->command(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/weft-health') . ' ' . $args);
+        return [$status, (array) json_decode($stdout, true), $stderr];
+    }
+
+    /** @return array{0: int, 1: string, 2: string} exit status, stdout and stderr of $command run in the site root */
+    private function command(string $command): array
+    {
         $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $this->site);
         $this->assertIsResource($process);
         $stdout = (string) stream_get_contents($pipes[1]);
         $stderr = (string) stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
-        $status = proc_close($process);
 
-        return [$status, (array) json_decode($stdout, true), $stderr];
+        return [proc_close($process), $stdout, $stderr];
     }
 }
