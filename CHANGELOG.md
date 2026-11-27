@@ -14,15 +14,23 @@ pre-1.0 the API may change between minor versions.
   status, headers and body — instead of itself, for example JSON to a form's `fetch()` from the
   form's own page: [Project structure](example/content/en/project-structure.md#dynamic-segments).
 
+### Changed
+
+- **Action.** `vendor/bin/weft-health` runs `bootstrap.php` inside a function, so the variables of
+  `bootstrap.php` are not global there. If a site check or code the bootstrap loads relies on one
+  through `global` or `$GLOBALS`, keep that value in a constant or a static property instead; pages
+  are not affected: [Upgrading](example/content/en/upgrading.md).
+
 ### Fixed
 
 - `vendor/bin/weft-health` printed an `Uncaught …` line instead of its report when `bootstrap.php`
-  threw, for example on a database connection made there that failed. It now prints a report with
-  only `"ok": false` and `bootstrap_error` (the exception's class, message, file and line) and exits
-  with 1; with the site's error handler already registered, the exception is also logged and alerted
-  as before. A script that reads the report must expect one without the other fields:
+  threw, for example on a database connection made there that failed, and nothing on stdout when it
+  died with a fatal error. It now prints a report with only `"ok": false` and `bootstrap_error` (the
+  exception's class, message, and the first file and line of the site's own code) and exits with 1;
+  with the site's error handler already registered, the error is also logged and alerted as before.
+  A script that reads the report must expect one without the other fields:
   [Troubleshooting](example/content/en/troubleshooting.md#weft-health-fails).
-- 8 smaller fixes: 1 reliability, 7 docs.
+- 5 smaller fixes: 2 reliability, 3 docs.
 
 ## 0.3.0 - 2026-11-11
 

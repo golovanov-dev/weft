@@ -639,12 +639,14 @@ are left out on purpose — preloading them would undo the code split.
 is not ready to serve: logs or rate-limit counters PHP cannot write, an unusable `PROXY_IPS`, a
 captcha, an alert channel or mail without its settings, a static `robots.txt` or `llms.txt` that
 hides the generated one, development settings (`DEBUG`, example.com, no built assets), a failed
-check of the site, or a `bootstrap.php` that throws (`bootstrap_error`). What each field means:
-[Troubleshooting](/docs/troubleshooting#weft-health-fails).
+check of the site, or a `bootstrap.php` that throws or dies with a fatal error (`bootstrap_error`).
+What each field means: [Troubleshooting](/docs/troubleshooting#weft-health-fails).
 
 The engine cannot know what your site needs, so the site adds its own checks in `app/Bootstrap.php`.
 A check returns the fields to show and `ok`; anything but `ok => true`, or an exception, fails the
-report. A minimal check that a contact form has an address to email (this example's
+report. `weft-health` runs `bootstrap.php` inside a function, so its variables are not global: a
+check reads what it needs from a constant or a static property, not through `global`.
+A minimal check that a contact form has an address to email (this example's
 `App\Bootstrap::contactForm()` also fails on example.com and on an address that is not plain):
 
 ```php

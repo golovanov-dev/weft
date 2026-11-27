@@ -13,14 +13,16 @@ deploy user, unless a line says otherwise. `www-data` stands for PHP's user and 
 ## weft-health fails
 
 `vendor/bin/weft-health` prints a JSON report and exits with 1 when `ok` is false, 0 otherwise.
-When `bootstrap.php` throws, the report is only `ok` and `bootstrap_error` (the first row below).
+When `bootstrap.php` throws or dies with a fatal error, the report is only `ok` and `bootstrap_error`
+(the first row below). What the bootstrap and the site's checks print, such as a blank line after a
+closing `?>` or a debug `echo`, goes to stderr, so stdout is the report alone.
 `config` names the environment config the site loaded (`config/config.php` on a server). With
 `--dev`, on a development machine, `production` is listed without failing the report; every other
 field counts as on a server. `ok` is false when any of these is bad:
 
 | Field | Bad value | What to do |
 |---|---|---|
-| `bootstrap_error` | present | `bootstrap.php`, a file it loads or `App\Bootstrap` threw, so the site does not start and every page fails too. It names the exception, its message cut to 200 characters, and the file and line, from the site root: `ParseError: … in config/config.php:36` is a typo in that file. When the bootstrap had already called `ErrorHandler::run()`, the error log has its `EXCEPTION` line and the critical alert goes out, as for a page. `Golovanov\\Weft\\Http\\ServiceUnavailable: Database connection error`, as JSON prints it, is the database: see [Every page answers 503](#every-page-answers-503) |
+| `bootstrap_error` | present | `bootstrap.php`, a file it loads or `App\Bootstrap` threw or died with a fatal error (`Fatal error: Cannot redeclare …`), so the site does not start and every page fails too. A fatal error inside a site check (`Health::check`) comes here as well, and then the pages may still work. It names the exception, its message cut to 200 characters (of a syntax error only `syntax error`), and the place, from the site root. For an exception that is the file and line that threw or, when that file is in `vendor/`, the line of the site that called into it. A fatal error has no call stack: its place is the line where it happened, in `vendor/` too. `ParseError: syntax error in config/config.php:36` is a typo in that file. `strict_types declaration must be the very first statement` in a file that starts with `declare(strict_types=1)`, such as `config/config.php` made from the template, is a BOM before `<?php`: save the file as UTF-8 without BOM. When the bootstrap had already called `ErrorHandler::run()`, the error log has its `EXCEPTION` or `FATAL` line and the critical alert goes out, as for a page. `Golovanov\\Weft\\Http\\ServiceUnavailable: Database connection error`, as JSON prints it, is the database: see [Every page answers 503](#every-page-answers-503) |
 | `production` | not empty | Fix each setting it names: `DEBUG` or `DEV_MODE` on; `config/config.example.php` loaded (create `config/config.php`); `app.url.base` on example.com (set your domain); with `app.vite.entry` set, a `public/dist/.vite/manifest.json` that is missing or lacks that entry (run `npm run build`; with `WEB_ROOT` set, the manifest is looked for there) |
 | `logs_writable` | `false` | `logs_error` names what PHP cannot write: `errors/` or `requests/` under `LOGS_PATH`, or says that `LOGS_PATH` is not set. See [PHP cannot write storage/](#php-cannot-write-storage) |
 | `rate_limit_writable` | `false` | `rate_limit_error` names `rate_limit_path`, the counter directory. The same fix as for `logs_writable` |

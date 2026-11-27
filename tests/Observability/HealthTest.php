@@ -194,7 +194,114 @@ final class HealthTest extends TestCase
         [$status, $report] = $this->runHealth();
 
         $this->assertSame(1, $status);
-        $this->assertMatchesRegularExpression('~^ParseError: .+ in config/config\.php:3$~', (string) ($report['bootstrap_error'] ?? ''));
+        // Only the start of a syntax error: the rest quotes the code, here the password.
+        $this->assertSame(['ok' => false, 'bootstrap_error' => 'ParseError: syntax error in config/config.php:3'], $report);
+    }
+
+    /** Such as a database connection the engine makes: the place is the line of bootstrap.php that called it. */
+    public function testABootstrapErrorFromVendorNamesTheFirstPlaceInTheSite(): void
+    {
+        mkdir($this->site . '/vendor/lib', 0777, true);
+        file_put_contents($this->site . '/vendor/lib/connect.php', <<<'PHP'
+            <?php
+            function lib_connect(): void { lib_open(); }
+            function lib_open(): void { throw new RuntimeException('Database connection error'); }
+            PHP);
+        $this->makeSite('config.php', '', [], <<<'PHP'
+            require APP_ROOT . '/vendor/lib/connect.php';
+            lib_connect();
+            PHP);
+
+        [$status, $report] = $this->runHealth();
+
+        $this->assertSame(1, $status);
+        $this->assertSame('RuntimeException: Database connection error in bootstrap.php:' . $this->bootstrapLine('lib_connect()'), $report['bootstrap_error'] ?? null);
+    }
+
+    /** A file outside the site root keeps its full path; on Windows a drive letter in another case is still the root. */
+    public function testABootstrapErrorOutsideTheSiteRootKeepsItsFullPath(): void
+    {
+        $outside = $this->makeTempDir('weft-health-outside-');
+        file_put_contents($outside . '/shared.php', "<?php\nthrow new RuntimeException('shared');\n");
+        $this->makeSite('config.php', '', [], 'require ' . var_export($outside . '/shared.php', true) . ';');
+
+        try {
+            [, $report] = $this->runHealth();
+        } finally {
+            $this->removeDir($outside);
+        }
+        $this->assertSame('RuntimeException: shared in ' . str_replace('\\', '/', $outside) . '/shared.php:2', $report['bootstrap_error'] ?? null);
+
+        if (PHP_OS_FAMILY === 'Windows') {
+            $site = lcfirst($this->site) === $this->site ? ucfirst($this->site) : lcfirst($this->site);
+            file_put_contents($this->site . '/bootstrap.php', "<?php\nthrow new RuntimeException('here');\n");
+            [, $report] = $this->runHealth('', $site);
+            $this->assertSame('RuntimeException: here in bootstrap.php:2', $report['bootstrap_error'] ?? null);
+        }
+    }
+
+    /**
+     * A fatal error is no exception, such as a function declared twice: still the report and exit code 1,
+     * and the site's own shutdown handler logs and alerts it, once.
+     */
+    public function testAFatalErrorInTheBootstrapIsAReport(): void
+    {
+        $this->makeSite('config.php', '', [
+            'alerts' => ['channels' => ['log']],
+            'rate_limit' => ['path' => $this->site . '/ratelimit'],
+        ], <<<'PHP'
+            Golovanov\Weft\Observability\ErrorHandler::run();
+            function site_helper(): void {}
+            require APP_ROOT . '/helpers.php';
+            PHP);
+        file_put_contents($this->site . '/helpers.php', "<?php\nfunction site_helper(): void {}\n");
+
+        [$status, $report] = $this->runHealth();
+
+        $this->assertSame(1, $status);
+        $this->assertSame(['ok', 'bootstrap_error'], array_keys($report));
+        $this->assertMatchesRegularExpression('~^Fatal error: Cannot redeclare .+ in helpers\.php:2$~', (string) $report['bootstrap_error']);
+        $log = implode('', array_map('file_get_contents', glob($this->site . '/logs/errors/*.log') ?: []));
+        $this->assertSame(1, substr_count($log, 'FATAL ERRNO:'), $log);
+        $this->assertSame(1, substr_count($log, 'CRITICAL incident: Fatal error: Cannot redeclare'), $log);
+    }
+
+    /** A fatal error other than a syntax error keeps its whole message: cut at a comma, it would stop mid-sentence. */
+    public function testAFatalCompileErrorKeepsItsWholeMessage(): void
+    {
+        $this->makeSite('config.php', '', [], "require APP_ROOT . '/classes.php';");
+        file_put_contents($this->site . '/classes.php', <<<'PHP'
+            <?php
+            class SiteBase { public function f(int $a, int $b): void {} }
+            class SiteChild extends SiteBase { public function f(string $a, int $b): void {} }
+            PHP);
+
+        [$status, $report] = $this->runHealth();
+
+        $this->assertSame(1, $status);
+        $this->assertSame(
+            'Fatal error: Declaration of SiteChild::f(string $a, int $b): void must be compatible with SiteBase::f(int $a, int $b): void in classes.php:3',
+            $report['bootstrap_error'] ?? null,
+        );
+    }
+
+    /** A BOM in a config.php without declare, an echo in the bootstrap and one in a site check go to stderr: stdout is the report alone. */
+    public function testWhatTheBootstrapOrACheckPrintsGoesToStderr(): void
+    {
+        $this->makeSite('config.php', '', ['url' => ['base' => 'https://site.test']], <<<'PHP'
+            echo 'from the bootstrap';
+            Golovanov\Weft\Observability\Health::check('noisy', function (): array {
+                echo ' and a check';
+                return ['ok' => true];
+            });
+            PHP);
+        file_put_contents($this->site . '/config/config.php', "\u{FEFF}" . file_get_contents($this->site . '/config/config.php'));
+
+        [$status, $stdout, $stderr] = $this->command(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/weft-health'));
+
+        $this->assertSame(0, $status, $stdout);
+        $this->assertIsArray(json_decode($stdout, true), $stdout);
+        $this->assertSame("\u{FEFF}from the bootstrap and a check", $stderr);
     }
 
     /** As the site's exception handler would: the log line and the critical alert, here through the log channel. */
@@ -302,16 +409,16 @@ final class HealthTest extends TestCase
     }
 
     /** @return array{0: int, 1: array<string, mixed>, 2: string} exit status, report, stderr */
-    private function runHealth(string $args = ''): array
+    private function runHealth(string $args = '', ?string $cwd = null): array
     {
-        [$status, $stdout, $stderr] = $this->command(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/weft-health') . ' ' . $args);
+        [$status, $stdout, $stderr] = $this->command(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/weft-health') . ' ' . $args, $cwd);
         return [$status, (array) json_decode($stdout, true), $stderr];
     }
 
-    /** @return array{0: int, 1: string, 2: string} exit status, stdout and stderr of $command run in the site root */
-    private function command(string $command): array
+    /** @return array{0: int, 1: string, 2: string} exit status, stdout and stderr of $command run in the site root, or in $cwd */
+    private function command(string $command, ?string $cwd = null): array
     {
-        $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $this->site);
+        $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $cwd ?? $this->site);
         $this->assertIsResource($process);
         $stdout = (string) stream_get_contents($pipes[1]);
         $stderr = (string) stream_get_contents($pipes[2]);

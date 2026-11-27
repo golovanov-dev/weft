@@ -9,8 +9,8 @@ declare(strict_types=1);
  *   vendor/bin/weft-health        is the site ready for production?
  *   vendor/bin/weft-health --dev  on a development machine: settings listed under "production" do not fail it
  *
- * Prints a JSON report and exits with 0 when "ok" is true, 1 otherwise. When bootstrap.php throws,
- * the report is only "ok": false and "bootstrap_error".
+ * Prints a JSON report and exits with 0 when "ok" is true, 1 otherwise. When bootstrap.php throws or
+ * dies with a fatal error, the report is only "ok": false and "bootstrap_error".
  */
 
 // stdout carries only the report: a warning or a deprecation from the bootstrap goes to stderr.
@@ -22,7 +22,56 @@ if (!is_file($bootstrap)) {
     exit(1);
 }
 
+$root = rtrim(str_replace('\\', '/', (string) getcwd()), '/') . '/';
+
+/** $file from the site root; a file outside it keeps its full path. Windows paths ignore case. */
+$fromRoot = static function (string $file) use ($root): string {
+    $file = str_replace('\\', '/', $file);
+    $prefix = substr($file, 0, strlen($root));
+    $inside = PHP_OS_FAMILY === 'Windows' ? strcasecmp($prefix, $root) === 0 : $prefix === $root;
+    return $inside ? substr($file, strlen($root)) : $file;
+};
+
+/** The message for the report: of a syntax error only its start, since the rest quotes the code, a password too. */
+$message = static fn(string $text, bool $syntax): string => mb_substr($syntax ? explode(',', $text, 2)[0] : $text, 0, 200);
+
+$printed = false;
+$print = static function (array $report) use (&$printed): void {
+    $printed = true;
+    echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) . "\n";
+};
+
+// What the bootstrap or a site check prints, such as a blank line after the closing tag, goes to stderr, not before the report.
+$level = ob_get_level();
+$bootstrapOutputToStderr = static function () use ($level): void {
+    $output = '';
+    while (ob_get_level() > $level) {
+        $output = ob_get_clean() . $output;
+    }
+    if ($output !== '') {
+        fwrite(STDERR, $output);
+    }
+};
+
+// A fatal error is no Throwable, such as a function declared twice: still the report, not an empty stdout.
+register_shutdown_function(static function () use (&$printed, $print, $bootstrapOutputToStderr, $fromRoot, $message): void {
+    $error = error_get_last();
+    if ($printed || $error === null || !in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) {
+        return;
+    }
+    $bootstrapOutputToStderr();
+    $print(['ok' => false, 'bootstrap_error' => sprintf(
+        'Fatal error: %s in %s:%d',
+        $message($error['message'], $error['type'] === E_PARSE),
+        $fromRoot($error['file']),
+        $error['line'],
+    )]);
+    // Last, so the site's own shutdown handler still logs and alerts the error: exit stops the rest.
+    register_shutdown_function(static fn() => exit(1));
+});
+
 $bootstrapError = null;
+ob_start();
 try {
     // In a scope of its own: no variable of bootstrap.php can stand in for the report below.
     (static function (string $file): void {
@@ -46,21 +95,24 @@ if ($bootstrapError !== null) {
         }
     }
 
-    $root = rtrim(str_replace('\\', '/', (string) getcwd()), '/') . '/';
-    $file = $bootstrapError->getFile();
-    if (str_starts_with(str_replace('\\', '/', $file), $root)) {
-        $file = substr(str_replace('\\', '/', $file), strlen($root));
+    // The first place in the site's code: where it was thrown, else the first call outside vendor/.
+    $where = $fromRoot($bootstrapError->getFile()) . ':' . $bootstrapError->getLine();
+    foreach ([['file' => $bootstrapError->getFile(), 'line' => $bootstrapError->getLine()], ...$bootstrapError->getTrace()] as $frame) {
+        if (isset($frame['file']) && !str_starts_with($fromRoot($frame['file']), 'vendor/')) {
+            $where = $fromRoot($frame['file']) . ':' . ($frame['line'] ?? 0);
+            break;
+        }
     }
     $report = ['ok' => false, 'bootstrap_error' => sprintf(
-        '%s: %s in %s:%d',
+        '%s: %s in %s',
         $bootstrapError::class,
-        mb_substr($bootstrapError->getMessage(), 0, 200),
-        $file,
-        $bootstrapError->getLine(),
+        $message($bootstrapError->getMessage(), $bootstrapError instanceof ParseError),
+        $where,
     )];
 } else {
     $report = Golovanov\Weft\Observability\Health::report(in_array('--dev', $_SERVER['argv'] ?? [], true));
 }
+$bootstrapOutputToStderr();
 
-echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) . "\n";
+$print($report);
 exit($report['ok'] ? 0 : 1);

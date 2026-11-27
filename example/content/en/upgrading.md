@@ -29,10 +29,20 @@ On your machine, in the site's directory. Commit the result.
   Then check that the line is there: `grep -n "'api_url'" app/Configs/app.php`.
 
 - **Your own readers of the `weft-health` report.** When `bootstrap.php` throws, for example on a
-  database connection made there, the report is JSON with only `"ok": false` and `bootstrap_error`
-  (the exception, its message, and the file and line) and exit code 1, not an `Uncaught …` line
+  database connection made there, or dies with a fatal error, the report is JSON with only
+  `"ok": false` and `bootstrap_error` (the error, its message and its place) and exit code 1. 0.3
+  printed an `Uncaught …` line instead, and on a fatal error nothing on stdout with exit code 255
   ([weft-health fails](/docs/troubleshooting#weft-health-fails)). A script that expects the other
   fields must handle a report without them.
+
+- **A global variable of `bootstrap.php`**, only for a site whose check or code loaded by the
+  bootstrap reads one through `global` or `$GLOBALS`. `weft-health` runs `bootstrap.php` inside a
+  function, so such a variable is not set there, and the check fails or reads nothing; pages are not
+  affected. Keep the value in a constant or a static property instead. To find such code:
+
+  ```bash
+  grep -rn -e 'global \$' -e '\$GLOBALS' bootstrap.php app/
+  ```
 
 ### Step 3: the constants
 
