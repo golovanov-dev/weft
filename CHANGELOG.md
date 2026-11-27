@@ -14,6 +14,16 @@ pre-1.0 the API may change between minor versions.
   status, headers and body — instead of itself, for example JSON to a form's `fetch()` from the
   form's own page: [Project structure](example/content/en/project-structure.md#dynamic-segments).
 
+### Fixed
+
+- `vendor/bin/weft-health` printed an `Uncaught …` line instead of its report when `bootstrap.php`
+  threw, for example on a database connection made there that failed. It now prints a report with
+  only `"ok": false` and `bootstrap_error` (the exception's class, message, file and line) and exits
+  with 1; with the site's error handler already registered, the exception is also logged and alerted
+  as before. A script that reads the report must expect one without the other fields:
+  [Troubleshooting](example/content/en/troubleshooting.md#weft-health-fails).
+- 8 smaller fixes: 1 reliability, 7 docs.
+
 ## 0.3.0 - 2026-11-11
 
 To upgrade from 0.2, do what each entry marked **Action.** says. The steps are in the upgrade guide,

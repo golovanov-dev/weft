@@ -88,7 +88,7 @@ abstract class TestCase extends BaseTestCase
         $_GET = [];
         $_POST = [];
         $_SERVER['REQUEST_URI'] = '/';
-        unset($_SERVER['HTTP_ACCEPT_LANGUAGE'], $_SERVER['REMOTE_ADDR']);
+        unset($_SERVER['REQUEST_METHOD'], $_SERVER['HTTP_ACCEPT_LANGUAGE'], $_SERVER['REMOTE_ADDR']);
     }
 
     /** @param array<string, mixed> $values */

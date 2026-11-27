@@ -31,7 +31,8 @@ define('LOGS_PATH', dirname(__DIR__) . '/storage/logs'); // errors/, traces: req
 Database (only if you use `Golovanov\Weft\Database`):
 
 ```php
-define('DB_HOST', '127.0.0.1'); // a port other than 3306 goes here, '127.0.0.1:3307': there is no DB_PORT
+define('DB_HOST', '127.0.0.1'); // a port other than 3306 goes here, '127.0.0.1:3307': there is no DB_PORT.
+                                // with a port, write the IP: on Linux 'localhost' alone is the Unix socket
 define('DB_NAME', '');
 define('DB_USER', '');
 define('DB_PASSWORD', '');
@@ -362,7 +363,8 @@ mirror, a path such as `https://mirror.example.com/tg` included. The example rea
 `POST <api_url>/bot<token>/sendMessage`, here `/tg/bot<token>/sendMessage` on the mirror: the mirror
 must drop `/tg` before passing the request to `api.telegram.org` (in nginx, `location /tg/` with
 `proxy_pass https://api.telegram.org/;`, the trailing `/` does that). The mirror gets your bot token
-in that path, so use only a mirror you run yourself. `api_url` must be an https URL without a query;
+in that path: use only a mirror you run yourself, and keep the path out of its access log
+(`access_log off;` in that `location`). `api_url` must be an https URL without a query;
 otherwise the channel is skipped like one without its token. The mirror's certificate must be one
 the hosting already trusts: a self-signed one is refused, and there is no setting for your own CA.
 

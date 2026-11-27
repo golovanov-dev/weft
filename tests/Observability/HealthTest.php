@@ -168,6 +168,97 @@ final class HealthTest extends TestCase
         );
     }
 
+    /** Such as a database connection in the bootstrap that failed: still a JSON report, not PHP's `Uncaught`. */
+    public function testABootstrapThatThrowsIsAReport(): void
+    {
+        $this->makeSite('config.php', '', [], <<<'PHP'
+            Golovanov\Weft\Observability\ErrorHandler::run();
+            throw new RuntimeException(str_repeat('x', 300));
+            PHP);
+
+        [$status, $report, $stderr] = $this->runHealth();
+
+        $this->assertSame(1, $status);
+        $this->assertSame([
+            'ok' => false,
+            'bootstrap_error' => 'RuntimeException: ' . str_repeat('x', 200) . ' in bootstrap.php:' . $this->bootstrapLine('throw new'),
+        ], $report);
+        $this->assertStringNotContainsString('Uncaught', $stderr);
+    }
+
+    /** Thrown before the engine is even loaded, such as a typo in config.php: the file is in the report. */
+    public function testABootstrapErrorNamesTheFileFromTheSiteRoot(): void
+    {
+        $this->makeSite('config.php', "define('DB_PASSWORD', 'it's-mine');", []);
+
+        [$status, $report] = $this->runHealth();
+
+        $this->assertSame(1, $status);
+        $this->assertMatchesRegularExpression('~^ParseError: .+ in config/config\.php:3$~', (string) ($report['bootstrap_error'] ?? ''));
+    }
+
+    /** As the site's exception handler would: the log line and the critical alert, here through the log channel. */
+    public function testABootstrapErrorAfterTheHandlerIsRegisteredIsLoggedAndAlerted(): void
+    {
+        $this->makeSite('config.php', '', [
+            'alerts' => ['channels' => ['log']],
+            'rate_limit' => ['path' => $this->site . '/ratelimit'],
+        ], <<<'PHP'
+            Golovanov\Weft\Observability\ErrorHandler::run();
+            throw new RuntimeException('bootstrap failed');
+            PHP);
+
+        [$status] = $this->runHealth();
+
+        $this->assertSame(1, $status);
+        $log = implode('', array_map('file_get_contents', glob($this->site . '/logs/errors/*.log') ?: []));
+        $this->assertStringContainsString('EXCEPTION ERRNO:0 | bootstrap failed', $log);
+        $this->assertStringContainsString('CRITICAL incident: Unhandled exception: bootstrap failed', $log);
+    }
+
+    /** Without the handler, nothing the site did not ask for: no error log of the engine's own. */
+    public function testABootstrapErrorBeforeTheHandlerIsRegisteredIsOnlyTheReport(): void
+    {
+        $this->makeSite('config.php', '', ['alerts' => ['channels' => ['log']]], <<<'PHP'
+            throw new RuntimeException('bootstrap failed');
+            PHP);
+
+        [$status, $report] = $this->runHealth();
+
+        $this->assertSame(1, $status);
+        $this->assertStringStartsWith('RuntimeException: bootstrap failed in bootstrap.php:', (string) ($report['bootstrap_error'] ?? ''));
+        $this->assertDirectoryDoesNotExist($this->site . '/logs/errors');
+    }
+
+    /** bootstrap.php runs in a scope of its own, so a $report of its own is not taken for the report. */
+    public function testAVariableOfTheBootstrapIsNotTheReport(): void
+    {
+        $this->makeSite('config.example.php', '', [], <<<'PHP'
+            $report = ['ok' => true, 'site' => 'mine'];
+            $bootstrapError = null;
+            PHP);
+
+        [$status, $report] = $this->runHealth();
+
+        $this->assertSame(1, $status);
+        $this->assertArrayNotHasKey('site', $report);
+        $this->assertContains('config/config.example.php is loaded', $report['production']);
+    }
+
+    /** With PHP's display_errors on stdout, as in a CLI without php.ini: the warning goes to stderr. */
+    public function testAWarningInTheBootstrapLeavesStdoutValidJson(): void
+    {
+        $this->makeSite('config.php', '', ['url' => ['base' => 'https://site.test']], <<<'PHP'
+            trigger_error('careful', E_USER_WARNING);
+            PHP);
+
+        [$status, $stdout, $stderr] = $this->command(escapeshellarg(PHP_BINARY) . ' -d display_errors=1 -d error_reporting=-1 ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/weft-health'));
+
+        $this->assertSame(0, $status, $stdout);
+        $this->assertIsArray(json_decode($stdout, true), $stdout);
+        $this->assertStringContainsString('careful', $stderr);
+    }
+
     public function testOutsideASiteRootItSaysWhereItLooked(): void
     {
         [$status, , $stderr] = $this->runHealth();
@@ -197,6 +288,17 @@ final class HealthTest extends TestCase
             Golovanov\Weft\Config\Config::load(APP_ROOT . '/app');
             {$wiring}
             PHP);
+    }
+
+    /** The line of the scratch site's bootstrap.php that starts with $code. */
+    private function bootstrapLine(string $code): int
+    {
+        foreach (file($this->site . '/bootstrap.php') ?: [] as $index => $line) {
+            if (str_starts_with(ltrim($line), $code)) {
+                return $index + 1;
+            }
+        }
+        $this->fail("No line starting with {$code} in bootstrap.php");
     }
 
     /** @return array{0: int, 1: array<string, mixed>, 2: string} exit status, report, stderr */

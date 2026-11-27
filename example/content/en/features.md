@@ -252,7 +252,9 @@ link. The engine runs the file with `$request` in scope and turns what it prints
 - the status is the one it set (`http_response_code()`, or a `Response` it `send()`s), otherwise 200;
 - `Content-Type` is always `application/json; charset=utf-8`, whatever the file set; its other
   headers (`Location`) are sent as set. A redirect (`Abort::redirect()`) has no body and is not
-  JSON; a response thrown with `Abort::response()` goes out as it is, with its own `Content-Type`
+  JSON; a response thrown with `Abort::response()` goes out as it is, without the JSON
+  `Content-Type`: `Response::json()`, `html()` and `text()` set their own, and a `Response` without
+  one goes out with the type the file set with `header()`, or PHP's `text/html`
   ([Project structure](/docs/project-structure#dynamic-segments));
 - an uncaught throwable discards the printed output and becomes a JSON 500, logged and alerted like
   any other; a `ServiceUnavailable` becomes a 503 (below);
@@ -636,8 +638,8 @@ are left out on purpose — preloading them would undo the code split.
 `vendor/bin/weft-health`, run in the site root, prints a JSON report and exits with 1 when the site
 is not ready to serve: logs or rate-limit counters PHP cannot write, an unusable `PROXY_IPS`, a
 captcha, an alert channel or mail without its settings, a static `robots.txt` or `llms.txt` that
-hides the generated one, development settings (`DEBUG`, example.com, no built assets),
-or a failed check of the site. What each field means:
+hides the generated one, development settings (`DEBUG`, example.com, no built assets), a failed
+check of the site, or a `bootstrap.php` that throws (`bootstrap_error`). What each field means:
 [Troubleshooting](/docs/troubleshooting#weft-health-fails).
 
 The engine cannot know what your site needs, so the site adds its own checks in `app/Bootstrap.php`.

@@ -9,16 +9,58 @@ declare(strict_types=1);
  *   vendor/bin/weft-health        is the site ready for production?
  *   vendor/bin/weft-health --dev  on a development machine: settings listed under "production" do not fail it
  *
- * Prints a JSON report and exits with 0 when "ok" is true, 1 otherwise.
+ * Prints a JSON report and exits with 0 when "ok" is true, 1 otherwise. When bootstrap.php throws,
+ * the report is only "ok": false and "bootstrap_error".
  */
+
+// stdout carries only the report: a warning or a deprecation from the bootstrap goes to stderr.
+ini_set('display_errors', 'stderr');
 
 $bootstrap = getcwd() . '/bootstrap.php';
 if (!is_file($bootstrap)) {
     fwrite(STDERR, 'weft-health: no bootstrap.php in ' . getcwd() . "; run it from the site root.\n");
     exit(1);
 }
-require $bootstrap;
 
-$report = Golovanov\Weft\Observability\Health::report(in_array('--dev', $_SERVER['argv'] ?? [], true));
+$bootstrapError = null;
+try {
+    // In a scope of its own: no variable of bootstrap.php can stand in for the report below.
+    (static function (string $file): void {
+        require $file;
+    })($bootstrap);
+} catch (Throwable $e) {
+    // The site did not start, such as a database connection in the bootstrap that failed.
+    $bootstrapError = $e;
+}
+
+if ($bootstrapError !== null) {
+    // The log line and the critical alert the site's exception handler would have given, when the
+    // bootstrap got as far as registering it.
+    $handler = set_exception_handler(null);
+    restore_exception_handler();
+    if ($handler === [Golovanov\Weft\Observability\ErrorHandler::class, 'handleException']) {
+        try {
+            Golovanov\Weft\Observability\ErrorHandler::report($bootstrapError, 'exception');
+        } catch (Throwable) {
+            // The report below still names the exception.
+        }
+    }
+
+    $root = rtrim(str_replace('\\', '/', (string) getcwd()), '/') . '/';
+    $file = $bootstrapError->getFile();
+    if (str_starts_with(str_replace('\\', '/', $file), $root)) {
+        $file = substr(str_replace('\\', '/', $file), strlen($root));
+    }
+    $report = ['ok' => false, 'bootstrap_error' => sprintf(
+        '%s: %s in %s:%d',
+        $bootstrapError::class,
+        mb_substr($bootstrapError->getMessage(), 0, 200),
+        $file,
+        $bootstrapError->getLine(),
+    )];
+} else {
+    $report = Golovanov\Weft\Observability\Health::report(in_array('--dev', $_SERVER['argv'] ?? [], true));
+}
+
 echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) . "\n";
 exit($report['ok'] ? 0 : 1);

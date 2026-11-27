@@ -1,10 +1,55 @@
 ---
 title: Upgrading
-description: Moving a site to a new minor version of Weft — 0.2 to 0.3, and 0.1.x to 0.2 with its config, copied files, the server, Redis keys and the way back.
+description: Moving a site to a new minor version of Weft — 0.3 to 0.4, 0.2 to 0.3, and 0.1.x to 0.2 with its config, copied files, the server, Redis keys and the way back.
 order: 8
 ---
 
 # Upgrading
+
+## From 0.3 to 0.4
+
+Follow [Updating the engine](/docs/deployment#the-engine) in Deployment. This page adds what 0.4
+needs at its steps; the 0.4.0 section of the
+[CHANGELOG](https://github.com/golovanov-dev/weft/blob/main/CHANGELOG.md) lists every change.
+
+### Step 2: your site's code and config
+
+On your machine, in the site's directory. Commit the result.
+
+- **`app/Configs/app.php`**, only for a server that sends Telegram alerts through a mirror
+  ([Alerts](/docs/configuration#alerts)). An `alerts.telegram` block copied from the example of 0.3
+  or earlier, in a copy of the example or added to the short `app.php`, has no `api_url`, and
+  `TELEGRAM_API_URL` does nothing without it: alerts keep going to `api.telegram.org`, and
+  `weft-health` does not report it. Add this line to the block:
+
+  ```php
+  'api_url' => defined('TELEGRAM_API_URL') ? TELEGRAM_API_URL : '',
+  ```
+
+  Then check that the line is there: `grep -n "'api_url'" app/Configs/app.php`.
+
+- **Your own readers of the `weft-health` report.** When `bootstrap.php` throws, for example on a
+  database connection made there, the report is JSON with only `"ok": false` and `bootstrap_error`
+  (the exception, its message, and the file and line) and exit code 1, not an `Uncaught …` line
+  ([weft-health fails](/docs/troubleshooting#weft-health-fails)). A script that expects the other
+  fields must handle a report without them.
+
+### Step 3: the constants
+
+0.4 adds no constants to the template and renames none: skip this step. `TELEGRAM_API_URL` goes into
+`config/config.php` only on a server that needs the mirror.
+
+### Step 4: the update
+
+```bash
+composer require golovanov/weft:^0.4 -W
+vendor/bin/weft-health --dev
+```
+
+### Back to 0.3
+
+Roll back as in [Updating the engine](/docs/deployment#the-engine); nothing on the server needs
+undoing.
 
 ## From 0.2 to 0.3
 

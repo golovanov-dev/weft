@@ -13,12 +13,14 @@ deploy user, unless a line says otherwise. `www-data` stands for PHP's user and 
 ## weft-health fails
 
 `vendor/bin/weft-health` prints a JSON report and exits with 1 when `ok` is false, 0 otherwise.
+When `bootstrap.php` throws, the report is only `ok` and `bootstrap_error` (the first row below).
 `config` names the environment config the site loaded (`config/config.php` on a server). With
 `--dev`, on a development machine, `production` is listed without failing the report; every other
 field counts as on a server. `ok` is false when any of these is bad:
 
 | Field | Bad value | What to do |
 |---|---|---|
+| `bootstrap_error` | present | `bootstrap.php`, a file it loads or `App\Bootstrap` threw, so the site does not start and every page fails too. It names the exception, its message cut to 200 characters, and the file and line, from the site root: `ParseError: … in config/config.php:36` is a typo in that file. When the bootstrap had already called `ErrorHandler::run()`, the error log has its `EXCEPTION` line and the critical alert goes out, as for a page. `Golovanov\\Weft\\Http\\ServiceUnavailable: Database connection error`, as JSON prints it, is the database: see [Every page answers 503](#every-page-answers-503) |
 | `production` | not empty | Fix each setting it names: `DEBUG` or `DEV_MODE` on; `config/config.example.php` loaded (create `config/config.php`); `app.url.base` on example.com (set your domain); with `app.vite.entry` set, a `public/dist/.vite/manifest.json` that is missing or lacks that entry (run `npm run build`; with `WEB_ROOT` set, the manifest is looked for there) |
 | `logs_writable` | `false` | `logs_error` names what PHP cannot write: `errors/` or `requests/` under `LOGS_PATH`, or says that `LOGS_PATH` is not set. See [PHP cannot write storage/](#php-cannot-write-storage) |
 | `rate_limit_writable` | `false` | `rate_limit_error` names `rate_limit_path`, the counter directory. The same fix as for `logs_writable` |
@@ -157,7 +159,8 @@ grep -rh 'Database connection error' storage/logs/errors/
 ```
 
 The `DATABASE` line has the driver's message after `Database connection error:`. Its code in square
-brackets does not depend on the language of the server, the message may be translated:
+brackets is the same in every language; the message may be translated, the `[2002]` ones by the
+system of the machine PHP runs on, not by the MySQL server:
 
 | Message | Cause |
 |---|---|
@@ -165,6 +168,7 @@ brackets does not depend on the language of the server, the message may be trans
 | `[1045] Access denied for user` | `DB_USER` or `DB_PASSWORD` in `config/config.php` |
 | `[1044] Access denied for user … to database` | `DB_NAME`, or the user has no rights on that database |
 | `[1049] Unknown database` | `DB_NAME` |
+| `[2054] … authentication method unknown to the client [auth_gssapi_client]` | `DB_USER` or `DB_PASSWORD`: MariaDB on Windows answers this way a user it does not have (or `[1045]`, either at random) and a wrong password for `root`, whose login also accepts gssapi |
 | `[2002]`: `Connection refused`, `timed out`, `getaddrinfo for <host> failed` | `DB_HOST`, or the MySQL server is down or unreachable from this host |
 
 No such line: a page or an endpoint threw a `ServiceUnavailable` of its own, and the `KERNEL` line
@@ -221,8 +225,12 @@ grep -h '<trace_id>' storage/logs/requests/*.jsonl | grep alert.failed
 - `telegram`: `error` is Telegram's description. `Unauthorized`: a wrong bot token;
   `Bad Request: chat not found`: a wrong chat id, or the bot was never started in that chat.
   Through a mirror (`api_url`): `status` `0` with `transport_error: true` is the mirror not reached
-  or its certificate not trusted (a self-signed one is refused); `404`, often with `Telegram did not
-  confirm the message`, is a wrong path in `api_url` or a mirror that does not drop its own prefix.
+  or its certificate not trusted (a self-signed one is refused). The same with `TELEGRAM_API_URL` set
+  can be no mirror at all: the `alerts.telegram` block of `app/Configs/app.php` has no `api_url` line,
+  so alerts go to `api.telegram.org`, and `weft-health` does not notice
+  ([Upgrading](/docs/upgrading#from-03-to-04) has the line). `404` with `Telegram did not confirm
+  the message` is the mirror's own: a wrong path in `api_url`. `404` with `Not Found` is Telegram's:
+  the mirror passed its own prefix on.
 - `mail`: the alert goes out with the same mail settings as the contact form, so when the form's
   email fails, so does this alert. To hear about undelivered requests, add a channel that does not
   go through your mail.
