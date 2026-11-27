@@ -163,10 +163,14 @@ final class Alert
                     array_filter(['app.alertloop.base_url', 'app.alertloop.api_key'], $empty),
                 ));
             case 'telegram':
-                return array_values(array_map(
+                $errors = array_values(array_map(
                     static fn(string $key): string => $key . ' is empty',
                     array_filter(['app.alerts.telegram.bot_token', 'app.alerts.telegram.chat_id'], $empty),
                 ));
+                if (!self::isHttpsUrl(self::telegramApiUrl())) {
+                    $errors[] = 'app.alerts.telegram.api_url is not an https URL';
+                }
+                return $errors;
             case 'mail':
                 $to = self::mailTo();
                 $errors = $to === [] ? ['app.alerts.mail_to is empty'] : [];
@@ -182,6 +186,23 @@ final class Alert
             default:
                 return ['app.alerts.channels has an unknown channel "' . mb_substr($channel, 0, 40) . '"'];
         }
+    }
+
+    /** app.alerts.telegram.api_url without the trailing `/`; the public Bot API when it is not set. */
+    private static function telegramApiUrl(): string
+    {
+        $url = rtrim(trim((string) Config::get('app.alerts.telegram.api_url', '')), '/');
+        return $url === '' ? 'https://api.telegram.org' : $url;
+    }
+
+    /** https with a host, a path at most: the bot token goes into the path of every request. */
+    private static function isHttpsUrl(string $url): bool
+    {
+        $parts = parse_url($url);
+        return is_array($parts)
+            && strtolower($parts['scheme'] ?? '') === 'https'
+            && ($parts['host'] ?? '') !== ''
+            && array_diff_key($parts, ['scheme' => 0, 'host' => 0, 'port' => 0, 'path' => 0]) === [];
     }
 
     /** @return list<string> */
@@ -249,7 +270,7 @@ final class Alert
         $token = trim((string) Config::get('app.alerts.telegram.bot_token', ''));
         $client = new HttpClient(timeout: self::TELEGRAM_TIMEOUT, connectTimeout: 3);
         // log => false: the bot token is part of the URL.
-        $response = $client->post('https://api.telegram.org/bot' . $token . '/sendMessage', [
+        $response = $client->post(self::telegramApiUrl() . '/bot' . $token . '/sendMessage', [
             'chat_id' => trim((string) Config::get('app.alerts.telegram.chat_id', '')),
             'text' => mb_substr(self::text($event), 0, 4000),
             'link_preview_options' => ['is_disabled' => true],

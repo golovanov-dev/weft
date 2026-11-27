@@ -319,6 +319,51 @@ final class AlertTest extends TestCase
         $this->assertStringNotContainsString('SECRET-token', self::errorLogSince($logOffset));
     }
 
+    /** A mirror gets the token in the path too; a failure through it still never records the token. */
+    public function testTelegramGoesThroughTheConfiguredMirror(): void
+    {
+        $this->telegramOn();
+        Config::set('app.alerts.telegram.api_url', 'https://mirror.site.test/tg/');
+        $traceId = Trace::boot();
+        $request = null;
+        self::fakeHttp(static function (array $r) use (&$request): array {
+            $request = $r;
+            return ['body' => false, 'error' => 'Failed to connect to ' . $r['url']];
+        });
+
+        $this->assertSame([], Alert::configErrors());
+        $this->assertFalse(Alert::send('lost'));
+
+        $this->assertSame('https://mirror.site.test/tg/bot123456:SECRET-token/sendMessage', $request['url']);
+        $failure = $this->failureEvents($this->traceEvents($traceId))[0]['data'];
+        $this->assertStringContainsString('https://mirror.site.test/tg/bot***', $failure['error']);
+        $this->assertStringNotContainsString('SECRET-token', $failure['error']);
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function badTelegramApiUrls(): iterable
+    {
+        yield 'http' => ['http://mirror.site.test'];
+        yield 'no scheme' => ['mirror.site.test'];
+        yield 'query' => ['https://mirror.site.test/?key=1'];
+    }
+
+    #[DataProvider('badTelegramApiUrls')]
+    public function testTelegramWithABadApiUrlIsNotReady(string $url): void
+    {
+        $this->telegramOn();
+        Config::set('app.alerts.telegram.api_url', $url);
+        $calls = 0;
+        self::fakeHttp(static function () use (&$calls): array {
+            $calls++;
+            return ['body' => '{"ok":true,"result":{}}'];
+        });
+
+        $this->assertSame(['app.alerts.telegram.api_url is not an https URL'], Alert::configErrors());
+        $this->assertFalse(Alert::send('lost'));
+        $this->assertSame(0, $calls);
+    }
+
     public function testTelegramThatRefusesTheMessageIsAFailureWithItsDescription(): void
     {
         $this->telegramOn();

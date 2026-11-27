@@ -474,7 +474,7 @@ An alert goes to every channel listed in `app.alerts.channels`, in that order
 | Channel | Where | Settings |
 |---|---|---|
 | `alertloop` | [AlertLoop](https://github.com/golovanov-dev/alertloop), `POST /v1/events` | `app.alertloop.*` |
-| `telegram` | a message from your bot to a chat | `app.alerts.telegram.bot_token`, `chat_id` |
+| `telegram` | a message from your bot to a chat | `app.alerts.telegram.bot_token`, `chat_id`, optional `api_url` |
 | `mail` | an email through `Mail` | `app.alerts.mail_to`, `app.mail.*` |
 | `log` | a line in `errors/`; reaches nobody | — |
 

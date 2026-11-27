@@ -56,10 +56,11 @@ not empty. To disable it, set `CAPTCHA_SECRET_KEY` to `''`; on a site with its o
 `app.captcha.enabled` to `false`.
 
 `alert_channels` is `app.alerts.channels`; `alert_errors` names what a listed channel lacks:
-`app.alertloop.base_url` or `api_key`, `app.alerts.telegram.bot_token` or `chat_id`,
-`app.alerts.mail_to` and, for `mail`, the `app.mail` settings. In this example a channel is listed
-when `ALERTLOOP_API_KEY`, `TELEGRAM_BOT_TOKEN` or `ALERT_MAIL_TO` is set, and the rest comes from
-`ALERTLOOP_BASE_URL` and `TELEGRAM_CHAT_ID`. To turn a channel off, set its constant to `''`.
+`app.alertloop.base_url` or `api_key`, `app.alerts.telegram.bot_token` or `chat_id`, an
+`app.alerts.telegram.api_url` that is not an https URL, `app.alerts.mail_to` and, for `mail`, the
+`app.mail` settings. In this example a channel is listed when `ALERTLOOP_API_KEY`,
+`TELEGRAM_BOT_TOKEN` or `ALERT_MAIL_TO` is set, and the rest comes from `ALERTLOOP_BASE_URL`,
+`TELEGRAM_CHAT_ID` and `TELEGRAM_API_URL`. To turn a channel off, set its constant to `''`.
 
 `mail_errors` names `app.mail.from` (empty or not a plain address), `app.mail.driver` (not `mail`
 or `smtp`), and, with `smtp`, `app.mail.smtp.host` or `encryption`. In this example they come from
@@ -219,6 +220,9 @@ grep -h '<trace_id>' storage/logs/requests/*.jsonl | grep alert.failed
   is AlertLoop not reached.
 - `telegram`: `error` is Telegram's description. `Unauthorized`: a wrong bot token;
   `Bad Request: chat not found`: a wrong chat id, or the bot was never started in that chat.
+  Through a mirror (`api_url`): `status` `0` with `transport_error: true` is the mirror not reached
+  or its certificate not trusted (a self-signed one is refused); `404`, often with `Telegram did not
+  confirm the message`, is a wrong path in `api_url` or a mirror that does not drop its own prefix.
 - `mail`: the alert goes out with the same mail settings as the contact form, so when the form's
   email fails, so does this alert. To hear about undelivered requests, add a channel that does not
   go through your mail.

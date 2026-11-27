@@ -3,6 +3,14 @@
 All notable changes to Weft are documented in this file. Weft follows semantic versioning;
 pre-1.0 the API may change between minor versions.
 
+## Unreleased
+
+### Added
+
+- `app.alerts.telegram.api_url` sends the `telegram` alert channel through your own Bot API mirror,
+  for hosting that cannot reach `api.telegram.org`; without it nothing changes:
+  [Configuration](example/content/en/configuration.md#alerts).
+
 ## 0.3.0 - 2026-11-11
 
 To upgrade from 0.2, do what each entry marked **Action.** says. The steps are in the upgrade guide,

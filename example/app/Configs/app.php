@@ -139,6 +139,7 @@ return [
         'telegram' => [
             'bot_token' => defined('TELEGRAM_BOT_TOKEN') ? TELEGRAM_BOT_TOKEN : '',
             'chat_id' => defined('TELEGRAM_CHAT_ID') ? TELEGRAM_CHAT_ID : '',
+            'api_url' => defined('TELEGRAM_API_URL') ? TELEGRAM_API_URL : '',
         ],
     ],
 

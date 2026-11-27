@@ -140,7 +140,7 @@ them. The template has none of those blocks, so with it these constants turn not
 |---|---|
 | `MAIL_DRIVER`, `MAIL_FROM`, `SMTP_*` | `mail` |
 | `ALERTLOOP_BASE_URL`, `ALERTLOOP_API_KEY` | `alerts` and `alertloop` |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | `alerts` |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_API_URL` | `alerts` |
 | `ALERT_MAIL_TO` | `alerts` and `mail` |
 | `CAPTCHA_SITE_KEY`, `CAPTCHA_SECRET_KEY` | `captcha` |
 | `INDEXNOW_KEY` | `indexnow` |
@@ -335,7 +335,11 @@ what is missing under `mail_errors` (`app.mail.from`, `app.mail.smtp.host` with 
 'alerts' => [
     'channels' => ['alertloop', 'telegram', 'mail', 'log'],  // any of these, tried in this order
     'mail_to'  => 'ops@site.test',                           // channel mail: one address or a list
-    'telegram' => ['bot_token' => '…', 'chat_id' => '…'],    // channel telegram
+    'telegram' => [                                          // channel telegram
+        'bot_token' => '…',
+        'chat_id'   => '…',
+        'api_url'   => '',   // optional: your own Bot API mirror; '' is https://api.telegram.org
+    ],
 ],
 'alertloop' => [                       // channel alertloop
     'base_url' => defined('ALERTLOOP_BASE_URL') ? ALERTLOOP_BASE_URL : '',
@@ -350,6 +354,17 @@ what is missing under `mail_errors` (`app.mail.from`, `app.mail.smtp.host` with 
 `ALERTLOOP_API_KEY`, `TELEGRAM_BOT_TOKEN` and `ALERT_MAIL_TO` are set. A listed channel without its
 settings is skipped, the error log gets a line, and `vendor/bin/weft-health` lists the setting under
 `alert_errors`.
+
+`telegram.api_url` is for hosting that cannot reach `api.telegram.org`: point it at a Bot API
+mirror, a path such as `https://mirror.example.com/tg` included. The example reads it from
+`TELEGRAM_API_URL`, so on the server that needs the mirror add to `config/config.php`
+`define('TELEGRAM_API_URL', 'https://mirror.example.com/tg');`. Every alert is then
+`POST <api_url>/bot<token>/sendMessage`, here `/tg/bot<token>/sendMessage` on the mirror: the mirror
+must drop `/tg` before passing the request to `api.telegram.org` (in nginx, `location /tg/` with
+`proxy_pass https://api.telegram.org/;`, the trailing `/` does that). The mirror gets your bot token
+in that path, so use only a mirror you run yourself. `api_url` must be an https URL without a query;
+otherwise the channel is skipped like one without its token. The mirror's certificate must be one
+the hosting already trusts: a self-signed one is refused, and there is no setting for your own CA.
 
 The example's contact form also sends an alert for every request (`business_event`, with the trace
 id and no form data): `New contact request` at `info` when the email was accepted, `Contact request
