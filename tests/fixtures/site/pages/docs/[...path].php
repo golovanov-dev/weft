@@ -1,6 +1,7 @@
 <?php
 
 use Golovanov\Weft\Http\Abort;
+use Golovanov\Weft\Http\Response;
 use Golovanov\Weft\Seo\Seo;
 
 // The template decides what exists under /docs/...
@@ -10,6 +11,10 @@ if ($path === 'gone') {
 }
 if ($path === 'moved') {
     throw Abort::redirect(url('/about'));
+}
+if ($path === 'answered') {
+    echo '<p>half a form</p>';
+    throw Abort::response(Response::json(['saved' => false], 422)->withHeader('X-Form', 'invalid'));
 }
 ?>
 <p>docs:<?= e($path) ?>|<?= e($params['path']) ?></p>

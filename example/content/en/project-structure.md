@@ -82,22 +82,36 @@ Translations for such pages come from the parent directory name (`pages/docs/[sl
 `lang/<locale>/docs.php`), or the param name at the top level.
 
 The template decides whether its content exists. To answer with the site's 404 page — no canonical,
-nothing the template had set — or with a redirect, it throws:
+nothing the template had set — with a redirect, or with a response of its own, it throws:
 
 ```php
 use Golovanov\Weft\Http\Abort;
+use Golovanov\Weft\Http\Response;
 
 throw Abort::notFound();
 throw Abort::redirect(url('/new-place'));   // 301; a second argument picks another 3xx
+throw Abort::response(Response::json(['errors' => $errors], 422));   // any Response, as it is
+```
+
+`Abort::response()` sends the response's status, headers and body instead of the page and its
+layout. A form page can answer its own script with JSON and still render the page with the errors
+when the form is posted without JavaScript:
+
+```php
+// pages/signup.php — the form's fetch() sends Accept: application/json
+if ($request->isPost() && $errors !== [] && $request->wantsJson()) {
+    throw Abort::response(Response::json(['success' => false, 'errors' => $errors], 422));
+}
 ```
 
 `http_response_code(404)` in the template works too, but then the template renders the not-found
-content itself. In an `api/` endpoint `Abort::notFound()` is the standard JSON 404 and
-`Abort::redirect()` the same redirect. `pages/404.php` (and the layout while it renders the 404
-page) cannot use `Abort`: the visitor gets the engine's built-in 404 page instead and a line goes
-to `errors/`, so redirect old addresses from a page template (a catch-all, for example), not from
-the 404 page. Headers a template or endpoint set with `header()` before `Abort::notFound()` are
-not sent with the 404; a redirect keeps them, so a cookie set before `Abort::redirect()` goes out.
+content itself. In an `api/` endpoint `Abort::notFound()` is the standard JSON 404, and
+`Abort::redirect()` and `Abort::response()` work as on a page. `pages/404.php` (and the layout while
+it renders the 404 page) cannot use `Abort`: the visitor gets the engine's built-in 404 page instead
+and a line goes to `errors/`, so redirect old addresses from a page template (a catch-all, for
+example), not from the 404 page. Whatever the template printed before the throw is discarded.
+Headers it set with `header()` or `setcookie()` before `Abort::notFound()` are not sent with the
+404; a redirect or a response keeps them, so a cookie or a regenerated session goes out with it.
 
 ## Two entry points
 

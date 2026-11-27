@@ -10,6 +10,9 @@ pre-1.0 the API may change between minor versions.
 - `app.alerts.telegram.api_url` sends the `telegram` alert channel through your own Bot API mirror,
   for hosting that cannot reach `api.telegram.org`; without it nothing changes:
   [Configuration](example/content/en/configuration.md#alerts).
+- `Abort::response($response)`: a page or an endpoint throws it to answer with that `Response` — its
+  status, headers and body — instead of itself, for example JSON to a form's `fetch()` from the
+  form's own page: [Project structure](example/content/en/project-structure.md#dynamic-segments).
 
 ## 0.3.0 - 2026-11-11
 

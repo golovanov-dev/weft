@@ -281,6 +281,12 @@ check($abort['status'] === 404, 'catch-all page answers 404 with Abort::notFound
 check(!isset($abort['headers']['x-smoke-leak']) && isset($abort['headers']['x-content-type-options']), 'a header the page set before Abort is not sent, the engine ones are', json_encode($abort['headers']) ?: '');
 $moved = request($base . '/smoke/moved');
 check($moved['status'] === 301 && str_contains($moved['headers']['set-cookie'] ?? '', 'smoke_moved=1'), 'a cookie the page set before Abort::redirect() goes out with the redirect', json_encode($moved['headers']) ?: '');
+$answered = request($base . '/smoke/answered');
+check(
+    $answered['status'] === 422 && $answered['body'] === '{"saved":false}' && str_contains($answered['headers']['set-cookie'] ?? '', 'smoke_answered=1'),
+    'Abort::response() answers with that response and the cookie the page set before it',
+    $answered['status'] . ' ' . $answered['body'] . ' ' . (json_encode($answered['headers']) ?: ''),
+);
 $own = request($base . '/smoke/canonical');
 check(canonical($own['body']) === $base . '/smoke/list', 'a canonical set with url() is absolute on page 1', canonical($own['body']));
 check(str_contains($own['body'], '<meta property="og:url" content="' . $base . '/smoke/list"'), 'og:url from url() is absolute too');

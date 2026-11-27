@@ -39,8 +39,9 @@ use Golovanov\Weft\View\View;
  * The default locale is served without a URL prefix; other locales use /<locale>/...
  * Every page has one address: GET/HEAD of /about/, /home, /en/about or /RU/about is redirected
  * (301) to /about, /, /about or /ru/about; a path with characters Sanitize::path() would drop or
- * fold is a 404. A page or an API endpoint may end itself with throw Abort::notFound() or
- * Abort::redirect(): a page gets the 404 page, an endpoint the JSON 404, both the redirect.
+ * fold is a 404. A page or an API endpoint may end itself with throw Abort::notFound(),
+ * Abort::redirect() or Abort::response(): a page gets the 404 page, an endpoint the JSON 404, both
+ * the redirect or the response.
  * Any other throwable is logged, alerted and answered with 500; a ServiceUnavailable with 503 and
  * Retry-After.
  */
@@ -339,9 +340,10 @@ final class Kernel
     }
 
     /**
-     * Run a page or an endpoint that may end itself with Abort. Abort::redirect() is the redirect,
-     * with the headers it set (Set-Cookie, a regenerated session). Abort::notFound(), or any Abort
-     * when $followRedirect is false, is $notFound() without them: back to the headers set before it ran.
+     * Run a page or an endpoint that may end itself with Abort. Abort::redirect() and
+     * Abort::response() are their response, with the headers it set (Set-Cookie, a regenerated
+     * session). Abort::notFound(), or any Abort when $followRedirect is false, is $notFound()
+     * without them: back to the headers set before it ran.
      *
      * @param \Closure(): Response $run
      * @param \Closure(Abort): Response $notFound
@@ -352,8 +354,8 @@ final class Kernel
         try {
             return $run();
         } catch (Abort $abort) {
-            if ($followRedirect && $abort->location !== null) {
-                return Response::redirect($abort->location, $abort->status);
+            if ($followRedirect && $abort->response !== null) {
+                return $abort->response;
             }
             if (!headers_sent()) {
                 header_remove();

@@ -147,6 +147,35 @@ final class KernelTest extends TestCase
         $this->assertSame('', $response->body);
     }
 
+    /** handle() end to end: the page's own response goes out as it is, without what the page printed. */
+    public function testAbortResponseIsThatResponseInsteadOfThePage(): void
+    {
+        $response = $this->route('/docs/answered');
+        $this->assertSame(422, $response->status);
+        $this->assertSame('invalid', $response->headers['X-Form']);
+        $this->assertSame('application/json; charset=utf-8', $response->headers['Content-Type']);
+        $this->assertSame('{"saved":false}', $response->body);
+
+        $_SERVER['REQUEST_URI'] = '/docs/answered';
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        ob_start();
+        Kernel::handle();
+        $output = (string) ob_get_clean();
+
+        $this->assertSame('{"saved":false}', $output);
+        $end = array_values(array_filter($this->traceEvents(Trace::id()), static fn(array $e): bool => ($e['event'] ?? null) === 'request_end'));
+        $this->assertSame(422, $end[0]['data']['status']);
+    }
+
+    /** In an api/ endpoint too, with the response's own Content-Type instead of the JSON one. */
+    public function testAbortResponseInAnApiEndpoint(): void
+    {
+        $response = $this->route('/api/answer');
+        $this->assertSame(202, $response->status);
+        $this->assertSame('text/plain; charset=utf-8', $response->headers['Content-Type']);
+        $this->assertSame('accepted', $response->body);
+    }
+
     /** The 404 page cannot end itself: an Abort from it gives the built-in 404, not a 500. */
     #[DataProvider('abortsWhileTheNotFoundPageRenders')]
     public function testAbortWhileTheNotFoundPageRendersGivesTheBuiltIn404(string $uri): void
@@ -167,6 +196,7 @@ final class KernelTest extends TestCase
             'redirect from an unknown URL' => ['/no-such-page?abort-404=redirect'],
             'not found from an unknown URL' => ['/no-such-page?abort-404=not-found'],
             'redirect after a page gave up' => ['/docs/gone?abort-404=redirect'],
+            'response from an unknown URL' => ['/no-such-page?abort-404=response'],
         ];
     }
 

@@ -252,7 +252,8 @@ link. The engine runs the file with `$request` in scope and turns what it prints
 - the status is the one it set (`http_response_code()`, or a `Response` it `send()`s), otherwise 200;
 - `Content-Type` is always `application/json; charset=utf-8`, whatever the file set; its other
   headers (`Location`) are sent as set. A redirect (`Abort::redirect()`) has no body and is not
-  JSON;
+  JSON; a response thrown with `Abort::response()` goes out as it is, with its own `Content-Type`
+  ([Project structure](/docs/project-structure#dynamic-segments));
 - an uncaught throwable discards the printed output and becomes a JSON 500, logged and alerted like
   any other; a `ServiceUnavailable` becomes a 503 (below);
 - `exit` or `die` bypasses the engine: the output goes out with PHP's default `Content-Type`, and the
