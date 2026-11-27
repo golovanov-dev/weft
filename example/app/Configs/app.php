@@ -69,7 +69,7 @@ return [
                 ['url' => '/docs/reference', 'title' => 'Reference'],
                 ['url' => '/docs/deployment', 'title' => 'Deployment'],
                 ['url' => '/docs/troubleshooting', 'title' => 'Troubleshooting', 'notes' => 'What weft-health reports and how to fix it'],
-                ['url' => '/docs/upgrading', 'title' => 'Upgrading', 'notes' => 'From 0.2 to 0.3, and from 0.1.x to 0.2'],
+                ['url' => '/docs/upgrading', 'title' => 'Upgrading', 'notes' => 'From 0.3 to 0.4, 0.2 to 0.3, and from 0.1.x to 0.2'],
             ],
             'Optional' => [
                 ['url' => 'https://github.com/golovanov-dev/weft', 'title' => 'Source code'],

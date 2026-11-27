@@ -3,7 +3,10 @@
 All notable changes to Weft are documented in this file. Weft follows semantic versioning;
 pre-1.0 the API may change between minor versions.
 
-## Unreleased
+## 0.4.0 - 2026-11-27
+
+To upgrade from 0.3, do what each entry marked **Action.** says. The steps are in the upgrade guide,
+[Upgrading](example/content/en/upgrading.md).
 
 ### Added
 
@@ -26,9 +29,12 @@ pre-1.0 the API may change between minor versions.
 - `vendor/bin/weft-health` printed an `Uncaught …` line instead of its report when `bootstrap.php`
   threw, for example on a database connection made there that failed, and nothing on stdout when it
   died with a fatal error. It now prints a report with only `"ok": false` and `bootstrap_error` (the
-  exception's class, message, and the first file and line of the site's own code) and exits with 1;
-  with the site's error handler already registered, the error is also logged and alerted as before.
-  A script that reads the report must expect one without the other fields:
+  exception's class and message and the place: for an exception the first file and line of the site's
+  own code, for a fatal error the file and line it was raised at, which may be in `vendor/`) and exits
+  with 1; warnings from the bootstrap go to stderr, so stdout holds only the report. With the site's
+  error handler already registered, the error is also logged and alerted as before.
+  **Action.** If your monitoring parses the output of `weft-health`, expect that report without the
+  other fields, and exit code 1 (not 255) after a fatal error:
   [Troubleshooting](example/content/en/troubleshooting.md#weft-health-fails).
 - 5 smaller fixes: 2 reliability, 3 docs.
 
